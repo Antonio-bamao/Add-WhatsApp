@@ -13,6 +13,7 @@ test('creates default progress when file does not exist', () => {
   const progress = store.load();
 
   assert.equal(progress.lastIndex, -1);
+  assert.equal(progress.sourceFile, null);
   assert.deepEqual(progress.sent, []);
   assert.deepEqual(progress.failed, []);
   assert.deepEqual(progress.skipped, []);
@@ -32,5 +33,7 @@ test('saves and reloads progress', () => {
     invalid: []
   });
 
-  assert.equal(new JsonProgressStore(filePath).load().lastIndex, 5);
+  const saved = new JsonProgressStore(filePath).load();
+  assert.equal(saved.lastIndex, 5);
+  assert.ok(saved.updatedAt);
 });

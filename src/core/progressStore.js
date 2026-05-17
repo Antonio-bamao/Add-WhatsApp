@@ -6,6 +6,8 @@ function defaultProgress() {
     version: 1,
     taskId: null,
     sourceFile: null,
+    startedAt: null,
+    updatedAt: null,
     lastIndex: -1,
     sent: [],
     failed: [],
@@ -39,7 +41,11 @@ class JsonProgressStore {
 
   save(progress) {
     fs.mkdirSync(path.dirname(this.filePath), { recursive: true });
-    fs.writeFileSync(this.filePath, JSON.stringify({ ...defaultProgress(), ...progress }, null, 2));
+    fs.writeFileSync(this.filePath, JSON.stringify({
+      ...defaultProgress(),
+      ...progress,
+      updatedAt: new Date().toISOString()
+    }, null, 2));
   }
 }
 

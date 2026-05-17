@@ -72,7 +72,12 @@ function reasonLabel(reason) {
   const labels = {
     complete: '完成',
     stopped: '已暂停',
-    'daily-limit': '达到限额'
+    'daily-limit': '达到限额',
+    'automation-lost': '浏览器中断',
+    interrupted: '异常中断',
+    closed: '用户关闭',
+    error: '出错',
+    running: '运行中'
   };
   return labels[reason] || reason || '-';
 }
@@ -184,15 +189,19 @@ async function importContacts() {
     return;
   }
 
-  state.imported = response.data;
-  renderStats(response.data.stats);
-  renderRows(response.data.rows);
-  renderProgressSummary(response.data.progress);
-  elements.exportButton.disabled = false;
-  elements.runButton.disabled = (response.data.stats.valid || 0) === 0;
-  elements.fileMeta.textContent = `当前文件：${response.data.fileName}；电话列：${response.data.columns.phoneColumn || '未识别'}；国家列：${response.data.columns.countryColumn || '未识别'}`;
-  elements.tableState.textContent = `已解析 ${response.data.rows.length} 行`;
+  applyImportedData(response.data);
   addLog(`已导入 ${response.data.fileName}，有效号码 ${response.data.stats.valid || 0} 个。`, 'strong');
+}
+
+function applyImportedData(data) {
+  state.imported = data;
+  renderStats(data.stats);
+  renderRows(data.rows);
+  renderProgressSummary(data.progress);
+  elements.exportButton.disabled = false;
+  elements.runButton.disabled = (data.stats.valid || 0) === 0;
+  elements.fileMeta.textContent = `当前文件：${data.fileName}；电话列：${data.columns.phoneColumn || '未识别'}；国家列：${data.columns.countryColumn || '未识别'}`;
+  elements.tableState.textContent = `已解析 ${data.rows.length} 行`;
 }
 
 async function refreshCurrentProgress() {
@@ -237,6 +246,7 @@ function taskEventMessage(event) {
     'row:unregistered': `第 ${event.row.rowNumber} 行未注册 WhatsApp，已跳过。`,
     'row:sent': `第 ${event.row.rowNumber} 行已发送：${languageLabel(event.row.language)}`,
     'row:failed': `第 ${event.row.rowNumber} 行发送失败：${event.error}`,
+    'row:fatal': `自动化浏览器已关闭或失联，停在第 ${event.row.rowNumber} 行：${event.error}`,
     'task:finished': event.message,
     'task:error': event.message
   };
@@ -262,16 +272,17 @@ function handleTaskEvent(event) {
   }
   if (event.type === 'row:sent') state.taskStats.sent += 1;
   if (event.type === 'row:unregistered') state.taskStats.unregistered += 1;
-  if (event.type === 'row:failed') state.taskStats.failed += 1;
+  if (event.type === 'row:failed' || event.type === 'row:fatal') state.taskStats.failed += 1;
   if (event.type === 'row:invalid') state.taskStats.invalid += 1;
-  if (event.type === 'row:sent' || event.type === 'row:unregistered' || event.type === 'row:failed' || event.type === 'row:invalid') {
+  if (event.type === 'row:sent' || event.type === 'row:unregistered' || event.type === 'row:failed' || event.type === 'row:fatal' || event.type === 'row:invalid') {
     if (state.imported && Number.isInteger(event.index)) {
-      const nextRow = state.imported.rows[event.index + 1];
+      const isFatal = event.type === 'row:fatal';
+      const nextRow = state.imported.rows[isFatal ? event.index : event.index + 1];
       state.imported.progress = {
         ...(state.imported.progress || {}),
         available: true,
         total: state.imported.rows.length,
-        processed: Math.min(event.index + 1, state.imported.rows.length),
+        processed: Math.min(isFatal ? event.index : event.index + 1, state.imported.rows.length),
         nextRowNumber: nextRow ? nextRow.rowNumber : null,
         sent: state.taskStats.sent,
         skipped: state.taskStats.unregistered,
@@ -436,6 +447,15 @@ async function loadHistory() {
   renderHistory(await window.addWhatsapp.listHistory());
 }
 
+async function bootstrapApp() {
+  const bootstrap = await window.addWhatsapp.getBootstrapState();
+  if (bootstrap.imported) {
+    applyImportedData(bootstrap.imported);
+    addLog(`已恢复上次表格 ${bootstrap.imported.fileName}，可从记录位置继续。`, 'strong');
+  }
+  if (bootstrap.history) renderHistory(bootstrap.history);
+}
+
 for (const item of elements.navItems) {
   item.addEventListener('click', () => switchPage(item.dataset.pageTarget));
 }
@@ -458,4 +478,4 @@ for (const button of elements.templateAddButtons) {
 window.addWhatsapp.onTaskEvent(handleTaskEvent);
 window.addWhatsapp.onHistoryUpdated(renderHistory);
 loadTemplates();
-loadHistory();
+bootstrapApp();

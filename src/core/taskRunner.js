@@ -32,6 +32,19 @@ function createEmptyStats() {
   };
 }
 
+function isFatalAutomationError(error) {
+  const message = String(error && error.message ? error.message : error);
+  return [
+    'detached Frame',
+    'Target closed',
+    'Protocol error',
+    'Session closed',
+    'browser has disconnected',
+    'Browser has been closed',
+    'Execution context was destroyed'
+  ].some(pattern => message.toLowerCase().includes(pattern.toLowerCase()));
+}
+
 async function runSendTask({
   rows,
   client,
@@ -44,6 +57,10 @@ async function runSendTask({
   const today = config.today || new Date().toISOString().slice(0, 10);
   const maxPerDay = Number(config.maxPerDay || 80);
   const progress = progressStore.load();
+  progress.taskId = config.taskId || progress.taskId;
+  progress.sourceFile = config.sourceFile || progress.sourceFile;
+  progress.startedAt = progress.startedAt || config.startedAt || new Date().toISOString();
+  progressStore.save(progress);
   const stats = createEmptyStats();
   let sentToday = countSentToday(progress, today);
 
@@ -110,17 +127,24 @@ async function runSendTask({
       onEvent({ type: 'row:sent', index, row, message });
       await sleep(nextDelayMs(config));
     } catch (error) {
+      const fatal = isFatalAutomationError(error);
       progress.failed.push({
         rowNumber: row.rowNumber,
         whatsappId: row.whatsappId,
         error: error.message,
+        fatal,
         date: today
       });
-      progress.lastIndex = index;
       stats.failed += 1;
-      stats.processed += 1;
+      if (!fatal) {
+        progress.lastIndex = index;
+        stats.processed += 1;
+      }
       progressStore.save(progress);
-      onEvent({ type: 'row:failed', index, row, error: error.message });
+      onEvent({ type: fatal ? 'row:fatal' : 'row:failed', index, row, error: error.message });
+      if (fatal) {
+        return { reason: 'automation-lost', stats, progress };
+      }
       await sleep(nextDelayMs(config));
     }
   }
@@ -132,5 +156,6 @@ module.exports = {
   DEFAULT_TEMPLATES,
   chooseTemplate,
   nextDelayMs,
+  isFatalAutomationError,
   runSendTask
 };

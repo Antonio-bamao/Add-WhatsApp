@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { runSendTask } = require('../src/core/taskRunner');
+const { isFatalAutomationError, runSendTask } = require('../src/core/taskRunner');
 
 function createFakeClient({ registered = new Set(), failures = new Set() } = {}) {
   return {
@@ -133,4 +133,35 @@ test('stops gracefully when stop signal is set before next row', async () => {
   assert.equal(result.reason, 'stopped');
   assert.equal(result.stats.sent, 1);
   assert.equal(store.progress.lastIndex, 0);
+});
+
+test('stops without advancing progress when automation browser is closed', async () => {
+  const rows = [
+    { rowNumber: 2, status: 'valid', whatsappId: '10000000001@c.us', language: 'en' },
+    { rowNumber: 3, status: 'valid', whatsappId: '10000000002@c.us', language: 'en' }
+  ];
+  const client = {
+    async isRegisteredUser() {
+      throw new Error("Attempted to use detached Frame 'abc'.");
+    }
+  };
+  const store = createMemoryProgress({ lastIndex: 0 });
+
+  const result = await runSendTask({
+    rows,
+    client,
+    progressStore: store,
+    config: { maxPerDay: 10, delayMs: 0, today: '2026-05-17' },
+    templates: { en: ['hello'], fr: ['bonjour'], es: ['hola'] }
+  });
+
+  assert.equal(result.reason, 'automation-lost');
+  assert.equal(result.stats.failed, 1);
+  assert.equal(store.progress.lastIndex, 0);
+  assert.equal(store.progress.failed[0].fatal, true);
+});
+
+test('recognizes fatal automation errors', () => {
+  assert.equal(isFatalAutomationError(new Error('Target closed')), true);
+  assert.equal(isFatalAutomationError(new Error('send failed')), false);
 });

@@ -1,6 +1,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('addWhatsapp', {
+  getBootstrapState: () => ipcRenderer.invoke('app:bootstrap'),
   importContacts: () => ipcRenderer.invoke('contacts:select-and-import'),
   exportReport: rows => ipcRenderer.invoke('report:export', { rows }),
   startTask: config => ipcRenderer.invoke('task:start', config),

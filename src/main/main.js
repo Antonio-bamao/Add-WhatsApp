@@ -1,5 +1,6 @@
 const path = require('path');
 const crypto = require('node:crypto');
+const fs = require('node:fs');
 const { app, BrowserWindow, Tray, Menu, dialog, ipcMain } = require('electron');
 const XLSX = require('xlsx');
 const { importContacts } = require('../core/tableImporter');
@@ -20,6 +21,7 @@ let stopRequested = false;
 let whatsappService = null;
 let templateStore = null;
 let historyStore = null;
+let activeRun = null;
 
 function sendToRenderer(channel, payload) {
   if (mainWindow && !mainWindow.isDestroyed()) {
@@ -58,6 +60,8 @@ app.whenReady().then(() => {
   whatsappService = createWhatsAppService(app, event => sendToRenderer('task:event', event));
   templateStore = new JsonTemplateStore(path.join(app.getPath('userData'), 'templates.json'));
   historyStore = new JsonHistoryStore(path.join(app.getPath('userData'), 'history', 'runs.json'));
+  historyStore.markOpenInterrupted();
+  restoreLastImport();
   createWindow();
   createTray();
 
@@ -121,6 +125,17 @@ async function showCloseChoice() {
 
 async function quitCompletely() {
   isQuitting = true;
+  stopRequested = true;
+  if (activeRun) {
+    const history = historyStore.upsert({
+      ...activeRun,
+      finishedAt: new Date().toISOString(),
+      reason: 'closed',
+      message: '用户完全关闭软件，任务已停止并保留进度。',
+      stats: getStatsFromProgress(activeRun.progressPath)
+    });
+    sendToRenderer('history:updated', history);
+  }
   try {
     if (whatsappService) await whatsappService.destroy();
   } catch {
@@ -150,6 +165,7 @@ ipcMain.handle('contacts:select-and-import', async () => {
     const data = importContacts(result.filePaths[0]);
     importedRows = data.rows;
     importedSource = data.filePath;
+    saveLastImport(data.filePath);
     return {
       canceled: false,
       data: {
@@ -164,6 +180,11 @@ ipcMain.handle('contacts:select-and-import', async () => {
     };
   }
 });
+
+ipcMain.handle('app:bootstrap', async () => ({
+  imported: getImportedSummary(),
+  history: historyStore.list()
+}));
 
 ipcMain.handle('progress:get-current', async () => getCurrentProgressSummary());
 
@@ -195,10 +216,22 @@ ipcMain.handle('history:list', async () => historyStore.list());
 
 async function runTask(config) {
   const startedAt = new Date().toISOString();
+  const taskId = `${Date.now()}`;
+  const progressPath = progressPathForSource(importedSource);
+  activeRun = {
+    id: taskId,
+    sourceFile: importedSource,
+    startedAt,
+    finishedAt: null,
+    reason: 'running',
+    stats: { sent: 0, failed: 0, unregistered: 0, invalid: 0 },
+    progressPath
+  };
+  historyStore.upsert(activeRun);
+  sendToRenderer('history:updated', historyStore.list());
   try {
     sendToRenderer('task:event', { type: 'task:starting', message: '正在连接 WhatsApp...' });
     const client = await whatsappService.ensureReady();
-    const progressPath = progressPathForSource(importedSource);
     const progressStore = new JsonProgressStore(progressPath);
 
     const result = await runSendTask({
@@ -207,6 +240,9 @@ async function runTask(config) {
       progressStore,
       templates: templateStore.load(),
       config: {
+        taskId,
+        sourceFile: importedSource,
+        startedAt,
         maxPerDay: Number(config.maxPerDay || 80),
         delayMinMs: Number(config.delayMinSeconds || 22) * 1000,
         delayMaxMs: Number(config.delayMaxSeconds || 26) * 1000
@@ -220,8 +256,8 @@ async function runTask(config) {
       message: finishMessage(result.reason),
       result
     });
-    const history = historyStore.append({
-      id: `${Date.now()}`,
+    const history = historyStore.upsert({
+      id: taskId,
       sourceFile: importedSource,
       startedAt,
       finishedAt: new Date().toISOString(),
@@ -232,9 +268,21 @@ async function runTask(config) {
     sendToRenderer('history:updated', history);
   } catch (error) {
     sendToRenderer('task:event', { type: 'task:error', message: error.message });
+    const history = historyStore.upsert({
+      id: taskId,
+      sourceFile: importedSource,
+      startedAt,
+      finishedAt: new Date().toISOString(),
+      reason: 'error',
+      message: error.message,
+      stats: getStatsFromProgress(progressPath),
+      progressPath
+    });
+    sendToRenderer('history:updated', history);
   } finally {
     currentTask = null;
     stopRequested = false;
+    activeRun = null;
   }
 }
 
@@ -274,9 +322,65 @@ function getCurrentProgressSummary() {
   };
 }
 
+function getStatsFromProgress(progressPath) {
+  const progress = new JsonProgressStore(progressPath).load();
+  return {
+    sent: progress.sent.length,
+    unregistered: progress.skipped.length,
+    failed: progress.failed.length,
+    invalid: progress.invalid.length
+  };
+}
+
+function stateFilePath() {
+  return path.join(app.getPath('userData'), 'state', 'last-import.json');
+}
+
+function saveLastImport(sourceFile) {
+  const filePath = stateFilePath();
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, JSON.stringify({
+    sourceFile,
+    savedAt: new Date().toISOString()
+  }, null, 2));
+}
+
+function loadLastImportPath() {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(stateFilePath(), 'utf-8'));
+    return parsed && parsed.sourceFile && fs.existsSync(parsed.sourceFile) ? parsed.sourceFile : null;
+  } catch {
+    return null;
+  }
+}
+
+function restoreLastImport() {
+  const sourceFile = loadLastImportPath();
+  if (!sourceFile) return null;
+  try {
+    const data = importContacts(sourceFile);
+    importedRows = data.rows;
+    importedSource = data.filePath;
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+function getImportedSummary() {
+  if (!importedRows.length || !importedSource) return null;
+  const data = importContacts(importedSource);
+  importedRows = data.rows;
+  return {
+    ...data,
+    progress: getCurrentProgressSummary()
+  };
+}
+
 function finishMessage(reason) {
   if (reason === 'daily-limit') return '今日限额已用完。';
   if (reason === 'stopped') return '任务已暂停，下次开始会从已记录位置继续。';
+  if (reason === 'automation-lost') return '自动化浏览器已关闭或失联，任务已停止并保留进度。';
   return '任务已完成。';
 }
 
