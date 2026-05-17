@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="Add WhatsApp icon">
+  <defs>
+    <linearGradient id="g" x1="52" x2="204" y1="36" y2="220" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#35E276"/>
+      <stop offset="1" stop-color="#128C7E"/>
+    </linearGradient>
+  </defs>
+  <rect width="256" height="256" rx="56" fill="#075E54"/>
+  <circle cx="128" cy="122" r="86" fill="url(#g)"/>
+  <path fill="#35E276" d="M74 192l12-43 35 31-47 12Z"/>
+  <path fill="#fff" d="M128 53c-40 0-72 31-72 69 0 14 5 27 13 39l-9 33 35-9c10 5 21 7 33 7 40 0 72-31 72-70 0-38-32-69-72-69Zm0 124c-10 0-20-3-29-8l-3-2-20 5 5-19-2-3c-7-9-10-19-10-29 0-30 26-54 59-54s59 24 59 54-26 56-59 56Z"/>
+  <path fill="#fff" d="M159 136c-2-1-14-7-16-8-2-1-4-1-6 2-2 2-6 8-8 9-1 2-3 2-5 1-15-7-25-16-32-30-1-2 0-4 1-5l4-5c1-1 1-3 0-5l-7-16c-2-4-4-4-6-4h-5c-2 0-5 1-8 4-3 4-11 11-11 26s11 30 13 32c2 3 23 37 58 50 29 11 35 7 41 6 6-1 20-8 23-16 3-8 3-15 2-16-1-2-4-3-8-5Z"/>
+</svg>

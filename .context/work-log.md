@@ -30,3 +30,8 @@
 - 结果：左侧导航现在切换四个真实页面；模板文案支持 EN/ES/FR 编辑保存；发送任务页展示运行统计和日志；历史报表页展示每次任务运行结果。
 - 验证：`npm test` 通过 22 个测试；Electron 启动检查返回 `electron-started`；`npm run build` 成功生成便携版 EXE。
 - 下一步：真实小样本试跑。
+
+- 步骤：替换应用图标。
+- 结果：新增 WhatsApp 风格绿色气泡电话图标，配置为 Electron 窗口图标和 `electron-builder` 打包图标。
+- 验证：`npm test` 通过 22 个测试；Electron 启动检查返回 `electron-started`；`npm run build` 成功重新生成带图标的便携版 EXE。
+- 下一步：如需消除 Smart App Control 拦截，需要配置正式代码签名证书。

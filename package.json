@@ -12,8 +12,10 @@
   "build": {
     "appId": "com.addwhatsapp.desktop",
     "productName": "Add WhatsApp",
+    "icon": "assets/icon.ico",
     "files": [
       "src/**/*",
+      "assets/**/*",
       "package.json"
     ],
     "win": {
