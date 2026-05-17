@@ -463,13 +463,66 @@ button {
   font-weight: 800;
 }
 
-.button.run {
+.button.run,
+.button.stop {
   width: 100%;
   margin-top: 4px;
 }
 
+.task-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.button.stop {
+  color: #8a2420;
+  background: #ffe1df;
+  border-color: #f4b9b5;
+}
+
 .table-panel {
   min-height: 280px;
+}
+
+.log-panel {
+  min-height: 180px;
+}
+
+.log-list {
+  display: grid;
+  gap: 8px;
+  max-height: 180px;
+  overflow: auto;
+  padding: 12px;
+  background: #f7fbf9;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.log-line {
+  padding: 10px 12px;
+  color: #24473f;
+  background: #ffffff;
+  border: 1px solid #e2eee9;
+  border-radius: var(--radius);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.log-line.muted {
+  color: var(--muted);
+}
+
+.log-line.strong {
+  color: var(--wa-green-deep);
+  background: #eaf8f1;
+}
+
+.log-line.error {
+  color: #8a2420;
+  background: #ffe1df;
+  border-color: #f4b9b5;
 }
 
 .table-wrap {

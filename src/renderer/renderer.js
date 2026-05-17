@@ -16,6 +16,14 @@ const elements = {
   frCount: document.getElementById('frCount'),
   previewBody: document.getElementById('previewBody'),
   tableState: document.getElementById('tableState')
+  ,
+  runButton: document.getElementById('runButton'),
+  stopButton: document.getElementById('stopButton'),
+  dailyLimitInput: document.getElementById('dailyLimitInput'),
+  delayMinInput: document.getElementById('delayMinInput'),
+  delayMaxInput: document.getElementById('delayMaxInput'),
+  taskState: document.getElementById('taskState'),
+  logList: document.getElementById('logList')
 };
 
 function statusLabel(status) {
@@ -111,8 +119,10 @@ async function importContacts() {
   renderStats(response.data.stats);
   renderRows(response.data.rows);
   elements.exportButton.disabled = false;
+  elements.runButton.disabled = (response.data.stats.valid || 0) === 0;
   elements.fileMeta.textContent = `当前文件：${response.data.fileName}；电话列：${response.data.columns.phoneColumn || '未识别'}；国家列：${response.data.columns.countryColumn || '未识别'}`;
   elements.tableState.textContent = `已解析 ${response.data.rows.length} 行`;
+  addLog(`已导入 ${response.data.fileName}，有效号码 ${response.data.stats.valid || 0} 个。`, 'strong');
 }
 
 async function exportReport() {
@@ -126,6 +136,86 @@ async function exportReport() {
   }
 }
 
+function addLog(message, tone = '') {
+  if (elements.logList.querySelector('.muted')) {
+    elements.logList.innerHTML = '';
+  }
+  const line = document.createElement('div');
+  line.className = `log-line ${tone}`.trim();
+  line.textContent = `${new Date().toLocaleTimeString()}  ${message}`;
+  elements.logList.prepend(line);
+}
+
+function taskEventMessage(event) {
+  const map = {
+    'task:starting': event.message,
+    'auth:qr': event.message,
+    'auth:authenticated': event.message,
+    'auth:ready': event.message,
+    'auth:failure': event.message,
+    'auth:disconnected': event.message,
+    'task:stopping': event.message,
+    'row:start': `正在处理第 ${event.row.rowNumber} 行：${event.row.e164 || event.row.rawPhone || ''}`,
+    'row:invalid': `第 ${event.row.rowNumber} 行跳过：${statusLabel(event.row.status)}`,
+    'row:unregistered': `第 ${event.row.rowNumber} 行未注册 WhatsApp，已跳过。`,
+    'row:sent': `第 ${event.row.rowNumber} 行已发送：${languageLabel(event.row.language)}`,
+    'row:failed': `第 ${event.row.rowNumber} 行发送失败：${event.error}`,
+    'task:finished': event.message,
+    'task:error': event.message
+  };
+  return map[event.type] || event.message || event.type;
+}
+
+function handleTaskEvent(event) {
+  const errorTone = event.type.includes('failure') || event.type.includes('error') ? 'error' : '';
+  const strongTone = event.type.includes('ready') || event.type.includes('finished') ? 'strong' : '';
+  addLog(taskEventMessage(event), errorTone || strongTone);
+
+  if (event.type === 'task:starting') {
+    elements.taskState.textContent = '连接中';
+    elements.runButton.disabled = true;
+    elements.stopButton.disabled = false;
+  }
+  if (event.type === 'auth:ready') elements.taskState.textContent = '运行中';
+  if (event.type === 'task:finished' || event.type === 'task:error') {
+    elements.taskState.textContent = event.type === 'task:error' ? '出错' : '已结束';
+    elements.runButton.disabled = !state.imported;
+    elements.stopButton.disabled = true;
+  }
+}
+
+async function startTask() {
+  if (!state.imported) return;
+  const minDelay = Number(elements.delayMinInput.value || 22);
+  const maxDelay = Number(elements.delayMaxInput.value || 26);
+  elements.taskState.textContent = '准备中';
+  addLog('准备连接 WhatsApp。如果是第一次使用，请在弹出的浏览器里扫码。', 'strong');
+
+  const response = await window.addWhatsapp.startTask({
+    maxPerDay: Number(elements.dailyLimitInput.value || 80),
+    delayMinSeconds: Math.max(5, minDelay),
+    delayMaxSeconds: Math.max(5, maxDelay)
+  });
+
+  if (!response.started) {
+    elements.taskState.textContent = '未开始';
+    elements.runButton.disabled = false;
+    addLog(response.error || '任务启动失败。', 'error');
+  }
+}
+
+async function stopTask() {
+  elements.stopButton.disabled = true;
+  const response = await window.addWhatsapp.stopTask();
+  if (!response.stopped) {
+    addLog(response.error || '暂停失败。', 'error');
+    elements.stopButton.disabled = false;
+  }
+}
+
 elements.importButton.addEventListener('click', importContacts);
 elements.dropImportButton.addEventListener('click', importContacts);
 elements.exportButton.addEventListener('click', exportReport);
+elements.runButton.addEventListener('click', startTask);
+elements.stopButton.addEventListener('click', stopTask);
+window.addWhatsapp.onTaskEvent(handleTaskEvent);

@@ -130,16 +130,16 @@
 
             <label class="field">
               <span>每日上限</span>
-              <input type="number" min="1" max="500" value="80" />
+              <input id="dailyLimitInput" type="number" min="1" max="500" value="80" />
             </label>
             <div class="field-row">
               <label class="field">
                 <span>最小间隔</span>
-                <input type="number" min="5" value="22" />
+                <input id="delayMinInput" type="number" min="5" value="22" />
               </label>
               <label class="field">
                 <span>最大间隔</span>
-                <input type="number" min="5" value="26" />
+                <input id="delayMaxInput" type="number" min="5" value="26" />
               </label>
             </div>
 
@@ -151,7 +151,23 @@
               <p>下一步会加入模板编辑器，发送时按识别语言随机选择。</p>
             </div>
 
-            <button class="button run" type="button" disabled>开始任务</button>
+            <div class="task-actions">
+              <button id="runButton" class="button run" type="button" disabled>开始任务</button>
+              <button id="stopButton" class="button stop" type="button" disabled>暂停任务</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel log-panel">
+          <div class="panel-head">
+            <div>
+              <h3>运行日志</h3>
+              <p>扫码、登录、检测号码和发送结果都会在这里显示。</p>
+            </div>
+            <span id="taskState" class="table-state">未开始</span>
+          </div>
+          <div id="logList" class="log-list" aria-live="polite">
+            <div class="log-line muted">等待导入表格并开始任务。</div>
           </div>
         </section>
 

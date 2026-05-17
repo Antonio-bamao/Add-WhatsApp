@@ -2,6 +2,7 @@
   "name": "add-whatsapp-desktop",
   "version": "0.1.0",
   "description": "WhatsApp contact follow-up desktop automation tool",
+  "author": "Add WhatsApp",
   "main": "src/main/main.js",
   "scripts": {
     "start": "electron .",
@@ -16,7 +17,8 @@
       "package.json"
     ],
     "win": {
-      "target": "portable"
+      "target": "portable",
+      "signAndEditExecutable": false
     }
   },
   "dependencies": {

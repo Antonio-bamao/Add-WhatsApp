@@ -1,9 +1,24 @@
 const path = require('path');
+const crypto = require('node:crypto');
 const { app, BrowserWindow, dialog, ipcMain } = require('electron');
 const XLSX = require('xlsx');
 const { importContacts } = require('../core/tableImporter');
+const { JsonProgressStore } = require('../core/progressStore');
+const { DEFAULT_TEMPLATES, runSendTask } = require('../core/taskRunner');
+const { createWhatsAppService } = require('./whatsappService');
 
 let mainWindow;
+let importedRows = [];
+let importedSource = null;
+let currentTask = null;
+let stopRequested = false;
+let whatsappService = null;
+
+function sendToRenderer(channel, payload) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send(channel, payload);
+  }
+}
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -24,6 +39,7 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  whatsappService = createWhatsAppService(app, event => sendToRenderer('task:event', event));
   createWindow();
 
   app.on('activate', () => {
@@ -49,9 +65,12 @@ ipcMain.handle('contacts:select-and-import', async () => {
   }
 
   try {
+    const data = importContacts(result.filePaths[0]);
+    importedRows = data.rows;
+    importedSource = data.filePath;
     return {
       canceled: false,
-      data: importContacts(result.filePaths[0])
+      data
     };
   } catch (error) {
     return {
@@ -60,6 +79,71 @@ ipcMain.handle('contacts:select-and-import', async () => {
     };
   }
 });
+
+ipcMain.handle('task:start', async (_event, config) => {
+  if (currentTask) {
+    return { started: false, error: '已有任务正在运行。' };
+  }
+  if (!importedRows.length) {
+    return { started: false, error: '请先导入表格。' };
+  }
+
+  stopRequested = false;
+  currentTask = runTask(config || {});
+  return { started: true };
+});
+
+ipcMain.handle('task:stop', async () => {
+  if (!currentTask) return { stopped: false, error: '当前没有正在运行的任务。' };
+  stopRequested = true;
+  sendToRenderer('task:event', { type: 'task:stopping', message: '已请求暂停，当前号码处理完后会停下。' });
+  return { stopped: true };
+});
+
+async function runTask(config) {
+  try {
+    sendToRenderer('task:event', { type: 'task:starting', message: '正在连接 WhatsApp...' });
+    const client = await whatsappService.ensureReady();
+    const sourceKey = crypto
+      .createHash('sha1')
+      .update(importedSource || 'manual-import')
+      .digest('hex')
+      .slice(0, 16);
+    const progressPath = path.join(app.getPath('userData'), 'progress', `${sourceKey}.json`);
+    const progressStore = new JsonProgressStore(progressPath);
+
+    const result = await runSendTask({
+      rows: importedRows,
+      client,
+      progressStore,
+      templates: DEFAULT_TEMPLATES,
+      config: {
+        maxPerDay: Number(config.maxPerDay || 80),
+        delayMinMs: Number(config.delayMinSeconds || 22) * 1000,
+        delayMaxMs: Number(config.delayMaxSeconds || 26) * 1000
+      },
+      shouldStop: () => stopRequested,
+      onEvent: event => sendToRenderer('task:event', event)
+    });
+
+    sendToRenderer('task:event', {
+      type: 'task:finished',
+      message: finishMessage(result.reason),
+      result
+    });
+  } catch (error) {
+    sendToRenderer('task:event', { type: 'task:error', message: error.message });
+  } finally {
+    currentTask = null;
+    stopRequested = false;
+  }
+}
+
+function finishMessage(reason) {
+  if (reason === 'daily-limit') return '今日限额已用完。';
+  if (reason === 'stopped') return '任务已暂停，下次开始会从已记录位置继续。';
+  return '任务已完成。';
+}
 
 ipcMain.handle('report:export', async (_event, payload) => {
   const result = await dialog.showSaveDialog(mainWindow, {
