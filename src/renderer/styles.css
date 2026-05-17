@@ -31,7 +31,8 @@ body {
 }
 
 button,
-input {
+input,
+textarea {
   font: inherit;
 }
 
@@ -464,14 +465,16 @@ button {
   border-radius: var(--radius);
 }
 
-.template-preview {
+.template-preview,
+.resume-card {
   padding: 14px;
   background: #f7fbf9;
   border: 1px solid var(--line);
   border-radius: var(--radius);
 }
 
-.template-preview div {
+.template-preview div,
+.resume-card div {
   display: flex;
   justify-content: space-between;
   gap: 10px;
@@ -526,24 +529,73 @@ button {
 }
 
 .template-card {
-  min-height: 420px;
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  min-height: 520px;
+}
+
+.template-list {
+  display: grid;
+  gap: 12px;
+  max-height: 500px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.template-item {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  background: #f8fffb;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.template-item-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.icon-button {
+  display: inline-grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  padding: 0;
+  color: #8a2420;
+  background: #fff0ee;
+  border: 1px solid #f4c6c2;
+  border-radius: 999px;
+  font-size: 18px;
+  line-height: 1;
 }
 
 .template-editor {
   width: 100%;
-  min-height: 310px;
-  padding: 14px;
+  min-height: 104px;
+  padding: 12px;
   resize: vertical;
   color: var(--ink);
-  background: #f8fffb;
+  background: #ffffff;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   font: 14px/1.6 "Segoe UI", "Microsoft YaHei", sans-serif;
 }
 
-.template-editor:focus-visible {
+.template-editor:focus-visible,
+.icon-button:focus-visible {
   outline: 3px solid rgba(18, 140, 126, 0.24);
   outline-offset: 2px;
+}
+
+.template-add {
+  width: 100%;
 }
 
 .template-actions {

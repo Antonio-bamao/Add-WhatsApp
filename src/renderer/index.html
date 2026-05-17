@@ -200,6 +200,14 @@
                 <p>发送时会按识别语言随机选择对应文案。</p>
               </div>
 
+              <div class="resume-card" aria-label="续跑记录">
+                <div>
+                  <span class="template-label">续跑记录</span>
+                  <strong id="resumeSummary">等待导入</strong>
+                </div>
+                <p id="resumeDetail">导入表格后显示下一次开始处理的行号。</p>
+              </div>
+
               <div class="task-actions">
                 <button id="runButton" class="button run" type="button" disabled>开始任务</button>
                 <button id="stopButton" class="button stop" type="button" disabled>暂停任务</button>
@@ -223,16 +231,19 @@
         <section id="templatePage" class="page" data-title="编辑三种语言的问候文案" data-eyebrow="模板文案">
           <section class="template-grid">
             <article class="panel template-card">
-              <div class="panel-head"><div><h3>英语模板</h3><p>每行一条，英语区号码随机选择。</p></div><span class="step-badge">EN</span></div>
-              <textarea id="templateEn" class="template-editor" spellcheck="false"></textarea>
+              <div class="panel-head"><div><h3>英语模板</h3><p>英语区号码随机选择。</p></div><span class="step-badge">EN</span></div>
+              <div id="templateEnList" class="template-list" data-language="en"></div>
+              <button class="button ghost template-add" type="button" data-template-add="en">添加英语文案</button>
             </article>
             <article class="panel template-card">
               <div class="panel-head"><div><h3>西班牙语模板</h3><p>西班牙、墨西哥和拉美号码随机选择。</p></div><span class="step-badge">ES</span></div>
-              <textarea id="templateEs" class="template-editor" spellcheck="false"></textarea>
+              <div id="templateEsList" class="template-list" data-language="es"></div>
+              <button class="button ghost template-add" type="button" data-template-add="es">添加西语文案</button>
             </article>
             <article class="panel template-card">
               <div class="panel-head"><div><h3>法语模板</h3><p>法国和法语区号码随机选择。</p></div><span class="step-badge">FR</span></div>
-              <textarea id="templateFr" class="template-editor" spellcheck="false"></textarea>
+              <div id="templateFrList" class="template-list" data-language="fr"></div>
+              <button class="button ghost template-add" type="button" data-template-add="fr">添加法语文案</button>
             </article>
           </section>
           <div class="template-actions">

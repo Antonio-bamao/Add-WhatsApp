@@ -152,7 +152,10 @@ ipcMain.handle('contacts:select-and-import', async () => {
     importedSource = data.filePath;
     return {
       canceled: false,
-      data
+      data: {
+        ...data,
+        progress: getCurrentProgressSummary()
+      }
     };
   } catch (error) {
     return {
@@ -161,6 +164,8 @@ ipcMain.handle('contacts:select-and-import', async () => {
     };
   }
 });
+
+ipcMain.handle('progress:get-current', async () => getCurrentProgressSummary());
 
 ipcMain.handle('task:start', async (_event, config) => {
   if (currentTask) {
@@ -193,12 +198,7 @@ async function runTask(config) {
   try {
     sendToRenderer('task:event', { type: 'task:starting', message: '正在连接 WhatsApp...' });
     const client = await whatsappService.ensureReady();
-    const sourceKey = crypto
-      .createHash('sha1')
-      .update(importedSource || 'manual-import')
-      .digest('hex')
-      .slice(0, 16);
-    const progressPath = path.join(app.getPath('userData'), 'progress', `${sourceKey}.json`);
+    const progressPath = progressPathForSource(importedSource);
     const progressStore = new JsonProgressStore(progressPath);
 
     const result = await runSendTask({
@@ -236,6 +236,42 @@ async function runTask(config) {
     currentTask = null;
     stopRequested = false;
   }
+}
+
+function progressPathForSource(sourceFile) {
+  const sourceKey = crypto
+    .createHash('sha1')
+    .update(sourceFile || 'manual-import')
+    .digest('hex')
+    .slice(0, 16);
+  return path.join(app.getPath('userData'), 'progress', `${sourceKey}.json`);
+}
+
+function getCurrentProgressSummary() {
+  if (!importedRows.length || !importedSource) {
+    return {
+      available: false,
+      total: 0,
+      processed: 0,
+      nextRowNumber: null,
+      progressPath: null
+    };
+  }
+  const progressPath = progressPathForSource(importedSource);
+  const progress = new JsonProgressStore(progressPath).load();
+  const nextIndex = Math.min((progress.lastIndex ?? -1) + 1, importedRows.length);
+  return {
+    available: true,
+    total: importedRows.length,
+    processed: Math.min(nextIndex, importedRows.length),
+    lastIndex: progress.lastIndex ?? -1,
+    nextRowNumber: importedRows[nextIndex] ? importedRows[nextIndex].rowNumber : null,
+    sent: progress.sent.length,
+    skipped: progress.skipped.length,
+    failed: progress.failed.length,
+    invalid: progress.invalid.length,
+    progressPath
+  };
 }
 
 function finishMessage(reason) {

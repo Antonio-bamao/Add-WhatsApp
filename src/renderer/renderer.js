@@ -35,9 +35,12 @@ const elements = {
   taskState: document.getElementById('taskState'),
   logList: document.getElementById('logList'),
   templatePoolSummary: document.getElementById('templatePoolSummary'),
-  templateEn: document.getElementById('templateEn'),
-  templateEs: document.getElementById('templateEs'),
-  templateFr: document.getElementById('templateFr'),
+  resumeSummary: document.getElementById('resumeSummary'),
+  resumeDetail: document.getElementById('resumeDetail'),
+  templateEnList: document.getElementById('templateEnList'),
+  templateEsList: document.getElementById('templateEsList'),
+  templateFrList: document.getElementById('templateFrList'),
+  templateAddButtons: [...document.querySelectorAll('[data-template-add]')],
   saveTemplatesButton: document.getElementById('saveTemplatesButton'),
   templateSaveState: document.getElementById('templateSaveState'),
   refreshHistoryButton: document.getElementById('refreshHistoryButton'),
@@ -109,6 +112,23 @@ function renderTaskStats() {
   setText('failedMetric', state.taskStats.failed || 0);
 }
 
+function renderProgressSummary(progress) {
+  if (!progress || !progress.available) {
+    elements.resumeSummary.textContent = '等待导入';
+    elements.resumeDetail.textContent = '导入表格后显示下一次开始处理的行号。';
+    return;
+  }
+
+  if (progress.nextRowNumber) {
+    elements.resumeSummary.textContent = `已处理 ${progress.processed} / ${progress.total}`;
+    elements.resumeDetail.textContent = `下次开始会从表格第 ${progress.nextRowNumber} 行继续。成功 ${progress.sent || 0}，跳过 ${progress.skipped || 0}，失败 ${progress.failed || 0}。`;
+    return;
+  }
+
+  elements.resumeSummary.textContent = `已处理 ${progress.processed} / ${progress.total}`;
+  elements.resumeDetail.textContent = '这个表格已经处理到最后一行。';
+}
+
 function renderRows(rows) {
   const visibleRows = rows.slice(0, 80);
   elements.previewBody.innerHTML = '';
@@ -167,11 +187,19 @@ async function importContacts() {
   state.imported = response.data;
   renderStats(response.data.stats);
   renderRows(response.data.rows);
+  renderProgressSummary(response.data.progress);
   elements.exportButton.disabled = false;
   elements.runButton.disabled = (response.data.stats.valid || 0) === 0;
   elements.fileMeta.textContent = `当前文件：${response.data.fileName}；电话列：${response.data.columns.phoneColumn || '未识别'}；国家列：${response.data.columns.countryColumn || '未识别'}`;
   elements.tableState.textContent = `已解析 ${response.data.rows.length} 行`;
   addLog(`已导入 ${response.data.fileName}，有效号码 ${response.data.stats.valid || 0} 个。`, 'strong');
+}
+
+async function refreshCurrentProgress() {
+  if (!state.imported) return;
+  const progress = await window.addWhatsapp.getCurrentProgress();
+  state.imported.progress = progress;
+  renderProgressSummary(progress);
 }
 
 async function exportReport() {
@@ -235,7 +263,23 @@ function handleTaskEvent(event) {
   if (event.type === 'row:sent') state.taskStats.sent += 1;
   if (event.type === 'row:unregistered') state.taskStats.unregistered += 1;
   if (event.type === 'row:failed') state.taskStats.failed += 1;
-  if (event.type === 'row:sent' || event.type === 'row:unregistered' || event.type === 'row:failed') {
+  if (event.type === 'row:invalid') state.taskStats.invalid += 1;
+  if (event.type === 'row:sent' || event.type === 'row:unregistered' || event.type === 'row:failed' || event.type === 'row:invalid') {
+    if (state.imported && Number.isInteger(event.index)) {
+      const nextRow = state.imported.rows[event.index + 1];
+      state.imported.progress = {
+        ...(state.imported.progress || {}),
+        available: true,
+        total: state.imported.rows.length,
+        processed: Math.min(event.index + 1, state.imported.rows.length),
+        nextRowNumber: nextRow ? nextRow.rowNumber : null,
+        sent: state.taskStats.sent,
+        skipped: state.taskStats.unregistered,
+        failed: state.taskStats.failed,
+        invalid: state.taskStats.invalid
+      };
+      renderProgressSummary(state.imported.progress);
+    }
     renderTaskStats();
   }
   if (event.type === 'task:finished' || event.type === 'task:error') {
@@ -243,6 +287,7 @@ function handleTaskEvent(event) {
     elements.taskStateMetric.textContent = event.type === 'task:error' ? '出错' : '已结束';
     elements.runButton.disabled = !state.imported;
     elements.stopButton.disabled = true;
+    refreshCurrentProgress();
   }
 }
 
@@ -280,15 +325,61 @@ async function stopTask() {
   }
 }
 
-function templateLines(textarea) {
-  return textarea.value.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+function templateListElement(language) {
+  return elements[`template${language[0].toUpperCase()}${language.slice(1)}List`];
+}
+
+function templateInputs(language) {
+  return [...templateListElement(language).querySelectorAll('.template-editor')];
+}
+
+function templateLines(language) {
+  return templateInputs(language).map(input => input.value.trim()).filter(Boolean);
+}
+
+function createTemplateItem(language, value = '', index = 0) {
+  const item = document.createElement('div');
+  item.className = 'template-item';
+  item.innerHTML = `
+    <div class="template-item-head">
+      <span>文案 ${index + 1}</span>
+      <button class="icon-button" type="button" data-template-remove="${language}" aria-label="删除文案">×</button>
+    </div>
+    <textarea class="template-editor" spellcheck="false"></textarea>
+  `;
+  const textarea = item.querySelector('textarea');
+  textarea.value = value;
+  textarea.addEventListener('input', markTemplatesDirty);
+  item.querySelector('button').addEventListener('click', () => {
+    item.remove();
+    renumberTemplateItems(language);
+    markTemplatesDirty();
+  });
+  return item;
+}
+
+function renumberTemplateItems(language) {
+  templateListElement(language).querySelectorAll('.template-item-head span').forEach((label, index) => {
+    label.textContent = `文案 ${index + 1}`;
+  });
+}
+
+function renderTemplateList(language, lines) {
+  const list = templateListElement(language);
+  list.innerHTML = '';
+  const values = lines.length ? lines : [''];
+  values.forEach((line, index) => list.appendChild(createTemplateItem(language, line, index)));
+}
+
+function markTemplatesDirty() {
+  elements.templateSaveState.textContent = '有未保存修改';
 }
 
 function renderTemplates(templates) {
   state.templates = templates;
-  elements.templateEn.value = templates.en.join('\n');
-  elements.templateEs.value = templates.es.join('\n');
-  elements.templateFr.value = templates.fr.join('\n');
+  renderTemplateList('en', templates.en);
+  renderTemplateList('es', templates.es);
+  renderTemplateList('fr', templates.fr);
   elements.templatePoolSummary.textContent = `EN ${templates.en.length} / ES ${templates.es.length} / FR ${templates.fr.length}`;
   elements.templateSaveState.textContent = '模板已加载';
 }
@@ -299,9 +390,9 @@ async function loadTemplates() {
 
 async function saveTemplates() {
   const saved = await window.addWhatsapp.saveTemplates({
-    en: templateLines(elements.templateEn),
-    es: templateLines(elements.templateEs),
-    fr: templateLines(elements.templateFr)
+    en: templateLines('en'),
+    es: templateLines('es'),
+    fr: templateLines('fr')
   });
   renderTemplates(saved);
   elements.templateSaveState.textContent = '已保存';
@@ -355,9 +446,12 @@ elements.runButton.addEventListener('click', startTask);
 elements.stopButton.addEventListener('click', stopTask);
 elements.saveTemplatesButton.addEventListener('click', saveTemplates);
 elements.refreshHistoryButton.addEventListener('click', loadHistory);
-for (const editor of [elements.templateEn, elements.templateEs, elements.templateFr]) {
-  editor.addEventListener('input', () => {
-    elements.templateSaveState.textContent = '有未保存修改';
+for (const button of elements.templateAddButtons) {
+  button.addEventListener('click', () => {
+    const language = button.dataset.templateAdd;
+    const list = templateListElement(language);
+    list.appendChild(createTemplateItem(language, '', list.children.length));
+    markTemplatesDirty();
   });
 }
 

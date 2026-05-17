@@ -5,6 +5,7 @@ contextBridge.exposeInMainWorld('addWhatsapp', {
   exportReport: rows => ipcRenderer.invoke('report:export', { rows }),
   startTask: config => ipcRenderer.invoke('task:start', config),
   stopTask: () => ipcRenderer.invoke('task:stop'),
+  getCurrentProgress: () => ipcRenderer.invoke('progress:get-current'),
   getTemplates: () => ipcRenderer.invoke('templates:get'),
   saveTemplates: templates => ipcRenderer.invoke('templates:save', templates),
   listHistory: () => ipcRenderer.invoke('history:list'),
