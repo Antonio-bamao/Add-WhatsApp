@@ -21,6 +21,10 @@
     "win": {
       "target": "portable",
       "signAndEditExecutable": false
+    },
+    "nsis": {
+      "installerIcon": "assets/icon.ico",
+      "uninstallerIcon": "assets/icon.ico"
     }
   },
   "dependencies": {

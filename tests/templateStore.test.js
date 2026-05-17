@@ -28,11 +28,14 @@ test('saves templates and removes blank lines', () => {
     fr: ['Bonjour']
   });
 
-  assert.deepEqual(new JsonTemplateStore(filePath).load(), {
-    en: ['Hello'],
-    es: ['Hola'],
-    fr: ['Bonjour']
-  });
+  const loaded = new JsonTemplateStore(filePath).load();
+
+  assert.equal(loaded.en[0], 'Hello');
+  assert.equal(loaded.es[0], 'Hola');
+  assert.equal(loaded.fr[0], 'Bonjour');
+  assert.equal(loaded.en.length, 4);
+  assert.equal(loaded.es.length, 4);
+  assert.equal(loaded.fr.length, 4);
 });
 
 test('falls back to default language when a saved pool is empty', () => {

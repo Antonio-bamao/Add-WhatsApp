@@ -35,3 +35,8 @@
 - 结果：新增 WhatsApp 风格绿色气泡电话图标，配置为 Electron 窗口图标和 `electron-builder` 打包图标。
 - 验证：`npm test` 通过 22 个测试；Electron 启动检查返回 `electron-started`；`npm run build` 成功重新生成带图标的便携版 EXE。
 - 下一步：如需消除 Smart App Control 拦截，需要配置正式代码签名证书。
+
+- 步骤：优化小尺寸图标、模板数量和文件夹图标。
+- 结果：重生成透明背景多尺寸 ICO，移除旧深色方形背景；NSIS 打包阶段使用该图标；项目文件夹和 `dist` 文件夹写入 `desktop.ini` 图标配置；默认 EN/ES/FR 模板各扩展到 4 条。
+- 验证：`npm test` 通过 22 个测试；`npm run build` 生成 77MB 便携版 EXE，关联图标可提取为新透明图标。
+- 下一步：如 Windows 仍显示旧图标，需要刷新资源管理器图标缓存或重新打开文件夹。
