@@ -100,27 +100,12 @@ function createTray() {
 async function showCloseChoice() {
   if (closeChoiceOpen || !mainWindow) return;
   closeChoiceOpen = true;
-  try {
-    const result = await dialog.showMessageBox(mainWindow, {
-      type: 'question',
-      buttons: ['最小化到托盘', '完全关闭', '取消'],
-      defaultId: 0,
-      cancelId: 2,
-      title: '关闭 Add WhatsApp',
-      message: '你想把软件最小化到托盘，还是完全关闭？',
-      detail: '完全关闭会结束 Add WhatsApp 的所有进程；最小化到托盘会继续保留登录状态和当前窗口。'
-    });
-
-    if (result.response === 0) {
-      mainWindow.hide();
-      return;
-    }
-    if (result.response === 1) {
-      quitCompletely();
-    }
-  } finally {
-    closeChoiceOpen = false;
-  }
+  mainWindow.show();
+  mainWindow.focus();
+  sendToRenderer('app:show-close-choice', {
+    hasActiveTask: Boolean(currentTask),
+    hasTray: Boolean(tray)
+  });
 }
 
 async function quitCompletely() {
@@ -185,6 +170,19 @@ ipcMain.handle('app:bootstrap', async () => ({
   imported: getImportedSummary(),
   history: historyStore.list()
 }));
+
+ipcMain.handle('app:close-choice-action', async (_event, action) => {
+  closeChoiceOpen = false;
+  if (action === 'minimize') {
+    mainWindow.hide();
+    return { ok: true };
+  }
+  if (action === 'quit') {
+    await quitCompletely();
+    return { ok: true };
+  }
+  return { ok: true };
+});
 
 ipcMain.handle('progress:get-current', async () => getCurrentProgressSummary());
 

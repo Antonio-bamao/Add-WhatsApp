@@ -1,7 +1,8 @@
 const state = {
   imported: null,
   templates: { en: [], es: [], fr: [] },
-  taskStats: { sent: 0, failed: 0, unregistered: 0, invalid: 0 }
+  taskStats: { sent: 0, failed: 0, unregistered: 0, invalid: 0 },
+  activeTemplateLanguage: 'en'
 };
 
 const elements = {
@@ -40,14 +41,32 @@ const elements = {
   templateEnList: document.getElementById('templateEnList'),
   templateEsList: document.getElementById('templateEsList'),
   templateFrList: document.getElementById('templateFrList'),
+  templateTabs: [...document.querySelectorAll('[data-template-tab]')],
+  templatePanes: [...document.querySelectorAll('[data-language]')],
   templateAddButtons: [...document.querySelectorAll('[data-template-add]')],
+  templateActiveTitle: document.getElementById('templateActiveTitle'),
+  templateActiveDescription: document.getElementById('templateActiveDescription'),
+  templateActiveBadge: document.getElementById('templateActiveBadge'),
+  templateEnCount: document.getElementById('templateEnCount'),
+  templateEsCount: document.getElementById('templateEsCount'),
+  templateFrCount: document.getElementById('templateFrCount'),
   saveTemplatesButton: document.getElementById('saveTemplatesButton'),
   templateSaveState: document.getElementById('templateSaveState'),
   refreshHistoryButton: document.getElementById('refreshHistoryButton'),
-  historyBody: document.getElementById('historyBody')
+  historyBody: document.getElementById('historyBody'),
+  closeModal: document.getElementById('closeModal'),
+  closeModalDetail: document.getElementById('closeModalDetail'),
+  closeMinimizeButton: document.getElementById('closeMinimizeButton'),
+  closeQuitButton: document.getElementById('closeQuitButton'),
+  closeCancelButton: document.getElementById('closeCancelButton')
 };
 
 const PAGE_ACTIONS = new Set(['importPage']);
+const TEMPLATE_META = {
+  en: { title: '英语模板', description: '英语区号码随机选择这些文案。', badge: 'EN' },
+  es: { title: '西班牙语模板', description: '西班牙、墨西哥和拉美号码随机选择这些文案。', badge: 'ES' },
+  fr: { title: '法语模板', description: '法国和法语区号码随机选择这些文案。', badge: 'FR' }
+};
 
 function statusLabel(status) {
   const labels = {
@@ -382,8 +401,33 @@ function renderTemplateList(language, lines) {
   values.forEach((line, index) => list.appendChild(createTemplateItem(language, line, index)));
 }
 
+function updateTemplateCounts() {
+  elements.templateEnCount.textContent = templateInputs('en').length;
+  elements.templateEsCount.textContent = templateInputs('es').length;
+  elements.templateFrCount.textContent = templateInputs('fr').length;
+}
+
+function switchTemplateLanguage(language) {
+  state.activeTemplateLanguage = language;
+  const meta = TEMPLATE_META[language];
+  elements.templateActiveTitle.textContent = meta.title;
+  elements.templateActiveDescription.textContent = meta.description;
+  elements.templateActiveBadge.textContent = meta.badge;
+
+  for (const tab of elements.templateTabs) {
+    tab.classList.toggle('active', tab.dataset.templateTab === language);
+  }
+  for (const pane of elements.templatePanes) {
+    pane.classList.toggle('active', pane.dataset.language === language);
+  }
+  for (const button of elements.templateAddButtons) {
+    button.hidden = button.dataset.templateAdd !== language;
+  }
+}
+
 function markTemplatesDirty() {
   elements.templateSaveState.textContent = '有未保存修改';
+  updateTemplateCounts();
 }
 
 function renderTemplates(templates) {
@@ -393,6 +437,8 @@ function renderTemplates(templates) {
   renderTemplateList('fr', templates.fr);
   elements.templatePoolSummary.textContent = `EN ${templates.en.length} / ES ${templates.es.length} / FR ${templates.fr.length}`;
   elements.templateSaveState.textContent = '模板已加载';
+  updateTemplateCounts();
+  switchTemplateLanguage(state.activeTemplateLanguage);
 }
 
 async function loadTemplates() {
@@ -456,6 +502,19 @@ async function bootstrapApp() {
   if (bootstrap.history) renderHistory(bootstrap.history);
 }
 
+function showCloseModal(payload = {}) {
+  elements.closeModal.hidden = false;
+  elements.closeModalDetail.textContent = payload.hasActiveTask
+    ? '当前有任务正在运行。最小化会让任务继续；完全关闭会先保存任务记录，再结束软件进程。'
+    : '最小化会保留窗口状态和登录缓存；完全关闭会结束软件进程。';
+  elements.closeMinimizeButton.focus();
+}
+
+async function handleCloseChoice(action) {
+  elements.closeModal.hidden = true;
+  await window.addWhatsapp.closeChoiceAction(action);
+}
+
 for (const item of elements.navItems) {
   item.addEventListener('click', () => switchPage(item.dataset.pageTarget));
 }
@@ -466,6 +525,18 @@ elements.runButton.addEventListener('click', startTask);
 elements.stopButton.addEventListener('click', stopTask);
 elements.saveTemplatesButton.addEventListener('click', saveTemplates);
 elements.refreshHistoryButton.addEventListener('click', loadHistory);
+elements.closeMinimizeButton.addEventListener('click', () => handleCloseChoice('minimize'));
+elements.closeQuitButton.addEventListener('click', () => handleCloseChoice('quit'));
+elements.closeCancelButton.addEventListener('click', () => handleCloseChoice('cancel'));
+elements.closeModal.addEventListener('click', event => {
+  if (event.target === elements.closeModal) handleCloseChoice('cancel');
+});
+window.addEventListener('keydown', event => {
+  if (event.key === 'Escape' && !elements.closeModal.hidden) handleCloseChoice('cancel');
+});
+for (const tab of elements.templateTabs) {
+  tab.addEventListener('click', () => switchTemplateLanguage(tab.dataset.templateTab));
+}
 for (const button of elements.templateAddButtons) {
   button.addEventListener('click', () => {
     const language = button.dataset.templateAdd;
@@ -477,5 +548,6 @@ for (const button of elements.templateAddButtons) {
 
 window.addWhatsapp.onTaskEvent(handleTaskEvent);
 window.addWhatsapp.onHistoryUpdated(renderHistory);
+window.addWhatsapp.onShowCloseChoice(showCloseModal);
 loadTemplates();
 bootstrapApp();
