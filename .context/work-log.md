@@ -15,3 +15,8 @@
 - 步骤：初始化 Git 仓库并完成第一次提交。
 - 结果：提交 `chore: initialize whatsapp desktop project`，包含项目上下文、计划文档和 `.gitignore`。
 - 下一步：开始搭建 Electron/Node 项目骨架。
+
+- 步骤：搭建 Electron 桌面骨架和 WhatsApp 风格 UI v0。
+- 结果：新增 Electron 主进程、preload、导入预检界面、号码解析模块、语言规则模块、表格导入模块和 Node 测试。
+- 验证：`npm test` 通过 11 个测试；Electron 启动冒烟检查返回 `electron-started`。
+- 下一步：接入 WhatsApp 登录和发送任务执行器。
