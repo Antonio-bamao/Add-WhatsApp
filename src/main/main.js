@@ -38,6 +38,7 @@ function createWindow() {
     minHeight: 720,
     title: 'Add WhatsApp',
     icon: iconPath,
+    autoHideMenuBar: true,
     backgroundColor: '#f6fbf8',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -45,6 +46,8 @@ function createWindow() {
       nodeIntegration: false
     }
   });
+  mainWindow.setMenu(null);
+  mainWindow.setMenuBarVisibility(false);
 
   mainWindow.on('close', event => {
     if (isQuitting) return;
@@ -57,6 +60,7 @@ function createWindow() {
 
 app.whenReady().then(() => {
   app.setAppUserModelId('com.addwhatsapp.desktop');
+  Menu.setApplicationMenu(null);
   whatsappService = createWhatsAppService(app, event => sendToRenderer('task:event', event));
   templateStore = new JsonTemplateStore(path.join(app.getPath('userData'), 'templates.json'));
   historyStore = new JsonHistoryStore(path.join(app.getPath('userData'), 'history', 'runs.json'));
