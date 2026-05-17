@@ -22,19 +22,19 @@
         </div>
 
         <nav class="nav-list">
-          <button class="nav-item active" type="button">
+          <button class="nav-item active" type="button" data-page-target="importPage">
             <span class="nav-dot"></span>
             导入预检
           </button>
-          <button class="nav-item" type="button">
+          <button class="nav-item" type="button" data-page-target="taskPage">
             <span class="nav-dot"></span>
             发送任务
           </button>
-          <button class="nav-item" type="button">
+          <button class="nav-item" type="button" data-page-target="templatePage">
             <span class="nav-dot"></span>
             模板文案
           </button>
-          <button class="nav-item" type="button">
+          <button class="nav-item" type="button" data-page-target="historyPage">
             <span class="nav-dot"></span>
             历史报表
           </button>
@@ -52,8 +52,8 @@
       <main class="workspace">
         <header class="topbar">
           <div>
-            <p class="eyebrow">WhatsApp 风格工作台</p>
-            <h2>导入表格，先把号码和语言判断清楚</h2>
+            <p id="pageEyebrow" class="eyebrow">WhatsApp 风格工作台</p>
+            <h2 id="pageTitle">导入表格，先把号码和语言判断清楚</h2>
           </div>
           <div class="topbar-actions">
             <button id="exportButton" class="button ghost" type="button" disabled>导出预检</button>
@@ -61,144 +61,215 @@
           </div>
         </header>
 
-        <section class="summary-grid" aria-label="预检统计">
-          <article class="metric">
-            <span class="metric-label">总行数</span>
-            <strong id="totalCount">0</strong>
-            <small>导入后自动统计</small>
-          </article>
-          <article class="metric success">
-            <span class="metric-label">有效号码</span>
-            <strong id="validCount">0</strong>
-            <small>可进入发送队列</small>
-          </article>
-          <article class="metric warning">
-            <span class="metric-label">待确认</span>
-            <strong id="pendingCount">0</strong>
-            <small>歧义格式先不发送</small>
-          </article>
-          <article class="metric danger">
-            <span class="metric-label">无效/重复</span>
-            <strong id="blockedCount">0</strong>
-            <small>会写入报表</small>
-          </article>
-        </section>
+        <section id="importPage" class="page active-page" data-title="导入表格，先把号码和语言判断清楚" data-eyebrow="WhatsApp 风格工作台">
+          <section class="summary-grid" aria-label="预检统计">
+            <article class="metric">
+              <span class="metric-label">总行数</span>
+              <strong id="totalCount">0</strong>
+              <small>导入后自动统计</small>
+            </article>
+            <article class="metric success">
+              <span class="metric-label">有效号码</span>
+              <strong id="validCount">0</strong>
+              <small>可进入发送队列</small>
+            </article>
+            <article class="metric warning">
+              <span class="metric-label">待确认</span>
+              <strong id="pendingCount">0</strong>
+              <small>歧义格式先不发送</small>
+            </article>
+            <article class="metric danger">
+              <span class="metric-label">无效/重复</span>
+              <strong id="blockedCount">0</strong>
+              <small>会写入报表</small>
+            </article>
+          </section>
 
-        <section class="main-grid">
-          <div class="panel import-panel">
+          <section class="main-grid">
+            <div class="panel import-panel">
+              <div class="panel-head">
+                <div>
+                  <h3>导入预检</h3>
+                  <p id="fileMeta">还没有选择表格。支持电话列、国家列和语言列自动识别。</p>
+                </div>
+                <span class="step-badge">Step 01</span>
+              </div>
+
+              <div class="drop-zone" id="dropZone">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M12 3a1 1 0 0 1 1 1v8.6l2.3-2.3a1 1 0 1 1 1.4 1.4l-4 4a1 1 0 0 1-1.4 0l-4-4a1 1 0 1 1 1.4-1.4l2.3 2.3V4a1 1 0 0 1 1-1Zm-7 13a1 1 0 0 1 1 1v2h12v-2a1 1 0 1 1 2 0v3a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1Z" />
+                </svg>
+                <h4>选择客户表格</h4>
+                <p>例如：33781387438、33-771147488、(256) 665-4606、44 7851 692353。</p>
+                <button class="button secondary" type="button" id="dropImportButton">打开文件</button>
+              </div>
+
+              <div class="language-strip" aria-label="语言统计">
+                <div><span class="lang-dot en"></span>英语 <strong id="enCount">0</strong></div>
+                <div><span class="lang-dot es"></span>西语 <strong id="esCount">0</strong></div>
+                <div><span class="lang-dot fr"></span>法语 <strong id="frCount">0</strong></div>
+              </div>
+            </div>
+          </section>
+
+          <section class="panel table-panel">
             <div class="panel-head">
               <div>
-                <h3>导入预检</h3>
-                <p id="fileMeta">还没有选择表格。支持电话列、国家列和语言列自动识别。</p>
+                <h3>预检明细</h3>
+                <p>只展示前 80 行，完整结果可导出。</p>
               </div>
-              <span class="step-badge">Step 01</span>
+              <span id="tableState" class="table-state">等待导入</span>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>行号</th>
+                    <th>原始电话</th>
+                    <th>标准号码</th>
+                    <th>国家</th>
+                    <th>语言</th>
+                    <th>状态</th>
+                    <th>原因</th>
+                  </tr>
+                </thead>
+                <tbody id="previewBody">
+                  <tr class="empty-row">
+                    <td colspan="7">导入表格后，这里会显示号码解析和语言判断结果。</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </section>
+
+        <section id="taskPage" class="page" data-title="控制发送任务，扫码一次后自动续跑" data-eyebrow="发送任务">
+          <section class="summary-grid task-summary" aria-label="任务统计">
+            <article class="metric success">
+              <span class="metric-label">本次成功</span>
+              <strong id="sentMetric">0</strong>
+              <small>已发送消息</small>
+            </article>
+            <article class="metric warning">
+              <span class="metric-label">未注册</span>
+              <strong id="unregisteredMetric">0</strong>
+              <small>自动跳过</small>
+            </article>
+            <article class="metric danger">
+              <span class="metric-label">失败</span>
+              <strong id="failedMetric">0</strong>
+              <small>记录错误原因</small>
+            </article>
+            <article class="metric">
+              <span class="metric-label">当前状态</span>
+              <strong id="taskStateMetric">待机</strong>
+              <small>扫码/连接/运行</small>
+            </article>
+          </section>
+
+          <section class="main-grid">
+            <div class="panel settings-panel">
+              <div class="panel-head">
+                <div>
+                  <h3>发送设置</h3>
+                  <p>登录状态会保存在本机；同一表格下次从已处理行继续。</p>
+                </div>
+                <span id="taskState" class="table-state">未开始</span>
+              </div>
+
+              <label class="field">
+                <span>每日上限</span>
+                <input id="dailyLimitInput" type="number" min="1" max="500" value="80" />
+              </label>
+              <div class="field-row">
+                <label class="field">
+                  <span>最小间隔（秒）</span>
+                  <input id="delayMinInput" type="number" min="5" value="22" />
+                </label>
+                <label class="field">
+                  <span>最大间隔（秒）</span>
+                  <input id="delayMaxInput" type="number" min="5" value="26" />
+                </label>
+              </div>
+
+              <div class="template-preview">
+                <div>
+                  <span class="template-label">当前模板池</span>
+                  <strong id="templatePoolSummary">EN / ES / FR</strong>
+                </div>
+                <p>发送时会按识别语言随机选择对应文案。</p>
+              </div>
+
+              <div class="task-actions">
+                <button id="runButton" class="button run" type="button" disabled>开始任务</button>
+                <button id="stopButton" class="button stop" type="button" disabled>暂停任务</button>
+              </div>
             </div>
 
-            <div class="drop-zone" id="dropZone">
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M12 3a1 1 0 0 1 1 1v8.6l2.3-2.3a1 1 0 1 1 1.4 1.4l-4 4a1 1 0 0 1-1.4 0l-4-4a1 1 0 1 1 1.4-1.4l2.3 2.3V4a1 1 0 0 1 1-1Zm-7 13a1 1 0 0 1 1 1v2h12v-2a1 1 0 1 1 2 0v3a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1Z" />
-              </svg>
-              <h4>选择客户表格</h4>
-              <p>例如：`33781387438`、`33-771147488`、`(256) 665-4606`、`44 7851 692353`。</p>
-              <button class="button secondary" type="button" id="dropImportButton">打开文件</button>
-            </div>
+            <section class="panel log-panel">
+              <div class="panel-head">
+                <div>
+                  <h3>运行日志</h3>
+                  <p>扫码、登录、检测号码和发送结果都会在这里显示。</p>
+                </div>
+              </div>
+              <div id="logList" class="log-list" aria-live="polite">
+                <div class="log-line muted">等待导入表格并开始任务。</div>
+              </div>
+            </section>
+          </section>
+        </section>
 
-            <div class="language-strip" aria-label="语言统计">
-              <div>
-                <span class="lang-dot en"></span>
-                英语 <strong id="enCount">0</strong>
-              </div>
-              <div>
-                <span class="lang-dot es"></span>
-                西语 <strong id="esCount">0</strong>
-              </div>
-              <div>
-                <span class="lang-dot fr"></span>
-                法语 <strong id="frCount">0</strong>
-              </div>
-            </div>
+        <section id="templatePage" class="page" data-title="编辑三种语言的问候文案" data-eyebrow="模板文案">
+          <section class="template-grid">
+            <article class="panel template-card">
+              <div class="panel-head"><div><h3>英语模板</h3><p>每行一条，英语区号码随机选择。</p></div><span class="step-badge">EN</span></div>
+              <textarea id="templateEn" class="template-editor" spellcheck="false"></textarea>
+            </article>
+            <article class="panel template-card">
+              <div class="panel-head"><div><h3>西班牙语模板</h3><p>西班牙、墨西哥和拉美号码随机选择。</p></div><span class="step-badge">ES</span></div>
+              <textarea id="templateEs" class="template-editor" spellcheck="false"></textarea>
+            </article>
+            <article class="panel template-card">
+              <div class="panel-head"><div><h3>法语模板</h3><p>法国和法语区号码随机选择。</p></div><span class="step-badge">FR</span></div>
+              <textarea id="templateFr" class="template-editor" spellcheck="false"></textarea>
+            </article>
+          </section>
+          <div class="template-actions">
+            <span id="templateSaveState" class="table-state">未保存修改</span>
+            <button id="saveTemplatesButton" class="button primary" type="button">保存模板</button>
           </div>
+        </section>
 
-          <div class="panel settings-panel">
+        <section id="historyPage" class="page" data-title="查看发送历史和运行结果" data-eyebrow="历史报表">
+          <section class="panel table-panel">
             <div class="panel-head">
               <div>
-                <h3>发送设置</h3>
-                <p>默认保守节奏，后续接入真实发送任务。</p>
+                <h3>历史任务</h3>
+                <p>任务完成、暂停或达到每日限额后会写入这里。</p>
               </div>
-              <span class="step-badge">Step 02</span>
+              <button id="refreshHistoryButton" class="button ghost" type="button">刷新历史</button>
             </div>
-
-            <label class="field">
-              <span>每日上限</span>
-              <input id="dailyLimitInput" type="number" min="1" max="500" value="80" />
-            </label>
-            <div class="field-row">
-              <label class="field">
-                <span>最小间隔</span>
-                <input id="delayMinInput" type="number" min="5" value="22" />
-              </label>
-              <label class="field">
-                <span>最大间隔</span>
-                <input id="delayMaxInput" type="number" min="5" value="26" />
-              </label>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>开始时间</th>
+                    <th>结束时间</th>
+                    <th>结果</th>
+                    <th>成功</th>
+                    <th>未注册</th>
+                    <th>失败</th>
+                    <th>无效/跳过</th>
+                    <th>来源文件</th>
+                  </tr>
+                </thead>
+                <tbody id="historyBody">
+                  <tr class="empty-row"><td colspan="8">还没有历史任务。</td></tr>
+                </tbody>
+              </table>
             </div>
-
-            <div class="template-preview">
-              <div>
-                <span class="template-label">默认模板池</span>
-                <strong>EN / ES / FR</strong>
-              </div>
-              <p>下一步会加入模板编辑器，发送时按识别语言随机选择。</p>
-            </div>
-
-            <div class="task-actions">
-              <button id="runButton" class="button run" type="button" disabled>开始任务</button>
-              <button id="stopButton" class="button stop" type="button" disabled>暂停任务</button>
-            </div>
-          </div>
-        </section>
-
-        <section class="panel log-panel">
-          <div class="panel-head">
-            <div>
-              <h3>运行日志</h3>
-              <p>扫码、登录、检测号码和发送结果都会在这里显示。</p>
-            </div>
-            <span id="taskState" class="table-state">未开始</span>
-          </div>
-          <div id="logList" class="log-list" aria-live="polite">
-            <div class="log-line muted">等待导入表格并开始任务。</div>
-          </div>
-        </section>
-
-        <section class="panel table-panel">
-          <div class="panel-head">
-            <div>
-              <h3>预检明细</h3>
-              <p>只展示前 80 行，完整结果可导出。</p>
-            </div>
-            <span id="tableState" class="table-state">等待导入</span>
-          </div>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>行号</th>
-                  <th>原始电话</th>
-                  <th>标准号码</th>
-                  <th>国家</th>
-                  <th>语言</th>
-                  <th>状态</th>
-                  <th>原因</th>
-                </tr>
-              </thead>
-              <tbody id="previewBody">
-                <tr class="empty-row">
-                  <td colspan="7">导入表格后，这里会显示号码解析和语言判断结果。</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
+          </section>
         </section>
       </main>
     </div>

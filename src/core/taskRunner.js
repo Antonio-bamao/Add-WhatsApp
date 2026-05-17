@@ -1,16 +1,5 @@
 const { countSentToday } = require('./progressStore');
-
-const DEFAULT_TEMPLATES = {
-  en: [
-    "Hi, I was checking my customer list and wanted to see if you're still interested in jerseys. Can I send you a few new photos?"
-  ],
-  es: [
-    'Hola, estaba revisando mi lista de clientes y quería saber si todavía te interesan camisetas. ¿Te puedo mandar unas fotos nuevas?'
-  ],
-  fr: [
-    'Bonjour, je revoyais ma liste de clients et je voulais savoir si les maillots vous intéressent toujours. Puis-je vous envoyer quelques nouvelles photos ?'
-  ]
-};
+const { DEFAULT_TEMPLATES } = require('./templateStore');
 
 function sleep(ms) {
   if (!ms) return Promise.resolve();
@@ -28,9 +17,9 @@ function nextDelayMs(config = {}) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
-function chooseTemplate(language, templates = DEFAULT_TEMPLATES) {
+function chooseTemplate(language, templates = DEFAULT_TEMPLATES, random = Math.random) {
   const pool = templates[language] && templates[language].length ? templates[language] : templates.en;
-  return pool[0];
+  return pool[Math.floor(random() * pool.length)];
 }
 
 function createEmptyStats() {

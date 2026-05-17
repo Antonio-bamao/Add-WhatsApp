@@ -177,6 +177,16 @@ button {
   overflow: hidden;
 }
 
+.page {
+  display: none;
+  align-content: start;
+  gap: 22px;
+}
+
+.page.active-page {
+  display: grid;
+}
+
 .topbar {
   display: flex;
   align-items: center;
@@ -303,6 +313,16 @@ button {
 .main-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.35fr) minmax(320px, 0.65fr);
+  gap: 18px;
+}
+
+#importPage .main-grid {
+  grid-template-columns: 1fr;
+}
+
+.template-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 18px;
 }
 
@@ -492,12 +512,45 @@ button {
 .log-list {
   display: grid;
   gap: 8px;
-  max-height: 180px;
+  max-height: 350px;
   overflow: auto;
   padding: 12px;
   background: #f7fbf9;
   border: 1px solid var(--line);
   border-radius: var(--radius);
+}
+
+.task-summary .metric:last-child strong {
+  color: var(--wa-green-deep);
+  font-size: 28px;
+}
+
+.template-card {
+  min-height: 420px;
+}
+
+.template-editor {
+  width: 100%;
+  min-height: 310px;
+  padding: 14px;
+  resize: vertical;
+  color: var(--ink);
+  background: #f8fffb;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  font: 14px/1.6 "Segoe UI", "Microsoft YaHei", sans-serif;
+}
+
+.template-editor:focus-visible {
+  outline: 3px solid rgba(18, 140, 126, 0.24);
+  outline-offset: 2px;
+}
+
+.template-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 12px;
 }
 
 .log-line {
@@ -598,6 +651,10 @@ td {
   }
 
   .main-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .template-grid {
     grid-template-columns: 1fr;
   }
 }

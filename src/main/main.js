@@ -4,7 +4,9 @@ const { app, BrowserWindow, dialog, ipcMain } = require('electron');
 const XLSX = require('xlsx');
 const { importContacts } = require('../core/tableImporter');
 const { JsonProgressStore } = require('../core/progressStore');
-const { DEFAULT_TEMPLATES, runSendTask } = require('../core/taskRunner');
+const { runSendTask } = require('../core/taskRunner');
+const { JsonTemplateStore } = require('../core/templateStore');
+const { JsonHistoryStore } = require('../core/historyStore');
 const { createWhatsAppService } = require('./whatsappService');
 
 let mainWindow;
@@ -13,6 +15,8 @@ let importedSource = null;
 let currentTask = null;
 let stopRequested = false;
 let whatsappService = null;
+let templateStore = null;
+let historyStore = null;
 
 function sendToRenderer(channel, payload) {
   if (mainWindow && !mainWindow.isDestroyed()) {
@@ -40,6 +44,8 @@ function createWindow() {
 
 app.whenReady().then(() => {
   whatsappService = createWhatsAppService(app, event => sendToRenderer('task:event', event));
+  templateStore = new JsonTemplateStore(path.join(app.getPath('userData'), 'templates.json'));
+  historyStore = new JsonHistoryStore(path.join(app.getPath('userData'), 'history', 'runs.json'));
   createWindow();
 
   app.on('activate', () => {
@@ -100,7 +106,14 @@ ipcMain.handle('task:stop', async () => {
   return { stopped: true };
 });
 
+ipcMain.handle('templates:get', async () => templateStore.load());
+
+ipcMain.handle('templates:save', async (_event, templates) => templateStore.save(templates));
+
+ipcMain.handle('history:list', async () => historyStore.list());
+
 async function runTask(config) {
+  const startedAt = new Date().toISOString();
   try {
     sendToRenderer('task:event', { type: 'task:starting', message: '正在连接 WhatsApp...' });
     const client = await whatsappService.ensureReady();
@@ -116,7 +129,7 @@ async function runTask(config) {
       rows: importedRows,
       client,
       progressStore,
-      templates: DEFAULT_TEMPLATES,
+      templates: templateStore.load(),
       config: {
         maxPerDay: Number(config.maxPerDay || 80),
         delayMinMs: Number(config.delayMinSeconds || 22) * 1000,
@@ -131,6 +144,16 @@ async function runTask(config) {
       message: finishMessage(result.reason),
       result
     });
+    const history = historyStore.append({
+      id: `${Date.now()}`,
+      sourceFile: importedSource,
+      startedAt,
+      finishedAt: new Date().toISOString(),
+      reason: result.reason,
+      stats: result.stats,
+      progressPath
+    });
+    sendToRenderer('history:updated', history);
   } catch (error) {
     sendToRenderer('task:event', { type: 'task:error', message: error.message });
   } finally {

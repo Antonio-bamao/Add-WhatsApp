@@ -1,8 +1,15 @@
 const state = {
-  imported: null
+  imported: null,
+  templates: { en: [], es: [], fr: [] },
+  taskStats: { sent: 0, failed: 0, unregistered: 0, invalid: 0 }
 };
 
 const elements = {
+  pageEyebrow: document.getElementById('pageEyebrow'),
+  pageTitle: document.getElementById('pageTitle'),
+  topbarActions: document.querySelector('.topbar-actions'),
+  navItems: [...document.querySelectorAll('.nav-item')],
+  pages: [...document.querySelectorAll('.page')],
   importButton: document.getElementById('importButton'),
   dropImportButton: document.getElementById('dropImportButton'),
   exportButton: document.getElementById('exportButton'),
@@ -15,16 +22,29 @@ const elements = {
   esCount: document.getElementById('esCount'),
   frCount: document.getElementById('frCount'),
   previewBody: document.getElementById('previewBody'),
-  tableState: document.getElementById('tableState')
-  ,
+  tableState: document.getElementById('tableState'),
+  sentMetric: document.getElementById('sentMetric'),
+  unregisteredMetric: document.getElementById('unregisteredMetric'),
+  failedMetric: document.getElementById('failedMetric'),
+  taskStateMetric: document.getElementById('taskStateMetric'),
   runButton: document.getElementById('runButton'),
   stopButton: document.getElementById('stopButton'),
   dailyLimitInput: document.getElementById('dailyLimitInput'),
   delayMinInput: document.getElementById('delayMinInput'),
   delayMaxInput: document.getElementById('delayMaxInput'),
   taskState: document.getElementById('taskState'),
-  logList: document.getElementById('logList')
+  logList: document.getElementById('logList'),
+  templatePoolSummary: document.getElementById('templatePoolSummary'),
+  templateEn: document.getElementById('templateEn'),
+  templateEs: document.getElementById('templateEs'),
+  templateFr: document.getElementById('templateFr'),
+  saveTemplatesButton: document.getElementById('saveTemplatesButton'),
+  templateSaveState: document.getElementById('templateSaveState'),
+  refreshHistoryButton: document.getElementById('refreshHistoryButton'),
+  historyBody: document.getElementById('historyBody')
 };
+
+const PAGE_ACTIONS = new Set(['importPage']);
 
 function statusLabel(status) {
   const labels = {
@@ -45,8 +65,31 @@ function languageLabel(language) {
   return labels[language] || language || '-';
 }
 
+function reasonLabel(reason) {
+  const labels = {
+    complete: '完成',
+    stopped: '已暂停',
+    'daily-limit': '达到限额'
+  };
+  return labels[reason] || reason || '-';
+}
+
 function setText(key, value) {
   elements[key].textContent = String(value);
+}
+
+function switchPage(pageId) {
+  for (const page of elements.pages) {
+    page.classList.toggle('active-page', page.id === pageId);
+  }
+  for (const item of elements.navItems) {
+    item.classList.toggle('active', item.dataset.pageTarget === pageId);
+  }
+  const active = document.getElementById(pageId);
+  elements.pageTitle.textContent = active.dataset.title;
+  elements.pageEyebrow.textContent = active.dataset.eyebrow;
+  elements.topbarActions.hidden = !PAGE_ACTIONS.has(pageId);
+  if (pageId === 'historyPage') loadHistory();
 }
 
 function renderStats(stats) {
@@ -58,6 +101,12 @@ function renderStats(stats) {
   setText('enCount', stats.languages.en || 0);
   setText('esCount', stats.languages.es || 0);
   setText('frCount', stats.languages.fr || 0);
+}
+
+function renderTaskStats() {
+  setText('sentMetric', state.taskStats.sent || 0);
+  setText('unregisteredMetric', state.taskStats.unregistered || 0);
+  setText('failedMetric', state.taskStats.failed || 0);
 }
 
 function renderRows(rows) {
@@ -172,23 +221,40 @@ function handleTaskEvent(event) {
   addLog(taskEventMessage(event), errorTone || strongTone);
 
   if (event.type === 'task:starting') {
+    state.taskStats = { sent: 0, failed: 0, unregistered: 0, invalid: 0 };
+    renderTaskStats();
     elements.taskState.textContent = '连接中';
+    elements.taskStateMetric.textContent = '连接中';
     elements.runButton.disabled = true;
     elements.stopButton.disabled = false;
   }
-  if (event.type === 'auth:ready') elements.taskState.textContent = '运行中';
+  if (event.type === 'auth:ready') {
+    elements.taskState.textContent = '运行中';
+    elements.taskStateMetric.textContent = '运行中';
+  }
+  if (event.type === 'row:sent') state.taskStats.sent += 1;
+  if (event.type === 'row:unregistered') state.taskStats.unregistered += 1;
+  if (event.type === 'row:failed') state.taskStats.failed += 1;
+  if (event.type === 'row:sent' || event.type === 'row:unregistered' || event.type === 'row:failed') {
+    renderTaskStats();
+  }
   if (event.type === 'task:finished' || event.type === 'task:error') {
     elements.taskState.textContent = event.type === 'task:error' ? '出错' : '已结束';
+    elements.taskStateMetric.textContent = event.type === 'task:error' ? '出错' : '已结束';
     elements.runButton.disabled = !state.imported;
     elements.stopButton.disabled = true;
   }
 }
 
 async function startTask() {
-  if (!state.imported) return;
+  if (!state.imported) {
+    addLog('请先导入表格。', 'error');
+    return;
+  }
   const minDelay = Number(elements.delayMinInput.value || 22);
   const maxDelay = Number(elements.delayMaxInput.value || 26);
   elements.taskState.textContent = '准备中';
+  elements.taskStateMetric.textContent = '准备中';
   addLog('准备连接 WhatsApp。如果是第一次使用，请在弹出的浏览器里扫码。', 'strong');
 
   const response = await window.addWhatsapp.startTask({
@@ -199,6 +265,7 @@ async function startTask() {
 
   if (!response.started) {
     elements.taskState.textContent = '未开始';
+    elements.taskStateMetric.textContent = '待机';
     elements.runButton.disabled = false;
     addLog(response.error || '任务启动失败。', 'error');
   }
@@ -213,9 +280,88 @@ async function stopTask() {
   }
 }
 
+function templateLines(textarea) {
+  return textarea.value.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+}
+
+function renderTemplates(templates) {
+  state.templates = templates;
+  elements.templateEn.value = templates.en.join('\n');
+  elements.templateEs.value = templates.es.join('\n');
+  elements.templateFr.value = templates.fr.join('\n');
+  elements.templatePoolSummary.textContent = `EN ${templates.en.length} / ES ${templates.es.length} / FR ${templates.fr.length}`;
+  elements.templateSaveState.textContent = '模板已加载';
+}
+
+async function loadTemplates() {
+  renderTemplates(await window.addWhatsapp.getTemplates());
+}
+
+async function saveTemplates() {
+  const saved = await window.addWhatsapp.saveTemplates({
+    en: templateLines(elements.templateEn),
+    es: templateLines(elements.templateEs),
+    fr: templateLines(elements.templateFr)
+  });
+  renderTemplates(saved);
+  elements.templateSaveState.textContent = '已保存';
+}
+
+function renderHistory(items) {
+  elements.historyBody.innerHTML = '';
+  if (!items.length) {
+    elements.historyBody.innerHTML = '<tr class="empty-row"><td colspan="8">还没有历史任务。</td></tr>';
+    return;
+  }
+
+  for (const item of items) {
+    const stats = item.stats || {};
+    const invalid = (stats.invalid || 0);
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${formatTime(item.startedAt)}</td>
+      <td>${formatTime(item.finishedAt)}</td>
+      <td>${reasonLabel(item.reason)}</td>
+      <td>${stats.sent || 0}</td>
+      <td>${stats.unregistered || 0}</td>
+      <td>${stats.failed || 0}</td>
+      <td>${invalid}</td>
+      <td>${escapeHtml(shortPath(item.sourceFile || '-'))}</td>
+    `;
+    elements.historyBody.appendChild(tr);
+  }
+}
+
+function shortPath(value) {
+  return String(value).split(/[\\/]/).pop();
+}
+
+function formatTime(value) {
+  if (!value) return '-';
+  return new Date(value).toLocaleString();
+}
+
+async function loadHistory() {
+  renderHistory(await window.addWhatsapp.listHistory());
+}
+
+for (const item of elements.navItems) {
+  item.addEventListener('click', () => switchPage(item.dataset.pageTarget));
+}
 elements.importButton.addEventListener('click', importContacts);
 elements.dropImportButton.addEventListener('click', importContacts);
 elements.exportButton.addEventListener('click', exportReport);
 elements.runButton.addEventListener('click', startTask);
 elements.stopButton.addEventListener('click', stopTask);
+elements.saveTemplatesButton.addEventListener('click', saveTemplates);
+elements.refreshHistoryButton.addEventListener('click', loadHistory);
+for (const editor of [elements.templateEn, elements.templateEs, elements.templateFr]) {
+  editor.addEventListener('input', () => {
+    elements.templateSaveState.textContent = '有未保存修改';
+  });
+}
+
 window.addWhatsapp.onTaskEvent(handleTaskEvent);
+window.addWhatsapp.onHistoryUpdated(renderHistory);
+loadTemplates();
+loadHistory();

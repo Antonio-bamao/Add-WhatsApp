@@ -5,9 +5,17 @@ contextBridge.exposeInMainWorld('addWhatsapp', {
   exportReport: rows => ipcRenderer.invoke('report:export', { rows }),
   startTask: config => ipcRenderer.invoke('task:start', config),
   stopTask: () => ipcRenderer.invoke('task:stop'),
+  getTemplates: () => ipcRenderer.invoke('templates:get'),
+  saveTemplates: templates => ipcRenderer.invoke('templates:save', templates),
+  listHistory: () => ipcRenderer.invoke('history:list'),
   onTaskEvent: callback => {
     const listener = (_event, payload) => callback(payload);
     ipcRenderer.on('task:event', listener);
     return () => ipcRenderer.removeListener('task:event', listener);
+  },
+  onHistoryUpdated: callback => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('history:updated', listener);
+    return () => ipcRenderer.removeListener('history:updated', listener);
   }
 });
