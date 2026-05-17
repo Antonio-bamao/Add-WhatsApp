@@ -1,0 +1,33 @@
+# Dependencies
+node_modules/
+
+# WhatsApp Web local session and cache
+.wwebjs_auth/
+.wwebjs_cache/
+
+# Customer/contact data and local run state
+progress.json
+phone_numbers.csv
+numbers.txt
+*.xlsx
+*.xls
+*.csv
+*.log
+qr.txt
+
+# Build output
+dist/
+build/
+out/
+release/
+
+# Local environment
+.env
+.env.*
+
+# OS/editor noise
+Thumbs.db
+Desktop.ini
+.DS_Store
+.vscode/
+.idea/
