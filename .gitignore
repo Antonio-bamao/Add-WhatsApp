@@ -28,7 +28,6 @@ release/
 # OS/editor noise
 Thumbs.db
 Desktop.ini
-!desktop.ini
 .DS_Store
 .vscode/
 .idea/

@@ -1,6 +1,6 @@
 const path = require('path');
 const crypto = require('node:crypto');
-const { app, BrowserWindow, dialog, ipcMain } = require('electron');
+const { app, BrowserWindow, Tray, Menu, dialog, ipcMain } = require('electron');
 const XLSX = require('xlsx');
 const { importContacts } = require('../core/tableImporter');
 const { JsonProgressStore } = require('../core/progressStore');
@@ -10,6 +10,9 @@ const { JsonHistoryStore } = require('../core/historyStore');
 const { createWhatsAppService } = require('./whatsappService');
 
 let mainWindow;
+let tray;
+let isQuitting = false;
+let closeChoiceOpen = false;
 let importedRows = [];
 let importedSource = null;
 let currentTask = null;
@@ -25,19 +28,26 @@ function sendToRenderer(channel, payload) {
 }
 
 function createWindow() {
+  const iconPath = path.join(__dirname, '../../assets/icon.ico');
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 820,
     minWidth: 1040,
     minHeight: 720,
     title: 'Add WhatsApp',
-    icon: path.join(__dirname, '../../assets/icon.ico'),
+    icon: iconPath,
     backgroundColor: '#f6fbf8',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false
     }
+  });
+
+  mainWindow.on('close', event => {
+    if (isQuitting) return;
+    event.preventDefault();
+    showCloseChoice();
   });
 
   mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'));
@@ -49,6 +59,7 @@ app.whenReady().then(() => {
   templateStore = new JsonTemplateStore(path.join(app.getPath('userData'), 'templates.json'));
   historyStore = new JsonHistoryStore(path.join(app.getPath('userData'), 'history', 'runs.json'));
   createWindow();
+  createTray();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -56,8 +67,71 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit();
+  if (isQuitting && process.platform !== 'darwin') app.quit();
 });
+
+function createTray() {
+  const iconPath = path.join(__dirname, '../../assets/icon.ico');
+  tray = new Tray(iconPath);
+  tray.setToolTip('Add WhatsApp');
+  tray.setContextMenu(Menu.buildFromTemplate([
+    {
+      label: '显示主窗口',
+      click: () => {
+        mainWindow.show();
+        mainWindow.focus();
+      }
+    },
+    {
+      label: '完全退出',
+      click: () => quitCompletely()
+    }
+  ]));
+  tray.on('double-click', () => {
+    mainWindow.show();
+    mainWindow.focus();
+  });
+}
+
+async function showCloseChoice() {
+  if (closeChoiceOpen || !mainWindow) return;
+  closeChoiceOpen = true;
+  try {
+    const result = await dialog.showMessageBox(mainWindow, {
+      type: 'question',
+      buttons: ['最小化到托盘', '完全关闭', '取消'],
+      defaultId: 0,
+      cancelId: 2,
+      title: '关闭 Add WhatsApp',
+      message: '你想把软件最小化到托盘，还是完全关闭？',
+      detail: '完全关闭会结束 Add WhatsApp 的所有进程；最小化到托盘会继续保留登录状态和当前窗口。'
+    });
+
+    if (result.response === 0) {
+      mainWindow.hide();
+      return;
+    }
+    if (result.response === 1) {
+      quitCompletely();
+    }
+  } finally {
+    closeChoiceOpen = false;
+  }
+}
+
+async function quitCompletely() {
+  isQuitting = true;
+  try {
+    if (whatsappService) await whatsappService.destroy();
+  } catch {
+    // Ignore shutdown cleanup errors; quitting should still close every process.
+  }
+  if (tray) {
+    tray.destroy();
+    tray = null;
+  }
+  app.quit();
+}
 
 ipcMain.handle('contacts:select-and-import', async () => {
   const result = await dialog.showOpenDialog(mainWindow, {
