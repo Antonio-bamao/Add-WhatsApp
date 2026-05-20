@@ -1,20 +1,22 @@
 const path = require('node:path');
 
-function createWhatsAppSessionConfig(userDataPath, user) {
+function createWhatsAppSessionConfig(userDataPath, user, options = {}) {
   if (!user || !user.accountId) throw new Error('账号缺少 accountId。');
   return {
     accountId: user.accountId,
     sessionPath: path.join(userDataPath, 'accounts', user.accountId, 'whatsapp-session'),
-    clientId: `add-whatsapp-${user.accountId}`
+    clientId: `add-whatsapp-${user.accountId}`,
+    proxyServer: options.proxyServer || null
   };
 }
 
 class WhatsAppSessionManager {
-  constructor({ userDataPath, createService }) {
+  constructor({ userDataPath, createService, proxyServer = null }) {
     if (!userDataPath) throw new Error('userDataPath is required.');
     if (!createService) throw new Error('createService is required.');
     this.userDataPath = userDataPath;
     this.createService = createService;
+    this.proxyServer = proxyServer;
     this.activeAccountId = null;
     this.activeService = null;
   }
@@ -24,7 +26,9 @@ class WhatsAppSessionManager {
       return this.activeService;
     }
     await this.destroy();
-    const config = createWhatsAppSessionConfig(this.userDataPath, user);
+    const config = createWhatsAppSessionConfig(this.userDataPath, user, {
+      proxyServer: this.proxyServer
+    });
     this.activeAccountId = user.accountId;
     this.activeService = this.createService(config);
     return this.activeService;
@@ -32,6 +36,10 @@ class WhatsAppSessionManager {
 
   getService() {
     return this.activeService;
+  }
+
+  setProxyServer(proxyServer) {
+    this.proxyServer = proxyServer || null;
   }
 
   async destroy() {

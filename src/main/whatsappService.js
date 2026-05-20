@@ -11,9 +11,10 @@ function chromeCandidates() {
 }
 
 class WhatsAppService {
-  constructor({ sessionPath, clientId = 'add-whatsapp', emit }) {
+  constructor({ sessionPath, clientId = 'add-whatsapp', proxyServer = null, emit }) {
     this.sessionPath = sessionPath;
     this.clientId = clientId;
+    this.proxyServer = proxyServer;
     this.emit = emit || (() => {});
     this.client = null;
     this.ready = false;
@@ -21,6 +22,8 @@ class WhatsAppService {
 
   createClient() {
     const executablePath = chromeCandidates().find(candidate => require('node:fs').existsSync(candidate));
+    const args = ['--no-sandbox', '--disable-setuid-sandbox', '--window-size=1100,760'];
+    if (this.proxyServer) args.push(`--proxy-server=${this.proxyServer}`);
     this.client = new Client({
       authStrategy: new LocalAuth({
         dataPath: this.sessionPath,
@@ -29,7 +32,7 @@ class WhatsAppService {
       puppeteer: {
         headless: false,
         executablePath,
-        args: ['--no-sandbox', '--disable-setuid-sandbox', '--window-size=1100,760']
+        args
       }
     });
 
@@ -98,7 +101,8 @@ class WhatsAppService {
 function createWhatsAppService(app, emit, config = {}) {
   const sessionPath = config.sessionPath || path.join(app.getPath('userData'), 'whatsapp-session');
   const clientId = config.clientId || 'add-whatsapp';
-  return new WhatsAppService({ sessionPath, clientId, emit });
+  const proxyServer = config.proxyServer || null;
+  return new WhatsAppService({ sessionPath, clientId, proxyServer, emit });
 }
 
 module.exports = {

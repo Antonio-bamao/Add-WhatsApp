@@ -128,7 +128,7 @@
           </button>
           <button class="nav-item" type="button" data-page-target="accountPage">
             <span class="nav-dot"></span>
-            账号与同步
+            设置
           </button>
         </nav>
 
@@ -409,7 +409,7 @@
           </section>
         </section>
 
-        <section id="accountPage" class="page" data-title="管理本地账号、扫码缓存和跨设备同步" data-eyebrow="账号与同步">
+        <section id="accountPage" class="page" data-title="管理本地账号、扫码缓存和跨设备同步" data-eyebrow="设置">
           <section class="account-grid">
             <article class="panel account-panel">
               <div class="panel-head">
@@ -420,6 +420,8 @@
                 <span id="accountNameBadge" class="table-state">-</span>
               </div>
               <div class="account-actions">
+                <button id="openWorkspaceButton" class="button primary" type="button">新建工作台 / 打开另一个账号</button>
+                <button id="proxySettingsButton" class="button ghost" type="button" hidden>IP 设置</button>
                 <button id="logoutButton" class="button danger-button" type="button">退出本地账号</button>
               </div>
             </article>
@@ -474,6 +476,87 @@
           <button id="closeMinimizeButton" class="button primary" type="button">最小化到托盘</button>
           <button id="closeQuitButton" class="button danger-button" type="button">完全关闭</button>
           <button id="closeCancelButton" class="button ghost" type="button">取消</button>
+        </div>
+      </section>
+    </div>
+    <div id="workspaceRiskModal" class="modal-backdrop" hidden>
+      <section class="app-modal" role="dialog" aria-modal="true" aria-labelledby="workspaceRiskTitle">
+        <div class="modal-mark risk-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24">
+            <path d="M12 3a1.2 1.2 0 0 1 1 .6l9 15.6a1.2 1.2 0 0 1-1 1.8H3a1.2 1.2 0 0 1-1-1.8l9-15.6A1.2 1.2 0 0 1 12 3Zm0 4.2a1 1 0 0 0-1 1v4.6a1 1 0 1 0 2 0V8.2a1 1 0 0 0-1-1Zm0 9.6a1.2 1.2 0 1 0 0-2.4 1.2 1.2 0 0 0 0 2.4Z" />
+          </svg>
+        </div>
+        <div>
+          <p class="eyebrow">打开另一个工作台</p>
+          <h3 id="workspaceRiskTitle">先确认风控风险</h3>
+          <p>请注意同个 IP 执行两个 WhatsApp 账号同时自动化运行会更吃 CPU/内存，也更容易触发 WhatsApp 风控。新工作台会使用独立本地数据和独立 WhatsApp 缓存，不会自动开始任务。</p>
+        </div>
+        <div class="modal-actions">
+          <button id="workspaceRiskConfirmButton" class="button primary" type="button">我知道风险，继续打开</button>
+          <button id="workspaceRiskCancelButton" class="button ghost" type="button">取消</button>
+        </div>
+      </section>
+    </div>
+    <div id="proxySettingsModal" class="modal-backdrop" hidden>
+      <section class="app-modal proxy-modal" role="dialog" aria-modal="true" aria-labelledby="proxySettingsTitle">
+        <div class="modal-mark risk-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24">
+            <path d="M12 2 4 5.5v6c0 5.1 3.4 9.7 8 10.5 4.6-.8 8-5.4 8-10.5v-6L12 2Zm0 2.2 6 2.6v4.7c0 3.9-2.4 7.4-6 8.3-3.6-.9-6-4.4-6-8.3V6.8l6-2.6Z" />
+          </svg>
+        </div>
+        <div>
+          <p class="eyebrow">第二工作台代理</p>
+          <h3 id="proxySettingsTitle">IP 设置</h3>
+          <p>保存前会真实检测 SOCKS5 握手和代理出站连接。检测失败不会保存，也不会用于 WhatsApp 自动化浏览器。</p>
+        </div>
+        <form id="proxySettingsForm" class="proxy-form">
+          <label class="field">
+            <span>代理类型</span>
+            <input id="proxyTypeInput" type="hidden" value="socks5" />
+            <div class="readonly-control">Socks5</div>
+          </label>
+          <label class="field">
+            <span>代理主机</span>
+            <input id="proxyHostInput" type="text" placeholder="86.104.162.245" autocomplete="off" />
+          </label>
+          <label class="field">
+            <span>代理端口</span>
+            <input id="proxyPortInput" type="number" min="1" max="65535" placeholder="12324" autocomplete="off" />
+          </label>
+          <label class="field">
+            <span>代理账号</span>
+            <input id="proxyUsernameInput" type="text" autocomplete="off" />
+          </label>
+          <label class="field">
+            <span>代理密码</span>
+            <input id="proxyPasswordInput" type="password" autocomplete="off" />
+          </label>
+          <div class="proxy-inline-field">
+            <span>代理协议</span>
+            <label><input name="proxyIpMode" type="radio" value="speed" /> 速度优先</label>
+            <label><input name="proxyIpMode" type="radio" value="ipv4" checked /> IPv4</label>
+            <label><input name="proxyIpMode" type="radio" value="ipv6" /> IPv6</label>
+          </div>
+          <input id="proxyLookupChannelInput" type="hidden" value="IP2Location" />
+          <div class="proxy-inline-field proxy-option-group">
+            <span>IP 查询渠道</span>
+            <button class="segmented-choice active" type="button" data-proxy-lookup="IP2Location">IP2Location</button>
+            <button class="segmented-choice" type="button" data-proxy-lookup="ip-api">ip-api</button>
+          </div>
+          <label class="toggle-field compact-toggle">
+            <input id="proxyChangeReminderInput" type="checkbox" checked />
+            <span class="toggle-track" aria-hidden="true"></span>
+            <span>
+              <strong>IP 变更提醒</strong>
+              <small>检测通过后保存检测时间，后续可用于提醒你重新检查。</small>
+            </span>
+          </label>
+          <p id="proxySettingsState" class="sync-state">请输入代理信息后点击检查或保存。</p>
+        </form>
+        <div class="modal-actions">
+          <button id="proxyCheckButton" class="button ghost" type="button">检查代理</button>
+          <button id="proxySaveButton" class="button primary" type="button">保存</button>
+          <button id="proxyCancelButton" class="button ghost" type="button">取消</button>
         </div>
       </section>
     </div>

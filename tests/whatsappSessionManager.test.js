@@ -14,6 +14,22 @@ test('creates isolated WhatsApp session paths and client ids per account', () =>
   assert.notEqual(alice.clientId, bob.clientId);
 });
 
+test('passes workspace proxy settings into WhatsApp service config', async () => {
+  const created = [];
+  const manager = new WhatsAppSessionManager({
+    userDataPath: 'C:\\data',
+    proxyServer: 'socks5://186.192.1.1:1080',
+    createService: config => {
+      created.push(config);
+      return { destroy: async () => {} };
+    }
+  });
+
+  await manager.switchToAccount({ accountId: 'acc_a' });
+
+  assert.equal(created[0].proxyServer, 'socks5://186.192.1.1:1080');
+});
+
 test('destroys the active service when switching accounts', async () => {
   const destroyed = [];
   const created = [];

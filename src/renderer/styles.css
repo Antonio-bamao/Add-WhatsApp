@@ -1111,6 +1111,8 @@ td {
   grid-template-columns: 52px minmax(0, 1fr);
   gap: 18px;
   width: min(590px, 100%);
+  max-height: calc(100vh - 48px);
+  overflow: hidden;
   padding: 28px;
   color: var(--ink);
   background: rgba(255, 254, 250, 0.96);
@@ -1133,6 +1135,14 @@ td {
   width: 32px;
   height: 32px;
   fill: #073f38;
+}
+
+.modal-mark.risk-mark {
+  background: #f4d7a1;
+}
+
+.modal-mark.risk-mark svg {
+  fill: #5e4215;
 }
 
 .app-modal h3,
@@ -1161,6 +1171,131 @@ td {
   grid-template-columns: 1fr 1fr auto;
   gap: 12px;
   margin-top: 8px;
+}
+
+.modal-field {
+  grid-column: 1 / -1;
+}
+
+.proxy-modal {
+  width: min(640px, 100%);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+.proxy-form {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 14px;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 6px;
+  overscroll-behavior: contain;
+}
+
+.readonly-control {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 44px;
+  padding: 0 12px;
+  color: var(--ink);
+  background: rgba(246, 242, 234, 0.72);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.proxy-option-group {
+  padding: 10px;
+  background: rgba(246, 242, 234, 0.58);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.segmented-choice {
+  min-height: 36px;
+  padding: 0 14px;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 800;
+  transition: color var(--motion), background-color var(--motion), border-color var(--motion), box-shadow var(--motion);
+}
+
+.segmented-choice:hover,
+.segmented-choice:focus-visible {
+  color: var(--ink);
+  border-color: rgba(18, 140, 126, 0.22);
+  outline: none;
+}
+
+.segmented-choice.active {
+  color: var(--teal-900);
+  background: #dff6ee;
+  border-color: #b9e9dc;
+  box-shadow: 0 8px 20px rgba(18, 140, 126, 0.12);
+}
+
+.proxy-inline-field {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 18px;
+  align-items: center;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.proxy-inline-field label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.compact-toggle {
+  margin-top: 0;
+}
+
+.proxy-modal .modal-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  padding-top: 14px;
+  background: linear-gradient(180deg, rgba(255, 254, 250, 0.7), rgba(255, 254, 250, 0.98));
+  border-top: 1px solid rgba(226, 221, 210, 0.72);
+}
+
+@media (max-height: 760px) {
+  .modal-backdrop {
+    padding: 12px;
+  }
+
+  .app-modal {
+    max-height: calc(100vh - 24px);
+    padding: 22px;
+  }
+
+  .proxy-form {
+    gap: 10px;
+  }
+
+  .proxy-modal .field input,
+  .readonly-control {
+    min-height: 40px;
+  }
+}
+
+.modal-field small {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
 }
 
 .account-grid {

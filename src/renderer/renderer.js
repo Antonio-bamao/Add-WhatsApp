@@ -83,12 +83,30 @@ const elements = {
   closeCancelButton: document.getElementById('closeCancelButton'),
   currentAccountBadge: document.getElementById('currentAccountBadge'),
   accountNameBadge: document.getElementById('accountNameBadge'),
+  openWorkspaceButton: document.getElementById('openWorkspaceButton'),
+  proxySettingsButton: document.getElementById('proxySettingsButton'),
   logoutButton: document.getElementById('logoutButton'),
   clearWhatsAppButton: document.getElementById('clearWhatsAppButton'),
   syncPasswordInput: document.getElementById('syncPasswordInput'),
   exportSyncButton: document.getElementById('exportSyncButton'),
   importSyncButton: document.getElementById('importSyncButton'),
-  syncState: document.getElementById('syncState')
+  syncState: document.getElementById('syncState'),
+  workspaceRiskModal: document.getElementById('workspaceRiskModal'),
+  workspaceRiskConfirmButton: document.getElementById('workspaceRiskConfirmButton'),
+  workspaceRiskCancelButton: document.getElementById('workspaceRiskCancelButton'),
+  proxySettingsModal: document.getElementById('proxySettingsModal'),
+  proxySettingsForm: document.getElementById('proxySettingsForm'),
+  proxyTypeInput: document.getElementById('proxyTypeInput'),
+  proxyHostInput: document.getElementById('proxyHostInput'),
+  proxyPortInput: document.getElementById('proxyPortInput'),
+  proxyUsernameInput: document.getElementById('proxyUsernameInput'),
+  proxyPasswordInput: document.getElementById('proxyPasswordInput'),
+  proxyLookupChannelInput: document.getElementById('proxyLookupChannelInput'),
+  proxyChangeReminderInput: document.getElementById('proxyChangeReminderInput'),
+  proxySettingsState: document.getElementById('proxySettingsState'),
+  proxyCheckButton: document.getElementById('proxyCheckButton'),
+  proxySaveButton: document.getElementById('proxySaveButton'),
+  proxyCancelButton: document.getElementById('proxyCancelButton')
 };
 
 const PAGE_ACTIONS = new Set(['importPage']);
@@ -123,10 +141,24 @@ function applyAuthState(auth) {
   const username = authenticated ? state.auth.user.username : '未登录';
   elements.currentAccountBadge.textContent = username;
   elements.accountNameBadge.textContent = username;
+  const isSecondaryWorkspace = Boolean(state.auth.workspace && state.auth.workspace.isSecondary);
+  elements.openWorkspaceButton.hidden = isSecondaryWorkspace;
+  elements.proxySettingsButton.hidden = !isSecondaryWorkspace;
+  if (isSecondaryWorkspace) {
+    const proxy = state.auth.workspace.proxy;
+    elements.syncState.textContent = proxy ? proxyStatusText(proxy) : '当前是独立工作台。请先通过 IP 设置保存可用 SOCKS5 代理，再开始任务。';
+  }
   if (!authenticated) {
     state.imported = null;
     elements.recoveryBox.hidden = !state.pendingRecovery;
   }
+}
+
+function proxyStatusText(proxy) {
+  const exitIp = proxy.lastExitIp || proxy.baselineIp;
+  const checkedAt = proxy.lastCheckedAt ? formatTime(proxy.lastCheckedAt) : '尚未复查';
+  const error = proxy.lastProxyError ? `，上次异常：${proxy.lastProxyError}` : '';
+  return `当前是独立工作台，代理：${proxy.proxyServer}${exitIp ? `，出口 IP：${exitIp}` : ''}，检测：${checkedAt}${error}`;
 }
 
 async function handleLogin(event) {
@@ -206,6 +238,111 @@ async function logoutAccount() {
   }
   applyAuthState({ authenticated: false, user: null });
   switchAuthMode('login');
+}
+
+function showWorkspaceRiskModal() {
+  elements.workspaceRiskModal.hidden = false;
+  elements.workspaceRiskConfirmButton.focus();
+}
+
+function hideWorkspaceRiskModal() {
+  elements.workspaceRiskModal.hidden = true;
+}
+
+async function openAnotherWorkspace() {
+  elements.workspaceRiskConfirmButton.disabled = true;
+  const response = await window.addWhatsapp.openAnotherWorkspace({});
+  elements.workspaceRiskConfirmButton.disabled = false;
+  if (!response.ok) {
+    elements.syncState.textContent = response.error || '打开新工作台失败。';
+    return;
+  }
+  hideWorkspaceRiskModal();
+  elements.syncState.textContent = response.ok
+    ? '已打开独立工作台。请在新窗口登录另一个本地账号，任务不会自动开始。'
+    : (response.error || '打开新工作台失败。');
+}
+
+function proxyFormPayload() {
+  const mode = [...document.querySelectorAll('[name="proxyIpMode"]')].find(item => item.checked);
+  return {
+    type: elements.proxyTypeInput.value,
+    host: elements.proxyHostInput.value,
+    port: elements.proxyPortInput.value,
+    username: elements.proxyUsernameInput.value,
+    password: elements.proxyPasswordInput.value,
+    ipMode: mode ? mode.value : 'ipv4',
+    lookupChannel: elements.proxyLookupChannelInput.value,
+    changeReminder: elements.proxyChangeReminderInput.checked
+  };
+}
+
+function setProxyLookupChannel(value) {
+  const channel = value || 'IP2Location';
+  elements.proxyLookupChannelInput.value = channel;
+  for (const button of document.querySelectorAll('[data-proxy-lookup]')) {
+    button.classList.toggle('active', button.dataset.proxyLookup === channel);
+  }
+}
+
+function fillProxyForm(proxy) {
+  elements.proxyTypeInput.value = 'socks5';
+  elements.proxyHostInput.value = proxy ? proxy.host : '';
+  elements.proxyPortInput.value = proxy ? proxy.port : '';
+  elements.proxyUsernameInput.value = proxy ? proxy.username || '' : '';
+  elements.proxyPasswordInput.value = '';
+  setProxyLookupChannel(proxy ? proxy.lookupChannel || 'IP2Location' : 'IP2Location');
+  elements.proxyChangeReminderInput.checked = proxy ? proxy.changeReminder !== false : true;
+  for (const item of document.querySelectorAll('[name="proxyIpMode"]')) {
+    item.checked = item.value === (proxy ? proxy.ipMode || 'ipv4' : 'ipv4');
+  }
+  if (!proxy) {
+    elements.proxySettingsState.textContent = '请输入代理信息后点击检查或保存。';
+  } else if (proxy.hasPassword) {
+    elements.proxySettingsState.textContent = `已加载已保存代理。密码已保存但不回显，出口 IP：${proxy.lastExitIp || proxy.baselineIp || '未记录'}。`;
+  } else {
+    elements.proxySettingsState.textContent = `已加载已保存代理，出口 IP：${proxy.lastExitIp || proxy.baselineIp || '未记录'}。`;
+  }
+}
+
+async function showProxySettings() {
+  const response = await window.addWhatsapp.getProxySettings();
+  if (response.ok) {
+    fillProxyForm(response.proxy);
+    elements.proxySettingsModal.hidden = false;
+    elements.proxyHostInput.focus();
+  } else {
+    elements.syncState.textContent = response.error || '主工作台不提供 IP 设置。';
+  }
+}
+
+function hideProxySettings() {
+  elements.proxySettingsModal.hidden = true;
+}
+
+async function testProxySettings() {
+  elements.proxyCheckButton.disabled = true;
+  elements.proxySettingsState.textContent = '正在检测 SOCKS5 代理和出口 IP...';
+  const response = await window.addWhatsapp.testProxySettings(proxyFormPayload());
+  elements.proxyCheckButton.disabled = false;
+  elements.proxySettingsState.textContent = response.ok
+    ? `检测通过：${response.result.proxyServer}，出口 IP：${response.result.exitIp || '未返回'}`
+    : (response.error || '代理检测失败。');
+  return response;
+}
+
+async function saveProxySettings() {
+  elements.proxySaveButton.disabled = true;
+  elements.proxySettingsState.textContent = '正在检测出口 IP 并保存代理...';
+  const response = await window.addWhatsapp.saveProxySettings(proxyFormPayload());
+  elements.proxySaveButton.disabled = false;
+  if (!response.ok) {
+    elements.proxySettingsState.textContent = response.error || '代理保存失败。';
+    return;
+  }
+  state.auth.workspace.proxy = response.proxy;
+  elements.syncState.textContent = `代理已保存并检测通过：${response.proxy.proxyServer}，出口 IP 基线：${response.proxy.baselineIp || response.result.exitIp || '未记录'}`;
+  hideProxySettings();
 }
 
 async function clearWhatsAppSession() {
@@ -470,6 +607,7 @@ function taskEventMessage(event) {
     'auth:failure': event.message,
     'auth:disconnected': event.message,
     'task:stopping': event.message,
+    'task:proxy-error': event.message,
     'row:start': `正在处理第 ${event.row.rowNumber} 行：${event.row.e164 || event.row.rawPhone || ''}`,
     'row:invalid': `第 ${event.row.rowNumber} 行跳过：${statusLabel(event.row.status)}`,
     'row:unregistered': `第 ${event.row.rowNumber} 行未注册 WhatsApp，已跳过。`,
@@ -498,6 +636,10 @@ function handleTaskEvent(event) {
   if (event.type === 'auth:ready') {
     elements.taskState.textContent = '运行中';
     elements.taskStateMetric.textContent = '运行中';
+  }
+  if (event.type === 'task:proxy-error') {
+    elements.taskState.textContent = '代理异常';
+    elements.taskStateMetric.textContent = '正在停下';
   }
   if (event.type === 'row:sent') state.taskStats.sent += 1;
   if (event.type === 'row:unregistered') state.taskStats.unregistered += 1;
@@ -768,15 +910,33 @@ elements.refreshHistoryButton.addEventListener('click', loadHistory);
 elements.closeMinimizeButton.addEventListener('click', () => handleCloseChoice('minimize'));
 elements.closeQuitButton.addEventListener('click', () => handleCloseChoice('quit'));
 elements.closeCancelButton.addEventListener('click', () => handleCloseChoice('cancel'));
+elements.openWorkspaceButton.addEventListener('click', showWorkspaceRiskModal);
+elements.proxySettingsButton.addEventListener('click', showProxySettings);
 elements.logoutButton.addEventListener('click', logoutAccount);
 elements.clearWhatsAppButton.addEventListener('click', clearWhatsAppSession);
 elements.exportSyncButton.addEventListener('click', exportSyncPackage);
 elements.importSyncButton.addEventListener('click', importSyncPackage);
+elements.workspaceRiskConfirmButton.addEventListener('click', openAnotherWorkspace);
+elements.workspaceRiskCancelButton.addEventListener('click', hideWorkspaceRiskModal);
+elements.workspaceRiskModal.addEventListener('click', event => {
+  if (event.target === elements.workspaceRiskModal) hideWorkspaceRiskModal();
+});
+elements.proxyCheckButton.addEventListener('click', testProxySettings);
+elements.proxySaveButton.addEventListener('click', saveProxySettings);
+elements.proxyCancelButton.addEventListener('click', hideProxySettings);
+for (const button of document.querySelectorAll('[data-proxy-lookup]')) {
+  button.addEventListener('click', () => setProxyLookupChannel(button.dataset.proxyLookup));
+}
+elements.proxySettingsModal.addEventListener('click', event => {
+  if (event.target === elements.proxySettingsModal) hideProxySettings();
+});
 elements.closeModal.addEventListener('click', event => {
   if (event.target === elements.closeModal) handleCloseChoice('cancel');
 });
 window.addEventListener('keydown', event => {
   if (event.key === 'Escape' && !elements.closeModal.hidden) handleCloseChoice('cancel');
+  if (event.key === 'Escape' && !elements.workspaceRiskModal.hidden) hideWorkspaceRiskModal();
+  if (event.key === 'Escape' && !elements.proxySettingsModal.hidden) hideProxySettings();
 });
 for (const tab of elements.templateTabs) {
   tab.addEventListener('click', () => switchTemplateLanguage(tab.dataset.templateTab));

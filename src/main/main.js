@@ -1,6 +1,7 @@
 const path = require('path');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
+const { spawn } = require('node:child_process');
 const { app, BrowserWindow, Tray, Menu, dialog, ipcMain } = require('electron');
 const XLSX = require('xlsx');
 const { importContacts } = require('../core/tableImporter');
@@ -16,6 +17,31 @@ const { JsonTemplateStore } = require('../core/templateStore');
 const { JsonHistoryStore } = require('../core/historyStore');
 const { createWhatsAppService } = require('./whatsappService');
 const { WhatsAppSessionManager } = require('./whatsappSessionManager');
+const { LocalProxyBridge } = require('./proxyBridge');
+const {
+  JsonProxySettingsStore,
+  buildProxyServer,
+  lookupExitIpViaSocks5,
+  normalizeProxySettings,
+  publicProxySettings,
+  testSocks5Proxy
+} = require('./proxySettings');
+const { ProxyMonitor } = require('./proxyMonitor');
+const {
+  createWorkspaceId,
+  normalizeProxyServer,
+  parseWorkspaceId,
+  parseWorkspaceProxy,
+  workspaceLaunchArgs,
+  workspaceUserDataPath
+} = require('./workspaceProfiles');
+
+const PROXY_MONITOR_INTERVAL_MS = 5 * 60 * 1000;
+const workspaceId = parseWorkspaceId(process.argv);
+const workspaceProxyServer = parseWorkspaceProxy(process.argv);
+if (workspaceId) {
+  app.setPath('userData', workspaceUserDataPath(app.getPath('appData'), workspaceId));
+}
 
 let mainWindow;
 let tray;
@@ -29,10 +55,13 @@ let stopRequested = false;
 let authStore = null;
 let accountContext = null;
 let syncPackageStore = null;
+let proxySettingsStore = null;
 let whatsappSessionManager = null;
 let templateStore = null;
 let historyStore = null;
 let activeRun = null;
+let proxyMonitorTimer = null;
+let activeProxyBridge = null;
 
 function sendToRenderer(channel, payload) {
   if (mainWindow && !mainWindow.isDestroyed()) {
@@ -79,8 +108,10 @@ app.whenReady().then(() => {
   });
   accountContext = new AccountContext({ userDataPath });
   syncPackageStore = new SyncPackageStore();
+  proxySettingsStore = new JsonProxySettingsStore(path.join(userDataPath, 'settings', 'proxy.json'));
   whatsappSessionManager = new WhatsAppSessionManager({
     userDataPath,
+    proxyServer: workspaceProxyServer,
     createService: config => createWhatsAppService(app, event => sendToRenderer('task:event', event), config)
   });
   restoreAuthenticatedSession();
@@ -135,13 +166,23 @@ function authState() {
     return {
       hasUsers: authStore.listUsers().length > 0,
       authenticated: Boolean(user),
-      user
+      user,
+      workspace: {
+        id: workspaceId,
+        isSecondary: Boolean(workspaceId),
+        proxy: workspaceId ? publicProxySettings(proxySettingsStore.load()) : null
+      }
     };
   } catch (error) {
     return {
       hasUsers: false,
       authenticated: false,
       user: null,
+      workspace: {
+        id: workspaceId,
+        isSecondary: Boolean(workspaceId),
+        proxy: workspaceId && proxySettingsStore ? publicProxySettings(proxySettingsStore.load()) : null
+      },
       error: error.message
     };
   }
@@ -204,6 +245,7 @@ async function quitCompletely() {
   }
   try {
     if (whatsappSessionManager) await whatsappSessionManager.destroy();
+    await stopActiveProxyBridge();
   } catch {
     // Ignore shutdown cleanup errors; quitting should still close every process.
   }
@@ -313,6 +355,145 @@ ipcMain.handle('auth:clear-whatsapp-session', async () => {
   }
 });
 
+ipcMain.handle('workspace:open-another-account', async (_event, payload = {}) => {
+  try {
+    if (workspaceId) {
+      return { ok: false, error: '独立工作台里不能继续打开新的工作台。' };
+    }
+    const nextWorkspaceId = createWorkspaceId();
+    const args = workspaceLaunchArgs({
+      isPackaged: app.isPackaged,
+      appPath: app.getAppPath(),
+      workspaceId: nextWorkspaceId
+    });
+    const child = spawn(process.execPath, args, {
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: false
+    });
+    child.unref();
+    return {
+      ok: true,
+      workspaceId: nextWorkspaceId
+    };
+  } catch (error) {
+    return { ok: false, error: error.message };
+  }
+});
+
+function requireSecondaryWorkspace() {
+  if (!workspaceId) throw new Error('主工作台默认使用当前电脑/VPN 网络，不提供 IP 代理设置。');
+}
+
+async function probeSocks5Proxy(settings) {
+  const result = await testSocks5Proxy(settings);
+  const exitIp = await lookupExitIpViaSocks5(settings);
+  return {
+    ...result,
+    exitIp
+  };
+}
+
+function createProxyMonitor() {
+  return new ProxyMonitor({
+    loadSettings: () => proxySettingsStore.load(),
+    saveSettings: settings => proxySettingsStore.save(settings),
+    testProxy: probeSocks5Proxy
+  });
+}
+
+async function stopActiveProxyBridge() {
+  if (!activeProxyBridge) return;
+  const bridge = activeProxyBridge;
+  activeProxyBridge = null;
+  await bridge.stop();
+}
+
+async function browserProxyServerForSettings(settings) {
+  await stopActiveProxyBridge();
+  activeProxyBridge = new LocalProxyBridge(settings);
+  return activeProxyBridge.start();
+}
+
+async function checkSecondaryProxyReady() {
+  if (!workspaceId) return { ok: true };
+  const monitor = createProxyMonitor();
+  const result = await monitor.checkNow();
+  if (!result.ok) return result;
+  const settings = proxySettingsStore.load();
+  const browserProxyServer = await browserProxyServerForSettings(settings);
+  whatsappSessionManager.setProxyServer(browserProxyServer);
+  await whatsappSessionManager.destroy();
+  return result;
+}
+
+function startProxyMonitorForRunningTask() {
+  if (!workspaceId) return;
+  if (proxyMonitorTimer) clearInterval(proxyMonitorTimer);
+  const monitor = createProxyMonitor();
+  proxyMonitorTimer = setInterval(async () => {
+    if (!currentTask || stopRequested) return;
+    const result = await monitor.checkNow();
+    if (result.ok) {
+      sendToRenderer('auth:changed', authState());
+      return;
+    }
+    stopRequested = true;
+    sendToRenderer('task:event', {
+      type: 'task:proxy-error',
+      message: `代理异常，已请求暂停，当前号码处理完后会停下：${result.error}`,
+      result
+    });
+    sendToRenderer('auth:changed', authState());
+  }, PROXY_MONITOR_INTERVAL_MS);
+}
+
+function stopProxyMonitorForRunningTask() {
+  if (!proxyMonitorTimer) return;
+  clearInterval(proxyMonitorTimer);
+  proxyMonitorTimer = null;
+}
+
+ipcMain.handle('proxy:get', async () => {
+  try {
+    requireSecondaryWorkspace();
+    return { ok: true, proxy: publicProxySettings(proxySettingsStore.load()) };
+  } catch (error) {
+    return { ok: false, error: error.message };
+  }
+});
+
+ipcMain.handle('proxy:test', async (_event, payload = {}) => {
+  try {
+    requireSecondaryWorkspace();
+    const settings = normalizeProxySettings(payload);
+    const result = await probeSocks5Proxy(settings);
+    return { ok: true, result };
+  } catch (error) {
+    return { ok: false, error: error.message };
+  }
+});
+
+ipcMain.handle('proxy:save', async (_event, payload = {}) => {
+  try {
+    requireSecondaryWorkspace();
+    const settings = normalizeProxySettings(payload);
+    const testResult = await probeSocks5Proxy(settings);
+    const saved = proxySettingsStore.save({
+      ...settings,
+      baselineIp: testResult.exitIp,
+      lastExitIp: testResult.exitIp,
+      lastCheckedAt: testResult.checkedAt,
+      lastProxyError: null
+    });
+    await whatsappSessionManager.destroy();
+    await stopActiveProxyBridge();
+    return { ok: true, proxy: publicProxySettings(saved), result: testResult };
+  } catch (error) {
+    return { ok: false, error: error.message };
+  }
+});
+
 ipcMain.handle('contacts:select-and-import', async (_event, options = {}) => {
   try {
     requireAuthenticated();
@@ -398,6 +579,16 @@ ipcMain.handle('task:start', async (_event, config) => {
   } catch (error) {
     return { started: false, ...protectedError(error) };
   }
+  if (workspaceId) {
+    try {
+      const proxyCheck = await checkSecondaryProxyReady();
+      if (!proxyCheck.ok) {
+        return { started: false, error: `第二工作台代理检测失败：${proxyCheck.error}` };
+      }
+    } catch (error) {
+      return { started: false, error: `第二工作台代理检测失败：${error.message}` };
+    }
+  }
   if (currentTask) {
     return { started: false, error: '已有任务正在运行。' };
   }
@@ -454,6 +645,7 @@ async function runTask(config) {
   historyStore.upsert(activeRun);
   sendToRenderer('history:updated', historyStore.list());
   try {
+    startProxyMonitorForRunningTask();
     sendToRenderer('task:event', { type: 'task:starting', message: '正在连接 WhatsApp...' });
     const whatsappService = await whatsappSessionManager.switchToAccount(accountContext.requireCurrentUser());
     const client = await whatsappService.ensureReady();
@@ -506,6 +698,7 @@ async function runTask(config) {
     });
     sendToRenderer('history:updated', history);
   } finally {
+    stopProxyMonitorForRunningTask();
     currentTask = null;
     stopRequested = false;
     activeRun = null;
