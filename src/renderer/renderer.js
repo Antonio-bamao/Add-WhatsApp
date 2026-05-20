@@ -1,4 +1,6 @@
 const state = {
+  auth: { authenticated: false, user: null },
+  pendingRecovery: null,
   imported: null,
   templates: { en: [], es: [], fr: [] },
   taskStats: { sent: 0, failed: 0, unregistered: 0, invalid: 0 },
@@ -6,6 +8,24 @@ const state = {
 };
 
 const elements = {
+  authGate: document.getElementById('authGate'),
+  appShell: document.getElementById('appShell'),
+  authTabs: [...document.querySelectorAll('[data-auth-mode]')],
+  authForms: [...document.querySelectorAll('[data-auth-form]')],
+  loginForm: document.getElementById('loginForm'),
+  loginUsername: document.getElementById('loginUsername'),
+  loginPassword: document.getElementById('loginPassword'),
+  registerForm: document.getElementById('registerForm'),
+  registerUsername: document.getElementById('registerUsername'),
+  registerPassword: document.getElementById('registerPassword'),
+  resetForm: document.getElementById('resetForm'),
+  resetUsername: document.getElementById('resetUsername'),
+  resetRecoveryCode: document.getElementById('resetRecoveryCode'),
+  resetPassword: document.getElementById('resetPassword'),
+  recoveryBox: document.getElementById('recoveryBox'),
+  recoveryCodeText: document.getElementById('recoveryCodeText'),
+  downloadRecoveryButton: document.getElementById('downloadRecoveryButton'),
+  authMessage: document.getElementById('authMessage'),
   pageEyebrow: document.getElementById('pageEyebrow'),
   pageTitle: document.getElementById('pageTitle'),
   topbarActions: document.querySelector('.topbar-actions'),
@@ -13,11 +33,13 @@ const elements = {
   pages: [...document.querySelectorAll('.page')],
   importButton: document.getElementById('importButton'),
   dropImportButton: document.getElementById('dropImportButton'),
+  skipChinaNumbersToggle: document.getElementById('skipChinaNumbersToggle'),
   exportButton: document.getElementById('exportButton'),
   fileMeta: document.getElementById('fileMeta'),
   totalCount: document.getElementById('totalCount'),
   validCount: document.getElementById('validCount'),
   pendingCount: document.getElementById('pendingCount'),
+  chinaSkippedCount: document.getElementById('chinaSkippedCount'),
   blockedCount: document.getElementById('blockedCount'),
   enCount: document.getElementById('enCount'),
   esCount: document.getElementById('esCount'),
@@ -58,22 +80,170 @@ const elements = {
   closeModalDetail: document.getElementById('closeModalDetail'),
   closeMinimizeButton: document.getElementById('closeMinimizeButton'),
   closeQuitButton: document.getElementById('closeQuitButton'),
-  closeCancelButton: document.getElementById('closeCancelButton')
+  closeCancelButton: document.getElementById('closeCancelButton'),
+  currentAccountBadge: document.getElementById('currentAccountBadge'),
+  accountNameBadge: document.getElementById('accountNameBadge'),
+  logoutButton: document.getElementById('logoutButton'),
+  clearWhatsAppButton: document.getElementById('clearWhatsAppButton'),
+  syncPasswordInput: document.getElementById('syncPasswordInput'),
+  exportSyncButton: document.getElementById('exportSyncButton'),
+  importSyncButton: document.getElementById('importSyncButton'),
+  syncState: document.getElementById('syncState')
 };
 
 const PAGE_ACTIONS = new Set(['importPage']);
+const IMPORT_OPTIONS_STORAGE_KEY = 'addWhatsapp.importOptions';
 const TEMPLATE_META = {
   en: { title: '英语模板', description: '英语区号码随机选择这些文案。', badge: 'EN' },
   es: { title: '西班牙语模板', description: '西班牙、墨西哥和拉美号码随机选择这些文案。', badge: 'ES' },
   fr: { title: '法语模板', description: '法国和法语区号码随机选择这些文案。', badge: 'FR' }
 };
 
+function switchAuthMode(mode) {
+  for (const tab of elements.authTabs) {
+    tab.classList.toggle('active', tab.dataset.authMode === mode);
+  }
+  for (const form of elements.authForms) {
+    form.classList.toggle('active', form.dataset.authForm === mode);
+  }
+  elements.authMessage.textContent = '';
+}
+
+function setAuthMessage(message, tone = '') {
+  elements.authMessage.textContent = message || '';
+  elements.authMessage.classList.toggle('error', tone === 'error');
+  elements.authMessage.classList.toggle('strong', tone === 'strong');
+}
+
+function applyAuthState(auth) {
+  state.auth = auth || { authenticated: false, user: null };
+  const authenticated = Boolean(state.auth.authenticated && state.auth.user);
+  elements.authGate.hidden = authenticated;
+  elements.appShell.hidden = !authenticated;
+  const username = authenticated ? state.auth.user.username : '未登录';
+  elements.currentAccountBadge.textContent = username;
+  elements.accountNameBadge.textContent = username;
+  if (!authenticated) {
+    state.imported = null;
+    elements.recoveryBox.hidden = !state.pendingRecovery;
+  }
+}
+
+async function handleLogin(event) {
+  event.preventDefault();
+  const response = await window.addWhatsapp.loginAccount({
+    username: elements.loginUsername.value,
+    password: elements.loginPassword.value
+  });
+  if (!response.ok) {
+    setAuthMessage(response.error || '登录失败。', 'error');
+    return;
+  }
+  applyAuthState({ authenticated: true, user: response.user });
+  await loadAuthenticatedWorkspace();
+}
+
+async function handleRegister(event) {
+  event.preventDefault();
+  const response = await window.addWhatsapp.registerAccount({
+    username: elements.registerUsername.value,
+    password: elements.registerPassword.value
+  });
+  if (!response.ok) {
+    setAuthMessage(response.error || '注册失败。', 'error');
+    return;
+  }
+  state.pendingRecovery = {
+    username: response.user.username,
+    accountId: response.user.accountId,
+    recoveryCode: response.recoveryCode
+  };
+  elements.recoveryCodeText.textContent = response.recoveryCode;
+  elements.recoveryBox.hidden = false;
+  setAuthMessage('账号已注册。请先下载恢复信息，再继续使用。', 'strong');
+  applyAuthState({ authenticated: true, user: response.user });
+  await loadAuthenticatedWorkspace();
+}
+
+async function handleResetPassword(event) {
+  event.preventDefault();
+  const response = await window.addWhatsapp.resetPassword({
+    username: elements.resetUsername.value,
+    recoveryCode: elements.resetRecoveryCode.value,
+    newPassword: elements.resetPassword.value
+  });
+  if (!response.ok) {
+    setAuthMessage(response.error || '重置失败。', 'error');
+    return;
+  }
+  state.pendingRecovery = {
+    username: response.user.username,
+    accountId: response.user.accountId,
+    recoveryCode: response.recoveryCode
+  };
+  elements.recoveryCodeText.textContent = response.recoveryCode;
+  elements.recoveryBox.hidden = false;
+  switchAuthMode('login');
+  setAuthMessage('密码已重置。新的恢复码已生成，请下载保存。', 'strong');
+}
+
+async function downloadRecovery() {
+  if (!state.pendingRecovery) return;
+  const response = await window.addWhatsapp.downloadRecovery(state.pendingRecovery);
+  if (!response.ok) {
+    setAuthMessage(response.error || '下载失败。', 'error');
+    return;
+  }
+  setAuthMessage(`恢复信息已保存到桌面：${shortPath(response.filePath)}`, 'strong');
+  elements.recoveryBox.hidden = true;
+}
+
+async function logoutAccount() {
+  const response = await window.addWhatsapp.logoutAccount();
+  if (!response.ok) {
+    elements.syncState.textContent = response.error || '退出失败。';
+    return;
+  }
+  applyAuthState({ authenticated: false, user: null });
+  switchAuthMode('login');
+}
+
+async function clearWhatsAppSession() {
+  const response = await window.addWhatsapp.clearWhatsAppSession();
+  elements.syncState.textContent = response.ok
+    ? '当前账号的 WhatsApp 缓存已清除，下次任务会重新扫码。'
+    : (response.error || '清除失败。');
+}
+
+async function exportSyncPackage() {
+  const password = elements.syncPasswordInput.value;
+  const response = await window.addWhatsapp.exportSyncPackage(password);
+  if (response.canceled) return;
+  elements.syncState.textContent = response.ok
+    ? `同步包已导出：${shortPath(response.filePath)}`
+    : (response.error || '导出失败。');
+}
+
+async function importSyncPackage() {
+  const password = elements.syncPasswordInput.value;
+  const response = await window.addWhatsapp.importSyncPackage(password);
+  if (response.canceled) return;
+  elements.syncState.textContent = response.ok
+    ? `同步包已导入：历史 ${response.historyImported || 0} 条，进度 ${response.progressImported || 0} 份。`
+    : (response.error || '导入失败。');
+  if (response.ok) {
+    await loadHistory();
+    await refreshCurrentProgress();
+  }
+}
+
 function statusLabel(status) {
   const labels = {
     valid: '有效',
     pending: '待确认',
     invalid: '无效',
-    duplicate: '重复'
+    duplicate: '重复',
+    'china-skipped': '中国号码'
   };
   return labels[status] || status;
 }
@@ -101,8 +271,38 @@ function reasonLabel(reason) {
   return labels[reason] || reason || '-';
 }
 
+function rowErrorLabel(error) {
+  const labels = {
+    'china-number-skipped': '中国号码已排除',
+    'missing-phone': '缺少电话',
+    'country-required': '需要国家确认',
+    'ambiguous-or-invalid-for-country': '号码与国家不匹配',
+    'unparseable-phone': '无法解析'
+  };
+  return labels[error] || error || '-';
+}
+
 function setText(key, value) {
   elements[key].textContent = String(value);
+}
+
+function getImportOptions() {
+  return {
+    skipChinaNumbers: elements.skipChinaNumbersToggle.checked
+  };
+}
+
+function saveImportOptions() {
+  localStorage.setItem(IMPORT_OPTIONS_STORAGE_KEY, JSON.stringify(getImportOptions()));
+}
+
+function loadImportOptions() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(IMPORT_OPTIONS_STORAGE_KEY) || '{}');
+    elements.skipChinaNumbersToggle.checked = saved.skipChinaNumbers !== false;
+  } catch {
+    elements.skipChinaNumbersToggle.checked = true;
+  }
 }
 
 function switchPage(pageId) {
@@ -124,6 +324,7 @@ function renderStats(stats) {
   setText('totalCount', stats.total || 0);
   setText('validCount', stats.valid || 0);
   setText('pendingCount', stats.pending || 0);
+  setText('chinaSkippedCount', stats.chinaNumbers || stats.chinaSkipped || 0);
   setText('blockedCount', blocked);
   setText('enCount', stats.languages.en || 0);
   setText('esCount', stats.languages.es || 0);
@@ -171,7 +372,7 @@ function renderRows(rows) {
       <td>${escapeHtml(row.countryIso || '-')}</td>
       <td>${languageLabel(row.language)}</td>
       <td><span class="status-tag status-${row.status}">${statusLabel(row.status)}</span></td>
-      <td>${escapeHtml(row.error || '-')}</td>
+      <td>${escapeHtml(rowErrorLabel(row.error))}</td>
     `;
     elements.previewBody.appendChild(tr);
   }
@@ -191,7 +392,8 @@ async function importContacts() {
   elements.dropImportButton.disabled = true;
   elements.fileMeta.textContent = '正在读取表格并解析号码...';
 
-  const response = await window.addWhatsapp.importContacts();
+  saveImportOptions();
+  const response = await window.addWhatsapp.importContacts(getImportOptions());
 
   elements.importButton.disabled = false;
   elements.dropImportButton.disabled = false;
@@ -209,11 +411,19 @@ async function importContacts() {
   }
 
   applyImportedData(response.data);
-  addLog(`已导入 ${response.data.fileName}，有效号码 ${response.data.stats.valid || 0} 个。`, 'strong');
+  const chinaCount = response.data.stats.chinaNumbers || response.data.stats.chinaSkipped || 0;
+  const chinaMode = response.data.importOptions && response.data.importOptions.skipChinaNumbers === false
+    ? `中国号码 ${chinaCount} 个已加入队列。`
+    : `中国号码 ${chinaCount} 个已排除。`;
+  addLog(`已导入 ${response.data.fileName}，有效号码 ${response.data.stats.valid || 0} 个，${chinaMode}`, 'strong');
 }
 
 function applyImportedData(data) {
   state.imported = data;
+  if (data.importOptions) {
+    elements.skipChinaNumbersToggle.checked = data.importOptions.skipChinaNumbers !== false;
+    saveImportOptions();
+  }
   renderStats(data.stats);
   renderRows(data.rows);
   renderProgressSummary(data.progress);
@@ -343,7 +553,11 @@ async function startTask() {
     elements.taskStateMetric.textContent = '待机';
     elements.runButton.disabled = false;
     addLog(response.error || '任务启动失败。', 'error');
+    return;
   }
+
+  elements.runButton.disabled = true;
+  elements.stopButton.disabled = false;
 }
 
 async function stopTask() {
@@ -442,7 +656,12 @@ function renderTemplates(templates) {
 }
 
 async function loadTemplates() {
-  renderTemplates(await window.addWhatsapp.getTemplates());
+  if (!state.auth.authenticated) return;
+  try {
+    renderTemplates(await window.addWhatsapp.getTemplates());
+  } catch (error) {
+    addLog(error.message || '模板加载失败。', 'error');
+  }
 }
 
 async function saveTemplates() {
@@ -490,16 +709,30 @@ function formatTime(value) {
 }
 
 async function loadHistory() {
+  if (!state.auth.authenticated) return;
   renderHistory(await window.addWhatsapp.listHistory());
+}
+
+async function loadAuthenticatedWorkspace(bootstrap = null) {
+  const data = bootstrap || await window.addWhatsapp.getBootstrapState();
+  if (data.auth) applyAuthState(data.auth);
+  if (!state.auth.authenticated) return;
+  if (data.imported) {
+    applyImportedData(data.imported);
+    addLog(`已恢复上次表格 ${data.imported.fileName}，可从记录位置继续。`, 'strong');
+  }
+  if (data.history) renderHistory(data.history);
+  await loadTemplates();
 }
 
 async function bootstrapApp() {
   const bootstrap = await window.addWhatsapp.getBootstrapState();
-  if (bootstrap.imported) {
-    applyImportedData(bootstrap.imported);
-    addLog(`已恢复上次表格 ${bootstrap.imported.fileName}，可从记录位置继续。`, 'strong');
+  applyAuthState(bootstrap.auth);
+  if (bootstrap.auth && bootstrap.auth.error) {
+    setAuthMessage(bootstrap.auth.error, 'error');
+    return;
   }
-  if (bootstrap.history) renderHistory(bootstrap.history);
+  await loadAuthenticatedWorkspace(bootstrap);
 }
 
 function showCloseModal(payload = {}) {
@@ -518,6 +751,13 @@ async function handleCloseChoice(action) {
 for (const item of elements.navItems) {
   item.addEventListener('click', () => switchPage(item.dataset.pageTarget));
 }
+for (const tab of elements.authTabs) {
+  tab.addEventListener('click', () => switchAuthMode(tab.dataset.authMode));
+}
+elements.loginForm.addEventListener('submit', handleLogin);
+elements.registerForm.addEventListener('submit', handleRegister);
+elements.resetForm.addEventListener('submit', handleResetPassword);
+elements.downloadRecoveryButton.addEventListener('click', downloadRecovery);
 elements.importButton.addEventListener('click', importContacts);
 elements.dropImportButton.addEventListener('click', importContacts);
 elements.exportButton.addEventListener('click', exportReport);
@@ -528,6 +768,10 @@ elements.refreshHistoryButton.addEventListener('click', loadHistory);
 elements.closeMinimizeButton.addEventListener('click', () => handleCloseChoice('minimize'));
 elements.closeQuitButton.addEventListener('click', () => handleCloseChoice('quit'));
 elements.closeCancelButton.addEventListener('click', () => handleCloseChoice('cancel'));
+elements.logoutButton.addEventListener('click', logoutAccount);
+elements.clearWhatsAppButton.addEventListener('click', clearWhatsAppSession);
+elements.exportSyncButton.addEventListener('click', exportSyncPackage);
+elements.importSyncButton.addEventListener('click', importSyncPackage);
 elements.closeModal.addEventListener('click', event => {
   if (event.target === elements.closeModal) handleCloseChoice('cancel');
 });
@@ -549,5 +793,7 @@ for (const button of elements.templateAddButtons) {
 window.addWhatsapp.onTaskEvent(handleTaskEvent);
 window.addWhatsapp.onHistoryUpdated(renderHistory);
 window.addWhatsapp.onShowCloseChoice(showCloseModal);
-loadTemplates();
+window.addWhatsapp.onAuthChanged(applyAuthState);
+loadImportOptions();
+elements.skipChinaNumbersToggle.addEventListener('change', saveImportOptions);
 bootstrapApp();

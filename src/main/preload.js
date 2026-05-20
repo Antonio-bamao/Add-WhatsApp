@@ -1,9 +1,18 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('addWhatsapp', {
+  getAuthState: () => ipcRenderer.invoke('auth:get-state'),
+  registerAccount: payload => ipcRenderer.invoke('auth:register', payload),
+  loginAccount: payload => ipcRenderer.invoke('auth:login', payload),
+  logoutAccount: () => ipcRenderer.invoke('auth:logout'),
+  resetPassword: payload => ipcRenderer.invoke('auth:reset-password', payload),
+  downloadRecovery: payload => ipcRenderer.invoke('auth:download-recovery', payload),
+  clearWhatsAppSession: () => ipcRenderer.invoke('auth:clear-whatsapp-session'),
+  exportSyncPackage: password => ipcRenderer.invoke('sync:export', { password }),
+  importSyncPackage: password => ipcRenderer.invoke('sync:import', { password }),
   getBootstrapState: () => ipcRenderer.invoke('app:bootstrap'),
   closeChoiceAction: action => ipcRenderer.invoke('app:close-choice-action', action),
-  importContacts: () => ipcRenderer.invoke('contacts:select-and-import'),
+  importContacts: options => ipcRenderer.invoke('contacts:select-and-import', options),
   exportReport: rows => ipcRenderer.invoke('report:export', { rows }),
   startTask: config => ipcRenderer.invoke('task:start', config),
   stopTask: () => ipcRenderer.invoke('task:stop'),
@@ -25,5 +34,10 @@ contextBridge.exposeInMainWorld('addWhatsapp', {
     const listener = (_event, payload) => callback(payload);
     ipcRenderer.on('app:show-close-choice', listener);
     return () => ipcRenderer.removeListener('app:show-close-choice', listener);
+  },
+  onAuthChanged: callback => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('auth:changed', listener);
+    return () => ipcRenderer.removeListener('auth:changed', listener);
   }
 });

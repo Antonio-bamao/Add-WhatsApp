@@ -62,6 +62,34 @@ test('sends only valid registered rows and records skipped invalid rows', async 
   assert.deepEqual(client.sent, [{ chatId: '12566654606@c.us', message: 'hello' }]);
 });
 
+test('tracks China skipped rows without checking WhatsApp registration', async () => {
+  const rows = [
+    { rowNumber: 2, status: 'china-skipped', rawPhone: '8615970894073', e164: '+8615970894073', language: 'en' }
+  ];
+  let registrationChecks = 0;
+  const client = {
+    sent: [],
+    async isRegisteredUser() {
+      registrationChecks += 1;
+      return true;
+    }
+  };
+  const store = createMemoryProgress();
+
+  const result = await runSendTask({
+    rows,
+    client,
+    progressStore: store,
+    config: { maxPerDay: 10, delayMs: 0, today: '2026-05-17' },
+    templates: { en: ['hello'], fr: ['bonjour'], es: ['hola'] }
+  });
+
+  assert.equal(result.stats.chinaSkipped, 1);
+  assert.equal(result.stats.invalid, 1);
+  assert.equal(registrationChecks, 0);
+  assert.equal(store.progress.invalid[0].error, 'china-number-skipped');
+});
+
 test('resumes after last processed index', async () => {
   const rows = [
     { rowNumber: 2, status: 'valid', whatsappId: '10000000001@c.us', language: 'en' },

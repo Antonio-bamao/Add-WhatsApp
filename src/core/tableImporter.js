@@ -21,7 +21,7 @@ function workbookRows(filePath) {
   return XLSX.utils.sheet_to_json(sheet, { defval: '', raw: false });
 }
 
-function importContacts(filePath) {
+function importContacts(filePath, options = {}) {
   const rows = workbookRows(filePath);
   if (!rows.length) {
     return { filePath, rows: [], stats: summarize([]), error: 'empty-file' };
@@ -38,9 +38,9 @@ function importContacts(filePath) {
       phone: row[phoneColumn],
       country: countryColumn ? row[countryColumn] : '',
       language: languageColumn ? row[languageColumn] : ''
-    });
-    const duplicate = parsed.e164 && seen.has(parsed.e164);
-    if (parsed.e164) seen.add(parsed.e164);
+    }, options);
+    const duplicate = parsed.status === 'valid' && parsed.e164 && seen.has(parsed.e164);
+    if (parsed.status === 'valid' && parsed.e164) seen.add(parsed.e164);
 
     return {
       rowNumber: index + 2,
@@ -67,7 +67,12 @@ function summarize(rows) {
   return rows.reduce(
     (stats, row) => {
       stats.total += 1;
-      stats[row.status] = (stats[row.status] || 0) + 1;
+      if (row.status === 'china-skipped') {
+        stats.chinaSkipped += 1;
+      } else {
+        stats[row.status] = (stats[row.status] || 0) + 1;
+      }
+      if (row.isChinaNumber || row.status === 'china-skipped') stats.chinaNumbers += 1;
       if (row.language) stats.languages[row.language] = (stats.languages[row.language] || 0) + 1;
       return stats;
     },
@@ -77,6 +82,8 @@ function summarize(rows) {
       invalid: 0,
       pending: 0,
       duplicate: 0,
+      chinaNumbers: 0,
+      chinaSkipped: 0,
       languages: {}
     }
   );

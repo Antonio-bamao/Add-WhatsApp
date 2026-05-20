@@ -7,7 +7,95 @@
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
-    <div class="app-shell">
+    <section id="authGate" class="auth-gate">
+      <div class="auth-visual">
+        <div class="auth-brand">
+          <div class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" role="img">
+              <path d="M12 3.5a8.2 8.2 0 0 0-7 12.5l-1 4 4.1-1a8.2 8.2 0 1 0 3.9-15.5Zm0 1.8a6.4 6.4 0 1 1-3.2 11.9l-.3-.2-2 .5.5-1.9-.2-.3A6.4 6.4 0 0 1 12 5.3Z" />
+            </svg>
+          </div>
+          <div>
+            <h1>Add WhatsApp</h1>
+            <p>本地账号保护 · 独立扫码缓存 · 加密同步包</p>
+          </div>
+        </div>
+        <div class="auth-copy">
+          <p class="eyebrow">Local-first workspace</p>
+          <h2>把账号、扫码缓存和任务进度安静地留在本机。</h2>
+          <p>每个本地账号都有独立 WhatsApp 缓存。跨电脑继续任务时，用加密同步包迁移历史和进度。</p>
+        </div>
+      </div>
+
+      <div class="auth-panel">
+        <div class="auth-tabs" role="tablist" aria-label="本地账号">
+          <button class="auth-tab active" type="button" data-auth-mode="login">登录</button>
+          <button class="auth-tab" type="button" data-auth-mode="register">注册</button>
+          <button class="auth-tab" type="button" data-auth-mode="reset">忘记密码</button>
+        </div>
+
+        <form id="loginForm" class="auth-form active" data-auth-form="login">
+          <div>
+            <h3>登录本地账号</h3>
+            <p>登录后才会加载表格、模板、历史和 WhatsApp 缓存。</p>
+          </div>
+          <label class="field">
+            <span>账号</span>
+            <input id="loginUsername" type="text" autocomplete="username" />
+          </label>
+          <label class="field">
+            <span>密码</span>
+            <input id="loginPassword" type="password" autocomplete="current-password" />
+          </label>
+          <button class="button primary" type="submit">登录</button>
+        </form>
+
+        <form id="registerForm" class="auth-form" data-auth-form="register">
+          <div>
+            <h3>注册本地账号</h3>
+            <p>密码只保存哈希。注册成功后请下载恢复信息。</p>
+          </div>
+          <label class="field">
+            <span>账号</span>
+            <input id="registerUsername" type="text" autocomplete="username" />
+          </label>
+          <label class="field">
+            <span>密码</span>
+            <input id="registerPassword" type="password" autocomplete="new-password" />
+          </label>
+          <button class="button primary" type="submit">注册并登录</button>
+        </form>
+
+        <form id="resetForm" class="auth-form" data-auth-form="reset">
+          <div>
+            <h3>用恢复码重置密码</h3>
+            <p>恢复码只显示一次，如果没有保存就无法本地找回。</p>
+          </div>
+          <label class="field">
+            <span>账号</span>
+            <input id="resetUsername" type="text" autocomplete="username" />
+          </label>
+          <label class="field">
+            <span>恢复码</span>
+            <input id="resetRecoveryCode" type="text" autocomplete="off" />
+          </label>
+          <label class="field">
+            <span>新密码</span>
+            <input id="resetPassword" type="password" autocomplete="new-password" />
+          </label>
+          <button class="button primary" type="submit">重置密码</button>
+        </form>
+
+        <div id="recoveryBox" class="recovery-box" hidden>
+          <span>恢复信息已生成</span>
+          <strong id="recoveryCodeText">-</strong>
+          <button id="downloadRecoveryButton" class="button secondary" type="button">下载到桌面</button>
+        </div>
+        <p id="authMessage" class="auth-message" role="status"></p>
+      </div>
+    </section>
+
+    <div id="appShell" class="app-shell" hidden>
       <aside class="sidebar" aria-label="主导航">
         <div class="brand">
           <div class="brand-mark" aria-hidden="true">
@@ -38,6 +126,10 @@
             <span class="nav-dot"></span>
             历史报表
           </button>
+          <button class="nav-item" type="button" data-page-target="accountPage">
+            <span class="nav-dot"></span>
+            账号与同步
+          </button>
         </nav>
 
         <div class="sidebar-footer">
@@ -56,6 +148,7 @@
             <h2 id="pageTitle">导入表格，先把号码和语言判断清楚</h2>
           </div>
           <div class="topbar-actions">
+            <span id="currentAccountBadge" class="account-badge">未登录</span>
             <button id="exportButton" class="button ghost" type="button" disabled>导出预检</button>
             <button id="importButton" class="button primary" type="button">选择 CSV / XLSX</button>
           </div>
@@ -77,6 +170,11 @@
               <span class="metric-label">待确认</span>
               <strong id="pendingCount">0</strong>
               <small>歧义格式先不发送</small>
+            </article>
+            <article class="metric info">
+              <span class="metric-label">中国号码</span>
+              <strong id="chinaSkippedCount">0</strong>
+              <small>自动排除不添加</small>
             </article>
             <article class="metric danger">
               <span class="metric-label">无效/重复</span>
@@ -103,6 +201,15 @@
                 <p>例如：33781387438、33-771147488、(256) 665-4606、44 7851 692353。</p>
                 <button class="button secondary" type="button" id="dropImportButton">打开文件</button>
               </div>
+
+              <label class="toggle-field">
+                <input id="skipChinaNumbersToggle" type="checkbox" checked />
+                <span class="toggle-track" aria-hidden="true"></span>
+                <span>
+                  <strong>跳过中国号码</strong>
+                  <small>关闭后，+86 / 86 / 中国国家列会正常进入添加队列。</small>
+                </span>
+              </label>
 
               <div class="language-strip" aria-label="语言统计">
                 <div><span class="lang-dot en"></span>英语 <strong id="enCount">0</strong></div>
@@ -299,6 +406,53 @@
                 </tbody>
               </table>
             </div>
+          </section>
+        </section>
+
+        <section id="accountPage" class="page" data-title="管理本地账号、扫码缓存和跨设备同步" data-eyebrow="账号与同步">
+          <section class="account-grid">
+            <article class="panel account-panel">
+              <div class="panel-head">
+                <div>
+                  <h3>本地账号</h3>
+                  <p>退出只清除应用登录状态，不删除这个账号自己的历史和 WhatsApp 缓存。</p>
+                </div>
+                <span id="accountNameBadge" class="table-state">-</span>
+              </div>
+              <div class="account-actions">
+                <button id="logoutButton" class="button danger-button" type="button">退出本地账号</button>
+              </div>
+            </article>
+
+            <article class="panel account-panel">
+              <div class="panel-head">
+                <div>
+                  <h3>WhatsApp 扫码缓存</h3>
+                  <p>每个本地账号都有独立缓存。清除后，下次开始任务会重新扫码。</p>
+                </div>
+              </div>
+              <button id="clearWhatsAppButton" class="button ghost" type="button">清除当前账号 WhatsApp 缓存</button>
+            </article>
+
+            <article class="panel account-panel">
+              <div class="panel-head">
+                <div>
+                  <h3>跨设备同步包</h3>
+                  <p>同步包只迁移历史和进度，不包含密码、恢复码、WhatsApp 登录缓存或原始表格。</p>
+                </div>
+              </div>
+              <div class="sync-actions">
+                <label class="field">
+                  <span>同步包密码</span>
+                  <input id="syncPasswordInput" type="password" autocomplete="new-password" />
+                </label>
+                <div class="task-actions">
+                  <button id="exportSyncButton" class="button primary" type="button">导出同步包</button>
+                  <button id="importSyncButton" class="button secondary" type="button">导入同步包</button>
+                </div>
+              </div>
+              <p id="syncState" class="sync-state">导入另一台电脑的同步包后，相同名单会按进度继续。</p>
+            </article>
           </section>
         </section>
       </main>

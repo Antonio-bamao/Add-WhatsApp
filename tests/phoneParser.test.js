@@ -52,3 +52,30 @@ test('marks ambiguous numbers without country as pending', () => {
 
   assert.equal(result.status, 'pending');
 });
+
+test('marks China international numbers to be skipped before WhatsApp checks', () => {
+  const result = parsePhoneRow({ phone: '86-15970894073', country: '美国' });
+
+  assert.equal(result.status, 'china-skipped');
+  assert.equal(result.e164, '+8615970894073');
+  assert.equal(result.whatsappId, null);
+  assert.equal(result.isChinaNumber, true);
+  assert.equal(result.error, 'china-number-skipped');
+});
+
+test('marks China domestic numbers by country column to be skipped', () => {
+  const result = parsePhoneRow({ phone: '18612345678', country: '中国' });
+
+  assert.equal(result.status, 'china-skipped');
+  assert.equal(result.e164, '+8618612345678');
+  assert.equal(result.whatsappId, null);
+});
+
+test('allows China numbers when skip China option is disabled', () => {
+  const result = parsePhoneRow({ phone: '18612345678', country: '中国' }, { skipChinaNumbers: false });
+
+  assert.equal(result.status, 'valid');
+  assert.equal(result.e164, '+8618612345678');
+  assert.equal(result.whatsappId, '8618612345678@c.us');
+  assert.equal(result.isChinaNumber, true);
+});

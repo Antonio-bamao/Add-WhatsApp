@@ -28,6 +28,7 @@ function createEmptyStats() {
     failed: 0,
     unregistered: 0,
     invalid: 0,
+    chinaSkipped: 0,
     processed: 0
   };
 }
@@ -59,6 +60,7 @@ async function runSendTask({
   const progress = progressStore.load();
   progress.taskId = config.taskId || progress.taskId;
   progress.sourceFile = config.sourceFile || progress.sourceFile;
+  progress.sourceIdentity = config.sourceIdentity || progress.sourceIdentity || null;
   progress.startedAt = progress.startedAt || config.startedAt || new Date().toISOString();
   progressStore.save(progress);
   const stats = createEmptyStats();
@@ -77,15 +79,17 @@ async function runSendTask({
     onEvent({ type: 'row:start', index, row });
 
     if (row.status !== 'valid') {
+      const error = row.error || (row.status === 'china-skipped' ? 'china-number-skipped' : null);
       progress.invalid.push({
         rowNumber: row.rowNumber,
         rawPhone: row.rawPhone,
         status: row.status,
-        error: row.error,
+        error,
         date: today
       });
       progress.lastIndex = index;
       stats.invalid += 1;
+      if (row.status === 'china-skipped') stats.chinaSkipped += 1;
       stats.processed += 1;
       progressStore.save(progress);
       onEvent({ type: 'row:invalid', index, row });

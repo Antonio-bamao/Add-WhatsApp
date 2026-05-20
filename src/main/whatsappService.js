@@ -11,8 +11,9 @@ function chromeCandidates() {
 }
 
 class WhatsAppService {
-  constructor({ sessionPath, emit }) {
+  constructor({ sessionPath, clientId = 'add-whatsapp', emit }) {
     this.sessionPath = sessionPath;
+    this.clientId = clientId;
     this.emit = emit || (() => {});
     this.client = null;
     this.ready = false;
@@ -23,7 +24,7 @@ class WhatsAppService {
     this.client = new Client({
       authStrategy: new LocalAuth({
         dataPath: this.sessionPath,
-        clientId: 'add-whatsapp'
+        clientId: this.clientId
       }),
       puppeteer: {
         headless: false,
@@ -94,9 +95,10 @@ class WhatsAppService {
   }
 }
 
-function createWhatsAppService(app, emit) {
-  const sessionPath = path.join(app.getPath('userData'), 'whatsapp-session');
-  return new WhatsAppService({ sessionPath, emit });
+function createWhatsAppService(app, emit, config = {}) {
+  const sessionPath = config.sessionPath || path.join(app.getPath('userData'), 'whatsapp-session');
+  const clientId = config.clientId || 'add-whatsapp';
+  return new WhatsAppService({ sessionPath, clientId, emit });
 }
 
 module.exports = {
