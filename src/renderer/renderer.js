@@ -1,5 +1,6 @@
 const state = {
   auth: { authenticated: false, user: null },
+  subscription: null,
   pendingRecovery: null,
   imported: null,
   templates: { en: [], es: [], fr: [] },
@@ -29,7 +30,9 @@ const elements = {
   pageEyebrow: document.getElementById('pageEyebrow'),
   pageTitle: document.getElementById('pageTitle'),
   topbarActions: document.querySelector('.topbar-actions'),
-  navItems: [...document.querySelectorAll('.nav-item')],
+  navItems: [...document.querySelectorAll('[data-page-target]')],
+  plansToggle: document.getElementById('plansToggle'),
+  plansSubnav: document.getElementById('plansSubnav'),
   pages: [...document.querySelectorAll('.page')],
   importButton: document.getElementById('importButton'),
   dropImportButton: document.getElementById('dropImportButton'),
@@ -106,7 +109,18 @@ const elements = {
   proxySettingsState: document.getElementById('proxySettingsState'),
   proxyCheckButton: document.getElementById('proxyCheckButton'),
   proxySaveButton: document.getElementById('proxySaveButton'),
-  proxyCancelButton: document.getElementById('proxyCancelButton')
+  proxyCancelButton: document.getElementById('proxyCancelButton'),
+  activePlanBadge: document.getElementById('activePlanBadge'),
+  planCards: document.getElementById('planCards'),
+  balanceCreditsMetric: document.getElementById('balanceCreditsMetric'),
+  usedTodayMetric: document.getElementById('usedTodayMetric'),
+  dailyLimitMetric: document.getElementById('dailyLimitMetric'),
+  availableTodayMetric: document.getElementById('availableTodayMetric'),
+  resetTimeMetric: document.getElementById('resetTimeMetric'),
+  workspaceUsageMetric: document.getElementById('workspaceUsageMetric'),
+  usagePolicyText: document.getElementById('usagePolicyText'),
+  dailyUsageBar: document.getElementById('dailyUsageBar'),
+  workspaceUsageBar: document.getElementById('workspaceUsageBar')
 };
 
 const PAGE_ACTIONS = new Set(['importPage']);
@@ -135,6 +149,7 @@ function setAuthMessage(message, tone = '') {
 
 function applyAuthState(auth) {
   state.auth = auth || { authenticated: false, user: null };
+  if (state.auth.subscription) renderSubscriptionState(state.auth.subscription);
   const authenticated = Boolean(state.auth.authenticated && state.auth.user);
   elements.authGate.hidden = authenticated;
   elements.appShell.hidden = !authenticated;
@@ -144,6 +159,7 @@ function applyAuthState(auth) {
   const isSecondaryWorkspace = Boolean(state.auth.workspace && state.auth.workspace.isSecondary);
   elements.openWorkspaceButton.hidden = isSecondaryWorkspace;
   elements.proxySettingsButton.hidden = !isSecondaryWorkspace;
+  updateWorkspaceButtonState();
   if (isSecondaryWorkspace) {
     const proxy = state.auth.workspace.proxy;
     elements.syncState.textContent = proxy ? proxyStatusText(proxy) : '当前是独立工作台。请先通过 IP 设置保存可用 SOCKS5 代理，再开始任务。';
@@ -151,6 +167,94 @@ function applyAuthState(auth) {
   if (!authenticated) {
     state.imported = null;
     elements.recoveryBox.hidden = !state.pendingRecovery;
+  }
+}
+
+function formatCredits(value) {
+  return Number(value || 0).toLocaleString('zh-CN');
+}
+
+function formatPlanPrice(plan) {
+  if (!plan.unitPriceCents) return '¥0';
+  return `¥${(plan.unitPriceCents / 100).toFixed(plan.unitPriceCents % 100 === 0 ? 0 : 2)}`;
+}
+
+function renderPlanCards(subscription) {
+  if (!elements.planCards) return;
+  const activePlanId = subscription.plan && subscription.plan.id;
+  elements.planCards.innerHTML = '';
+  for (const plan of subscription.catalog || []) {
+    const isActive = plan.id === activePlanId;
+    const card = document.createElement('article');
+    card.className = `plan-card ${isActive ? 'active' : ''} ${plan.recommended ? 'recommended' : ''}`.trim();
+    const topUp = plan.minimumTopUpCredits
+      ? `${formatCredits(plan.minimumTopUpCredits)} 额度起充`
+      : '无需充值';
+    const templateLimit = plan.templateLimit ? `自定义文案模板 X${plan.templateLimit}` : '自定义文案模板不限';
+    card.innerHTML = `
+      <div class="plan-card-head">
+        <div>
+          <h3>${escapeHtml(plan.name)}</h3>
+          <p>${escapeHtml(plan.audience)}</p>
+        </div>
+        ${plan.recommended ? '<span class="table-state">推荐</span>' : ''}
+      </div>
+      <div class="plan-price">
+        <strong>${formatPlanPrice(plan)}</strong>
+        <span>/ 成功添加</span>
+      </div>
+      <ul class="plan-facts">
+        <li>${topUp}</li>
+        <li>每日可用上限：${formatCredits(plan.dailyLimit)}</li>
+        <li>工作台：${formatCredits(plan.workspaceLimit)} 个</li>
+        <li>${templateLimit}</li>
+        <li>未使用额度长期保留</li>
+      </ul>
+      <div class="plan-feature-list">
+        ${(plan.features || []).map(feature => `<span>${escapeHtml(feature)}</span>`).join('')}
+      </div>
+      <button class="button ${isActive ? 'secondary' : 'ghost'}" type="button" disabled>${isActive ? '当前套餐' : '联系开通'}</button>
+    `;
+    elements.planCards.appendChild(card);
+  }
+}
+
+function renderSubscriptionState(subscription) {
+  state.subscription = subscription;
+  const plan = subscription.plan || {};
+  renderPlanCards(subscription);
+  elements.activePlanBadge.textContent = `当前：${plan.name || '-'}`;
+  elements.balanceCreditsMetric.textContent = formatCredits(subscription.balanceCredits);
+  elements.usedTodayMetric.textContent = formatCredits(subscription.usedToday);
+  elements.dailyLimitMetric.textContent = `每日上限 ${formatCredits(plan.dailyLimit)}`;
+  elements.availableTodayMetric.textContent = formatCredits(subscription.availableNow);
+  elements.resetTimeMetric.textContent = subscription.nextResetAt ? `${formatTime(subscription.nextResetAt)} 重置` : '00:00 重置';
+  elements.workspaceUsageMetric.textContent = `${1 + (subscription.openSecondaryCount || 0)}/${plan.workspaceLimit || '-'}`;
+  elements.usagePolicyText.textContent = subscription.resetPolicy || '每日上限和账户余额分开计算。';
+  const dailyPercent = plan.dailyLimit ? Math.min(100, (Number(subscription.usedToday || 0) / plan.dailyLimit) * 100) : 0;
+  const workspacePercent = plan.workspaceLimit ? Math.min(100, ((1 + Number(subscription.openSecondaryCount || 0)) / plan.workspaceLimit) * 100) : 0;
+  elements.dailyUsageBar.style.width = `${dailyPercent}%`;
+  elements.workspaceUsageBar.style.width = `${workspacePercent}%`;
+  if (elements.dailyLimitInput && plan.dailyLimit) {
+    elements.dailyLimitInput.max = String(plan.dailyLimit);
+    if (Number(elements.dailyLimitInput.value || 0) > plan.dailyLimit) {
+      elements.dailyLimitInput.value = String(plan.dailyLimit);
+    }
+  }
+  updateWorkspaceButtonState();
+}
+
+function updateWorkspaceButtonState() {
+  if (!elements.openWorkspaceButton || !state.subscription) return;
+  const plan = state.subscription.plan || {};
+  const isSecondaryWorkspace = Boolean(state.auth.workspace && state.auth.workspace.isSecondary);
+  const totalOpen = 1 + Number(state.subscription.openSecondaryCount || 0);
+  const blocked = !isSecondaryWorkspace && plan.workspaceLimit && totalOpen >= plan.workspaceLimit;
+  elements.openWorkspaceButton.disabled = Boolean(blocked);
+  if (blocked) {
+    elements.openWorkspaceButton.textContent = `已达到${plan.name}工作台上限`;
+  } else {
+    elements.openWorkspaceButton.textContent = '新建工作台 / 打开另一个账号';
   }
 }
 
@@ -261,6 +365,8 @@ async function openAnotherWorkspace() {
   elements.syncState.textContent = response.ok
     ? '已打开独立工作台。请在新窗口登录另一个本地账号，任务不会自动开始。'
     : (response.error || '打开新工作台失败。');
+  const subscription = await window.addWhatsapp.getSubscriptionState();
+  renderSubscriptionState(subscription);
 }
 
 function proxyFormPayload() {
@@ -453,7 +559,15 @@ function switchPage(pageId) {
   elements.pageTitle.textContent = active.dataset.title;
   elements.pageEyebrow.textContent = active.dataset.eyebrow;
   elements.topbarActions.hidden = !PAGE_ACTIONS.has(pageId);
+  const isPlanPage = ['planPage', 'usagePage', 'creditsPage', 'billingPage', 'referralPage'].includes(pageId);
+  elements.plansToggle.classList.toggle('active', isPlanPage);
+  if (isPlanPage) setPlansExpanded(true);
   if (pageId === 'historyPage') loadHistory();
+}
+
+function setPlansExpanded(expanded) {
+  elements.plansToggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+  elements.plansSubnav.hidden = !expanded;
 }
 
 function renderStats(stats) {
@@ -893,6 +1007,10 @@ async function handleCloseChoice(action) {
 for (const item of elements.navItems) {
   item.addEventListener('click', () => switchPage(item.dataset.pageTarget));
 }
+elements.plansToggle.addEventListener('click', () => {
+  const expanded = elements.plansToggle.getAttribute('aria-expanded') === 'true';
+  setPlansExpanded(!expanded);
+});
 for (const tab of elements.authTabs) {
   tab.addEventListener('click', () => switchAuthMode(tab.dataset.authMode));
 }

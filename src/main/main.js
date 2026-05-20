@@ -15,6 +15,12 @@ const { migrateLegacyUserData } = require('../core/legacyMigration');
 const { runSendTask } = require('../core/taskRunner');
 const { JsonTemplateStore } = require('../core/templateStore');
 const { JsonHistoryStore } = require('../core/historyStore');
+const {
+  canOpenSecondaryWorkspace,
+  createEntitlementState,
+  planCatalog,
+  resolveTaskDailyLimit
+} = require('../core/billingPlans');
 const { createWhatsAppService } = require('./whatsappService');
 const { WhatsAppSessionManager } = require('./whatsappSessionManager');
 const { LocalProxyBridge } = require('./proxyBridge');
@@ -62,6 +68,8 @@ let historyStore = null;
 let activeRun = null;
 let proxyMonitorTimer = null;
 let activeProxyBridge = null;
+let subscriptionState = createEntitlementState('advanced', { balanceCredits: 2000 });
+const openSecondaryWorkspaces = new Set();
 
 function sendToRenderer(channel, payload) {
   if (mainWindow && !mainWindow.isDestroyed()) {
@@ -171,7 +179,8 @@ function authState() {
         id: workspaceId,
         isSecondary: Boolean(workspaceId),
         proxy: workspaceId ? publicProxySettings(proxySettingsStore.load()) : null
-      }
+      },
+      subscription: publicSubscriptionState()
     };
   } catch (error) {
     return {
@@ -183,9 +192,18 @@ function authState() {
         isSecondary: Boolean(workspaceId),
         proxy: workspaceId && proxySettingsStore ? publicProxySettings(proxySettingsStore.load()) : null
       },
+      subscription: publicSubscriptionState(),
       error: error.message
     };
   }
+}
+
+function publicSubscriptionState() {
+  return {
+    ...subscriptionState,
+    catalog: planCatalog(),
+    openSecondaryCount: openSecondaryWorkspaces.size
+  };
 }
 
 function protectedError(error) {
@@ -360,6 +378,10 @@ ipcMain.handle('workspace:open-another-account', async (_event, payload = {}) =>
     if (workspaceId) {
       return { ok: false, error: '独立工作台里不能继续打开新的工作台。' };
     }
+    const entitlement = canOpenSecondaryWorkspace(subscriptionState, openSecondaryWorkspaces.size);
+    if (!entitlement.ok) {
+      return { ok: false, error: entitlement.error };
+    }
     const nextWorkspaceId = createWorkspaceId();
     const args = workspaceLaunchArgs({
       isPackaged: app.isPackaged,
@@ -371,10 +393,17 @@ ipcMain.handle('workspace:open-another-account', async (_event, payload = {}) =>
       stdio: 'ignore',
       windowsHide: false
     });
+    openSecondaryWorkspaces.add(nextWorkspaceId);
+    child.once('exit', () => {
+      openSecondaryWorkspaces.delete(nextWorkspaceId);
+      sendToRenderer('auth:changed', authState());
+    });
     child.unref();
+    sendToRenderer('auth:changed', authState());
     return {
       ok: true,
-      workspaceId: nextWorkspaceId
+      workspaceId: nextWorkspaceId,
+      remaining: entitlement.remaining - 1
     };
   } catch (error) {
     return { ok: false, error: error.message };
@@ -493,6 +522,8 @@ ipcMain.handle('proxy:save', async (_event, payload = {}) => {
     return { ok: false, error: error.message };
   }
 });
+
+ipcMain.handle('subscription:get-state', async () => publicSubscriptionState());
 
 ipcMain.handle('contacts:select-and-import', async (_event, options = {}) => {
   try {
@@ -661,7 +692,7 @@ async function runTask(config) {
         sourceFile: importedSource,
         sourceIdentity: sourceIdentityFor(importedSource),
         startedAt,
-        maxPerDay: Number(config.maxPerDay || 80),
+        maxPerDay: resolveTaskDailyLimit(subscriptionState, config.maxPerDay),
         delayMinMs: Number(config.delayMinSeconds || 22) * 1000,
         delayMaxMs: Number(config.delayMaxSeconds || 26) * 1000
       },

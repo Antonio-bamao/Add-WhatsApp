@@ -12,6 +12,7 @@ contextBridge.exposeInMainWorld('addWhatsapp', {
   getProxySettings: () => ipcRenderer.invoke('proxy:get'),
   testProxySettings: payload => ipcRenderer.invoke('proxy:test', payload),
   saveProxySettings: payload => ipcRenderer.invoke('proxy:save', payload),
+  getSubscriptionState: () => ipcRenderer.invoke('subscription:get-state'),
   exportSyncPackage: password => ipcRenderer.invoke('sync:export', { password }),
   importSyncPackage: password => ipcRenderer.invoke('sync:import', { password }),
   getBootstrapState: () => ipcRenderer.invoke('app:bootstrap'),

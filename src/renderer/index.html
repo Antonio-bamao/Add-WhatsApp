@@ -126,6 +126,20 @@
             <span class="nav-dot"></span>
             历史报表
           </button>
+          <div class="nav-group expanded">
+            <button id="plansToggle" class="nav-item nav-parent" type="button" aria-expanded="true">
+              <span class="nav-dot"></span>
+              探索方案
+              <span class="nav-caret">▾</span>
+            </button>
+            <div id="plansSubnav" class="subnav">
+              <button class="subnav-item" type="button" data-page-target="planPage">套餐</button>
+              <button class="subnav-item" type="button" data-page-target="usagePage">用量</button>
+              <button class="subnav-item" type="button" data-page-target="creditsPage">积分</button>
+              <button class="subnav-item" type="button" data-page-target="billingPage">账单</button>
+              <button class="subnav-item" type="button" data-page-target="referralPage">推荐奖励</button>
+            </div>
+          </div>
           <button class="nav-item" type="button" data-page-target="accountPage">
             <span class="nav-dot"></span>
             设置
@@ -405,6 +419,115 @@
                   <tr class="empty-row"><td colspan="8">还没有历史任务。</td></tr>
                 </tbody>
               </table>
+            </div>
+          </section>
+        </section>
+
+        <section id="planPage" class="page" data-title="选择适合你添加节奏的套餐" data-eyebrow="探索方案">
+          <section class="plans-toolbar">
+            <div>
+              <h3>套餐</h3>
+              <p>账户余额长期保留；每日可用上限每天 00:00 重置，只控制消耗速度。</p>
+            </div>
+            <span id="activePlanBadge" class="table-state">当前套餐</span>
+          </section>
+          <section id="planCards" class="plan-grid" aria-label="套餐列表"></section>
+          <section class="panel rule-panel">
+            <div class="panel-head">
+              <div>
+                <h3>额度规则</h3>
+                <p>扣费只看“成功添加”。格式无效、未注册、代理失败、暂停、崩溃前未确认成功都不扣账户余额。</p>
+              </div>
+            </div>
+            <div class="rule-grid">
+              <div><strong>账户余额</strong><span>充值所得，不因当天没用完而清零。</span></div>
+              <div><strong>每日可用上限</strong><span>每天最多消耗多少额度，00:00 恢复。</span></div>
+              <div><strong>工作台数量</strong><span>包含主工作台；进阶版总共 2 个，专业版总共 3 个。</span></div>
+            </div>
+          </section>
+        </section>
+
+        <section id="usagePage" class="page" data-title="查看今日用量和工作台占用" data-eyebrow="探索方案">
+          <section class="summary-grid">
+            <article class="metric success">
+              <span class="metric-label">账户余额</span>
+              <strong id="balanceCreditsMetric">0</strong>
+              <small>未使用额度长期保留</small>
+            </article>
+            <article class="metric">
+              <span class="metric-label">今日已用</span>
+              <strong id="usedTodayMetric">0</strong>
+              <small id="dailyLimitMetric">每日上限 -</small>
+            </article>
+            <article class="metric info">
+              <span class="metric-label">今日可用</span>
+              <strong id="availableTodayMetric">0</strong>
+              <small id="resetTimeMetric">00:00 重置</small>
+            </article>
+            <article class="metric warning">
+              <span class="metric-label">工作台</span>
+              <strong id="workspaceUsageMetric">1/-</strong>
+              <small>包含主工作台</small>
+            </article>
+          </section>
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <h3>当前限制</h3>
+                <p id="usagePolicyText">每日上限和账户余额分开计算。</p>
+              </div>
+            </div>
+            <div class="usage-bars">
+              <div>
+                <span>今日额度</span>
+                <div class="usage-bar"><i id="dailyUsageBar"></i></div>
+              </div>
+              <div>
+                <span>工作台占用</span>
+                <div class="usage-bar"><i id="workspaceUsageBar"></i></div>
+              </div>
+            </div>
+          </section>
+        </section>
+
+        <section id="creditsPage" class="page" data-title="积分和额度规则" data-eyebrow="探索方案">
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <h3>积分</h3>
+                <p>这里先作为规则说明区，后续接入充值账本后展示可兑换积分、活动赠送和消耗流水。</p>
+              </div>
+            </div>
+            <div class="rule-grid">
+              <div><strong>成功添加</strong><span>扣 1 个添加额度，并写入任务历史。</span></div>
+              <div><strong>失败不扣</strong><span>代理失败、未登录、未注册、号码无效和暂停都不消耗额度。</span></div>
+              <div><strong>余额保留</strong><span>今天跑不完的额度继续留在账户里。</span></div>
+            </div>
+          </section>
+        </section>
+
+        <section id="billingPage" class="page" data-title="账单和充值记录" data-eyebrow="探索方案">
+          <section class="panel empty-billing">
+            <div>
+              <h3>账单</h3>
+              <p>充值支付接入后，这里会展示充值订单、额度入账、成功添加扣费和退款流水。</p>
+            </div>
+            <span class="table-state">暂未接入支付</span>
+          </section>
+        </section>
+
+        <section id="referralPage" class="page" data-title="推荐奖励" data-eyebrow="探索方案">
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <h3>推荐奖励</h3>
+                <p>后续可以把推荐码、奖励额度和被推荐用户状态放在这里，先不和主任务链路耦合。</p>
+              </div>
+            </div>
+            <div class="rule-grid">
+              <div><strong>邀请用户</strong><span>生成专属推荐码或链接。</span></div>
+              <div><strong>充值确认</strong><span>被推荐用户完成首充后发放奖励。</span></div>
+              <div><strong>奖励入账</strong><span>奖励额度进入账户余额，不影响每日上限规则。</span></div>
             </div>
           </section>
         </section>
