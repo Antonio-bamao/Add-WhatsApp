@@ -6,7 +6,8 @@ const {
   createEntitlementState,
   getPlan,
   planCatalog,
-  resolveTaskDailyLimit
+  resolveTaskDailyLimit,
+  usageSummary
 } = require('../src/core/billingPlans');
 
 test('defines the public pricing catalog from the approved package design', () => {
@@ -56,5 +57,30 @@ test('limits secondary workspace launches by the active package', () => {
     ok: false,
     remaining: 0,
     error: '当前进阶版最多同时使用 2 个工作台，请关闭已有独立工作台或升级套餐。'
+  });
+});
+
+test('summarizes daily and monthly usage for the usage dashboard', () => {
+  const entitlement = createEntitlementState('advanced', {
+    balanceCredits: 1880,
+    usedToday: 45,
+    usedThisMonth: 730,
+    monthlyLimit: 6000,
+    now: new Date('2026-05-21T08:30:00+08:00')
+  });
+
+  assert.deepEqual(usageSummary(entitlement), {
+    today: {
+      used: 45,
+      limit: 200,
+      remaining: 155,
+      percent: 23
+    },
+    month: {
+      used: 730,
+      limit: 6000,
+      remaining: 5270,
+      percent: 12
+    }
   });
 });

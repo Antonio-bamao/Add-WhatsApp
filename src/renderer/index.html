@@ -135,7 +135,7 @@
             <div id="plansSubnav" class="subnav">
               <button class="subnav-item" type="button" data-page-target="planPage">套餐</button>
               <button class="subnav-item" type="button" data-page-target="usagePage">用量</button>
-              <button class="subnav-item" type="button" data-page-target="creditsPage">积分</button>
+              <button class="subnav-item" type="button" data-page-target="quotaPage">额度</button>
               <button class="subnav-item" type="button" data-page-target="billingPage">账单</button>
               <button class="subnav-item" type="button" data-page-target="referralPage">推荐奖励</button>
             </div>
@@ -447,55 +447,120 @@
           </section>
         </section>
 
-        <section id="usagePage" class="page" data-title="查看今日用量和工作台占用" data-eyebrow="探索方案">
-          <section class="summary-grid">
-            <article class="metric success">
-              <span class="metric-label">账户余额</span>
-              <strong id="balanceCreditsMetric">0</strong>
-              <small>未使用额度长期保留</small>
-            </article>
-            <article class="metric">
-              <span class="metric-label">今日已用</span>
-              <strong id="usedTodayMetric">0</strong>
-              <small id="dailyLimitMetric">每日上限 -</small>
-            </article>
-            <article class="metric info">
-              <span class="metric-label">今日可用</span>
-              <strong id="availableTodayMetric">0</strong>
-              <small id="resetTimeMetric">00:00 重置</small>
-            </article>
-            <article class="metric warning">
-              <span class="metric-label">工作台</span>
-              <strong id="workspaceUsageMetric">1/-</strong>
-              <small>包含主工作台</small>
-            </article>
-          </section>
-          <section class="panel">
+        <section id="usagePage" class="page" data-title="查看本日和本月使用情况" data-eyebrow="探索方案">
+          <section class="usage-ledger panel">
             <div class="panel-head">
               <div>
-                <h3>当前限制</h3>
-                <p id="usagePolicyText">每日上限和账户余额分开计算。</p>
+                <h3>添加额度使用详情</h3>
+                <p>展示最近任务的额度消耗、状态和耗时。成功添加才会扣额度。</p>
               </div>
+              <span class="table-state">最近记录</span>
             </div>
-            <div class="usage-bars">
-              <div>
-                <span>今日额度</span>
-                <div class="usage-bar"><i id="dailyUsageBar"></i></div>
+            <div class="table-wrap usage-table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>创建时间</th>
+                    <th>类型</th>
+                    <th>来源</th>
+                    <th>任务结果</th>
+                    <th>使用额度</th>
+                    <th>耗时</th>
+                  </tr>
+                </thead>
+                <tbody id="usageLedgerBody">
+                  <tr class="empty-row"><td colspan="6">还没有成功添加记录。</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="usage-section">
+            <h3>本日使用情况</h3>
+            <div class="quota-progress-card">
+              <div class="quota-progress-head">
+                <div>
+                  <strong>今日额度</strong>
+                  <span id="dailyUsageResetHint">每日 00:00 重置</span>
+                </div>
+                <em><span id="usedTodayMetric">0</span> / <span id="dailyLimitValue">0</span> 已使用</em>
               </div>
-              <div>
-                <span>工作台占用</span>
+              <div class="usage-bar"><i id="dailyUsageBar"></i></div>
+              <p id="usagePolicyText">每日上限和账户余额分开计算。</p>
+            </div>
+          </section>
+
+          <section class="usage-section">
+            <h3>本月使用情况</h3>
+            <div class="usage-card-grid">
+              <article class="quota-progress-card">
+                <div class="quota-progress-head">
+                  <div>
+                    <strong>本月添加额度</strong>
+                    <span>按自然月统计，便于看业务节奏。</span>
+                  </div>
+                  <em><span id="monthUsedMetric">0</span> / <span id="monthLimitMetric">0</span> 已使用</em>
+                </div>
+                <div class="usage-bar"><i id="monthlyUsageBar"></i></div>
+              </article>
+              <article class="quota-progress-card">
+                <div class="quota-progress-head">
+                  <div>
+                    <strong>工作台占用</strong>
+                    <span>包含主工作台和已打开的独立工作台。</span>
+                  </div>
+                  <em id="workspaceUsageMetric">1/-</em>
+                </div>
                 <div class="usage-bar"><i id="workspaceUsageBar"></i></div>
-              </div>
+              </article>
             </div>
           </section>
         </section>
 
-        <section id="creditsPage" class="page" data-title="积分和额度规则" data-eyebrow="探索方案">
+        <section id="quotaPage" class="page" data-title="额度余额和充值规则" data-eyebrow="探索方案">
+          <section class="quota-balance-panel panel">
+            <div class="quota-balance-copy">
+              <p class="eyebrow">余额</p>
+              <h3>充值额度余额</h3>
+              <strong id="balanceCreditsMetric">0</strong>
+              <span>未使用额度长期保留，只有成功添加才扣除。</span>
+              <div class="quota-links">
+                <button class="text-button" type="button" data-page-target="usagePage">查看使用情况</button>
+                <button class="text-button" type="button" data-page-target="billingPage">充值记录</button>
+              </div>
+            </div>
+            <div class="membership-card">
+              <span>ADD WHATSAPP PACKAGE</span>
+              <strong id="quotaCardPlanName">-</strong>
+              <p id="quotaCardUserName">当前账号</p>
+            </div>
+          </section>
+
+          <section class="panel purchase-panel">
+            <div class="panel-head">
+              <div>
+                <h3>购买额度</h3>
+                <p>按当前套餐单价购买，额度有效期和支付方式后续接入。</p>
+              </div>
+            </div>
+            <div class="quota-packages" aria-label="额度包">
+              <button class="quota-package active" type="button">2,000</button>
+              <button class="quota-package" type="button">5,000</button>
+              <button class="quota-package" type="button">20,000</button>
+              <button class="quota-package" type="button">自定义</button>
+            </div>
+            <div class="purchase-total">
+              <span>预计金额按当前套餐单价计算</span>
+              <strong id="quotaEstimate">¥600.00</strong>
+              <button class="button primary" type="button" disabled>立即购买</button>
+            </div>
+          </section>
+
           <section class="panel">
             <div class="panel-head">
               <div>
-                <h3>积分</h3>
-                <p>这里先作为规则说明区，后续接入充值账本后展示可兑换积分、活动赠送和消耗流水。</p>
+                <h3>额度规则</h3>
+                <p>失败、未注册、号码无效、代理异常和暂停都不会扣额度。</p>
               </div>
             </div>
             <div class="rule-grid">
@@ -507,27 +572,102 @@
         </section>
 
         <section id="billingPage" class="page" data-title="账单和充值记录" data-eyebrow="探索方案">
-          <section class="panel empty-billing">
+          <section class="panel bill-summary">
             <div>
-              <h3>账单</h3>
-              <p>充值支付接入后，这里会展示充值订单、额度入账、成功添加扣费和退款流水。</p>
+              <span>您的下次付款</span>
+              <strong>¥0.00</strong>
+              <p>当前尚未接入线上支付，后续会在这里显示应付金额和账单周期。</p>
             </div>
-            <span class="table-state">暂未接入支付</span>
+            <div>
+              <span>账单信息</span>
+              <button class="text-button" type="button" data-page-target="planPage">升级计划</button>
+            </div>
+          </section>
+          <section class="panel current-plan-panel">
+            <div class="panel-head">
+              <div>
+                <h3>当前套餐</h3>
+                <p id="billingPlanDescription">当前使用本地套餐规则。</p>
+              </div>
+              <button class="button primary" type="button" disabled>升级</button>
+            </div>
+            <div class="billing-feature-grid">
+              <div id="billingIncludedList"></div>
+              <div id="billingExcludedList"></div>
+            </div>
+          </section>
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <h3>账单历史</h3>
+                <p>充值支付接入后，会展示订单编号、交易状态、金额和付款日期。</p>
+              </div>
+            </div>
+            <div class="table-wrap compact-table">
+              <table>
+                <thead>
+                  <tr>
+                    <th>订单编号</th>
+                    <th>交易状态</th>
+                    <th>金额</th>
+                    <th>付款日期</th>
+                    <th>操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>BILL-LOCAL-PREVIEW</td>
+                    <td><span class="status-tag status-valid">预览</span></td>
+                    <td>¥0.00</td>
+                    <td>-</td>
+                    <td>待接入</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
           </section>
         </section>
 
         <section id="referralPage" class="page" data-title="推荐奖励" data-eyebrow="探索方案">
+          <section class="panel referral-overview">
+            <div>
+              <h3>推荐概览</h3>
+              <p>查看您的推荐统计数据。</p>
+            </div>
+            <strong>--</strong>
+            <span>0 邀请总数</span>
+          </section>
+          <section class="panel referral-code-panel">
+            <h3>我的推荐码</h3>
+            <p>分享您的专属推荐码，邀请好友注册。</p>
+            <strong id="referralCodeText">ADWA2026</strong>
+          </section>
+          <section class="panel referral-code-panel">
+            <h3>推荐链接</h3>
+            <p>复制链接并分享给好友，完成注册即可获得奖励。</p>
+            <code id="referralLinkText">https://add-whatsapp.local/signin?referral=ADWA2026</code>
+          </section>
           <section class="panel">
             <div class="panel-head">
               <div>
-                <h3>推荐奖励</h3>
-                <p>后续可以把推荐码、奖励额度和被推荐用户状态放在这里，先不和主任务链路耦合。</p>
+                <h3>推荐记录</h3>
+                <p>后续会展示注册时间、被邀请人和奖励状态。</p>
               </div>
             </div>
-            <div class="rule-grid">
-              <div><strong>邀请用户</strong><span>生成专属推荐码或链接。</span></div>
-              <div><strong>充值确认</strong><span>被推荐用户完成首充后发放奖励。</span></div>
-              <div><strong>奖励入账</strong><span>奖励额度进入账户余额，不影响每日上限规则。</span></div>
+            <div class="table-wrap compact-table">
+              <table>
+                <thead>
+                  <tr>
+                    <th>注册时间</th>
+                    <th>被邀请账号</th>
+                    <th>奖励额度</th>
+                    <th>状态</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr class="empty-row"><td colspan="4">暂无推荐记录。</td></tr>
+                </tbody>
+              </table>
             </div>
           </section>
         </section>

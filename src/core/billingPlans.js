@@ -68,13 +68,17 @@ function nextLocalMidnight(now = new Date()) {
 function createEntitlementState(planId = DEFAULT_PLAN_ID, usage = {}) {
   const plan = getPlan(planId);
   const usedToday = Math.max(0, Number(usage.usedToday || 0));
+  const usedThisMonth = Math.max(0, Number(usage.usedThisMonth || 0));
   const balanceCredits = Math.max(0, Number(usage.balanceCredits || 0));
   const dailyRemaining = Math.max(0, plan.dailyLimit - usedToday);
   const availableNow = plan.unitPriceCents > 0 ? Math.min(balanceCredits, dailyRemaining) : dailyRemaining;
+  const monthlyLimit = Math.max(plan.dailyLimit, Number(usage.monthlyLimit || plan.dailyLimit * 30));
   return {
     plan,
     balanceCredits,
     usedToday,
+    usedThisMonth,
+    monthlyLimit,
     dailyRemaining,
     availableNow,
     nextResetAt: usage.nextResetAt || nextLocalMidnight(usage.now || new Date()),
@@ -103,6 +107,32 @@ function canOpenSecondaryWorkspace(entitlement, openSecondaryCount = 0) {
   return { ok: true, remaining };
 }
 
+function usagePercent(used, limit) {
+  if (!limit) return 0;
+  return Math.min(100, Math.round((Math.max(0, used) / limit) * 100));
+}
+
+function usageSummary(entitlement) {
+  const plan = entitlement && entitlement.plan ? entitlement.plan : getPlan();
+  const usedToday = Math.max(0, Number(entitlement && entitlement.usedToday || 0));
+  const usedThisMonth = Math.max(0, Number(entitlement && entitlement.usedThisMonth || 0));
+  const monthLimit = Math.max(plan.dailyLimit, Number(entitlement && entitlement.monthlyLimit || plan.dailyLimit * 30));
+  return {
+    today: {
+      used: usedToday,
+      limit: plan.dailyLimit,
+      remaining: Math.max(0, plan.dailyLimit - usedToday),
+      percent: usagePercent(usedToday, plan.dailyLimit)
+    },
+    month: {
+      used: usedThisMonth,
+      limit: monthLimit,
+      remaining: Math.max(0, monthLimit - usedThisMonth),
+      percent: usagePercent(usedThisMonth, monthLimit)
+    }
+  };
+}
+
 module.exports = {
   DEFAULT_PLAN_ID,
   DAY_MS,
@@ -110,5 +140,6 @@ module.exports = {
   createEntitlementState,
   getPlan,
   planCatalog,
-  resolveTaskDailyLimit
+  resolveTaskDailyLimit,
+  usageSummary
 };

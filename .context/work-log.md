@@ -80,3 +80,8 @@
 - 结果：侧栏新增可展开“探索方案”，包含套餐、用量、积分、账单、推荐奖励；套餐页展示推荐价格方案；用量页展示当前套餐、余额、今日已用、今日可用、工作台占用；积分/账单/推荐奖励先作为规则说明和未来接入占位。
 - 验证：`node --check src\renderer\renderer.js`、`node --check src\main\main.js`、`node --check src\core\billingPlans.js` 通过；`npm run build` 成功生成 `dist\Add WhatsApp 0.1.2.exe`。
 - 下一步：人工打开 EXE 检查套餐页面视觉、侧栏展开交互、重复打开工作台拦截和每日上限封顶体验。
+
+- 步骤：参考 AI 后台样式优化探索方案子页面。
+- 结果：将“积分”改为“额度”；用量页重做为添加额度使用明细、本日使用情况、本月使用情况和工作台占用；额度页加入余额卡、会员卡、额度包购买区和额度规则；账单页加入账单摘要、当前套餐和账单历史表；推荐奖励页加入推荐概览、推荐码、推荐链接和推荐记录；探索方案子菜单展开/收缩改成高度、透明度和位移过渡，避免硬切。
+- 验证：新增 `usageSummary` 测试先失败后实现；`node --check src\renderer\renderer.js`、`node --check src\main\main.js`、`node --check src\core\billingPlans.js` 通过。
+- 下一步：跑完整测试和构建后，人工打开 EXE 验证视觉效果。

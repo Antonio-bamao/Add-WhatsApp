@@ -19,7 +19,8 @@ const {
   canOpenSecondaryWorkspace,
   createEntitlementState,
   planCatalog,
-  resolveTaskDailyLimit
+  resolveTaskDailyLimit,
+  usageSummary
 } = require('../core/billingPlans');
 const { createWhatsAppService } = require('./whatsappService');
 const { WhatsAppSessionManager } = require('./whatsappSessionManager');
@@ -68,7 +69,12 @@ let historyStore = null;
 let activeRun = null;
 let proxyMonitorTimer = null;
 let activeProxyBridge = null;
-let subscriptionState = createEntitlementState('advanced', { balanceCredits: 2000 });
+let subscriptionState = createEntitlementState('advanced', {
+  balanceCredits: 2000,
+  usedToday: 0,
+  usedThisMonth: 0,
+  monthlyLimit: 6000
+});
 const openSecondaryWorkspaces = new Set();
 
 function sendToRenderer(channel, payload) {
@@ -202,7 +208,8 @@ function publicSubscriptionState() {
   return {
     ...subscriptionState,
     catalog: planCatalog(),
-    openSecondaryCount: openSecondaryWorkspaces.size
+    openSecondaryCount: openSecondaryWorkspaces.size,
+    usage: usageSummary(subscriptionState)
   };
 }
 

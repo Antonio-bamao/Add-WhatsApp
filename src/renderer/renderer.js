@@ -112,15 +112,24 @@ const elements = {
   proxyCancelButton: document.getElementById('proxyCancelButton'),
   activePlanBadge: document.getElementById('activePlanBadge'),
   planCards: document.getElementById('planCards'),
+  usageLedgerBody: document.getElementById('usageLedgerBody'),
   balanceCreditsMetric: document.getElementById('balanceCreditsMetric'),
   usedTodayMetric: document.getElementById('usedTodayMetric'),
-  dailyLimitMetric: document.getElementById('dailyLimitMetric'),
-  availableTodayMetric: document.getElementById('availableTodayMetric'),
-  resetTimeMetric: document.getElementById('resetTimeMetric'),
+  dailyLimitValue: document.getElementById('dailyLimitValue'),
+  dailyUsageResetHint: document.getElementById('dailyUsageResetHint'),
+  monthUsedMetric: document.getElementById('monthUsedMetric'),
+  monthLimitMetric: document.getElementById('monthLimitMetric'),
   workspaceUsageMetric: document.getElementById('workspaceUsageMetric'),
   usagePolicyText: document.getElementById('usagePolicyText'),
   dailyUsageBar: document.getElementById('dailyUsageBar'),
-  workspaceUsageBar: document.getElementById('workspaceUsageBar')
+  monthlyUsageBar: document.getElementById('monthlyUsageBar'),
+  workspaceUsageBar: document.getElementById('workspaceUsageBar'),
+  quotaCardPlanName: document.getElementById('quotaCardPlanName'),
+  quotaCardUserName: document.getElementById('quotaCardUserName'),
+  quotaEstimate: document.getElementById('quotaEstimate'),
+  billingPlanDescription: document.getElementById('billingPlanDescription'),
+  billingIncludedList: document.getElementById('billingIncludedList'),
+  billingExcludedList: document.getElementById('billingExcludedList')
 };
 
 const PAGE_ACTIONS = new Set(['importPage']);
@@ -156,6 +165,7 @@ function applyAuthState(auth) {
   const username = authenticated ? state.auth.user.username : '未登录';
   elements.currentAccountBadge.textContent = username;
   elements.accountNameBadge.textContent = username;
+  if (elements.quotaCardUserName) elements.quotaCardUserName.textContent = username;
   const isSecondaryWorkspace = Boolean(state.auth.workspace && state.auth.workspace.isSecondary);
   elements.openWorkspaceButton.hidden = isSecondaryWorkspace;
   elements.proxySettingsButton.hidden = !isSecondaryWorkspace;
@@ -222,19 +232,28 @@ function renderPlanCards(subscription) {
 function renderSubscriptionState(subscription) {
   state.subscription = subscription;
   const plan = subscription.plan || {};
+  const usage = subscription.usage || {};
+  const today = usage.today || { used: subscription.usedToday || 0, limit: plan.dailyLimit || 0, percent: 0 };
+  const month = usage.month || { used: subscription.usedThisMonth || 0, limit: subscription.monthlyLimit || 0, percent: 0 };
   renderPlanCards(subscription);
   elements.activePlanBadge.textContent = `当前：${plan.name || '-'}`;
   elements.balanceCreditsMetric.textContent = formatCredits(subscription.balanceCredits);
-  elements.usedTodayMetric.textContent = formatCredits(subscription.usedToday);
-  elements.dailyLimitMetric.textContent = `每日上限 ${formatCredits(plan.dailyLimit)}`;
-  elements.availableTodayMetric.textContent = formatCredits(subscription.availableNow);
-  elements.resetTimeMetric.textContent = subscription.nextResetAt ? `${formatTime(subscription.nextResetAt)} 重置` : '00:00 重置';
+  elements.usedTodayMetric.textContent = formatCredits(today.used);
+  elements.dailyLimitValue.textContent = formatCredits(today.limit);
+  elements.monthUsedMetric.textContent = formatCredits(month.used);
+  elements.monthLimitMetric.textContent = formatCredits(month.limit);
+  elements.dailyUsageResetHint.textContent = subscription.nextResetAt ? `${formatTime(subscription.nextResetAt)} 重置` : '每日 00:00 重置';
   elements.workspaceUsageMetric.textContent = `${1 + (subscription.openSecondaryCount || 0)}/${plan.workspaceLimit || '-'}`;
   elements.usagePolicyText.textContent = subscription.resetPolicy || '每日上限和账户余额分开计算。';
-  const dailyPercent = plan.dailyLimit ? Math.min(100, (Number(subscription.usedToday || 0) / plan.dailyLimit) * 100) : 0;
   const workspacePercent = plan.workspaceLimit ? Math.min(100, ((1 + Number(subscription.openSecondaryCount || 0)) / plan.workspaceLimit) * 100) : 0;
-  elements.dailyUsageBar.style.width = `${dailyPercent}%`;
+  elements.dailyUsageBar.style.width = `${today.percent || 0}%`;
+  elements.monthlyUsageBar.style.width = `${month.percent || 0}%`;
   elements.workspaceUsageBar.style.width = `${workspacePercent}%`;
+  elements.quotaCardPlanName.textContent = plan.name || '-';
+  elements.quotaEstimate.textContent = plan.unitPriceCents ? `¥${((plan.minimumTopUpCredits || 0) * plan.unitPriceCents / 100).toFixed(2)}` : '¥0.00';
+  elements.billingPlanDescription.textContent = `${plan.name || '-'}：每日可用上限 ${formatCredits(plan.dailyLimit)}，工作台 ${formatCredits(plan.workspaceLimit)} 个。`;
+  renderUsageLedger(subscription);
+  renderBillingFeatureLists(plan);
   if (elements.dailyLimitInput && plan.dailyLimit) {
     elements.dailyLimitInput.max = String(plan.dailyLimit);
     if (Number(elements.dailyLimitInput.value || 0) > plan.dailyLimit) {
@@ -242,6 +261,42 @@ function renderSubscriptionState(subscription) {
     }
   }
   updateWorkspaceButtonState();
+}
+
+function renderUsageLedger(subscription) {
+  if (!elements.usageLedgerBody) return;
+  const rows = [
+    { at: new Date().toISOString(), type: '成功添加', source: '发送任务', result: '本地预览', credits: subscription.usedToday || 0, duration: '-' },
+    { at: subscription.nextResetAt, type: '额度恢复', source: '每日上限', result: '等待重置', credits: 0, duration: '-' }
+  ];
+  elements.usageLedgerBody.innerHTML = rows.map(row => `
+    <tr>
+      <td>${formatTime(row.at)}</td>
+      <td><span class="status-tag status-valid">${row.type}</span></td>
+      <td>${row.source}</td>
+      <td>${row.result}</td>
+      <td>${formatCredits(row.credits)}</td>
+      <td>${row.duration}</td>
+    </tr>
+  `).join('');
+}
+
+function renderBillingFeatureLists(plan) {
+  if (!elements.billingIncludedList || !elements.billingExcludedList) return;
+  const included = [
+    `${formatCredits(plan.dailyLimit)} 每日可用额度`,
+    `${formatCredits(plan.workspaceLimit)} 个工作台`,
+    plan.templateLimit ? `自定义文案模板 X${plan.templateLimit}` : '自定义文案模板不限',
+    '导入预检和历史报表'
+  ];
+  const excluded = [
+    '线上自动支付',
+    '自动发票',
+    '云端同步账号',
+    '企业人工扩容'
+  ];
+  elements.billingIncludedList.innerHTML = included.map(item => `<span class="feature-ok">${escapeHtml(item)}</span>`).join('');
+  elements.billingExcludedList.innerHTML = excluded.map(item => `<span class="feature-no">${escapeHtml(item)}</span>`).join('');
 }
 
 function updateWorkspaceButtonState() {
@@ -559,7 +614,7 @@ function switchPage(pageId) {
   elements.pageTitle.textContent = active.dataset.title;
   elements.pageEyebrow.textContent = active.dataset.eyebrow;
   elements.topbarActions.hidden = !PAGE_ACTIONS.has(pageId);
-  const isPlanPage = ['planPage', 'usagePage', 'creditsPage', 'billingPage', 'referralPage'].includes(pageId);
+  const isPlanPage = ['planPage', 'usagePage', 'quotaPage', 'billingPage', 'referralPage'].includes(pageId);
   elements.plansToggle.classList.toggle('active', isPlanPage);
   if (isPlanPage) setPlansExpanded(true);
   if (pageId === 'historyPage') loadHistory();
@@ -567,7 +622,7 @@ function switchPage(pageId) {
 
 function setPlansExpanded(expanded) {
   elements.plansToggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
-  elements.plansSubnav.hidden = !expanded;
+  elements.plansSubnav.classList.toggle('collapsed', !expanded);
 }
 
 function renderStats(stats) {
