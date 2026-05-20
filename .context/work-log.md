@@ -85,3 +85,8 @@
 - 结果：将“积分”改为“额度”；用量页重做为添加额度使用明细、本日使用情况、本月使用情况和工作台占用；额度页加入余额卡、会员卡、额度包购买区和额度规则；账单页加入账单摘要、当前套餐和账单历史表；推荐奖励页加入推荐概览、推荐码、推荐链接和推荐记录；探索方案子菜单展开/收缩改成高度、透明度和位移过渡，避免硬切。
 - 验证：新增 `usageSummary` 测试先失败后实现；`node --check src\renderer\renderer.js`、`node --check src\main\main.js`、`node --check src\core\billingPlans.js` 通过。
 - 下一步：跑完整测试和构建后，人工打开 EXE 验证视觉效果。
+
+- 步骤：把额度页会员卡改为镭射订阅卡。
+- 结果：套餐规则新增卡片等级映射：免费版 `FREE` 银卡，进阶版 `PLUS` 金卡，专业版 `PRO` 金卡，商业版 `ULTRA` 金卡；额度页会员卡改为带芯片式头像、持卡人、等级和接触式标识的卡面；鼠标悬停时卡片保持布局位置不变，仅通过透视倾斜、侧边高光和镭射光带响应指针位置。
+- 验证：新增套餐卡等级字段测试先失败后实现；`node --check src\renderer\renderer.js`、`node --check src\core\billingPlans.js`、`node --check src\main\main.js` 通过。
+- 下一步：重新打包后人工在 EXE 中确认银卡/金卡质感和鼠标跟随效果。

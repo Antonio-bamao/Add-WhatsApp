@@ -1680,31 +1680,148 @@ td {
 }
 
 .membership-card {
-  display: grid;
-  align-content: space-between;
-  min-height: 180px;
-  padding: 20px;
-  color: #10100f;
-  background: #ffffff;
-  border: 1px solid var(--line);
+  --card-x: 50%;
+  --card-y: 50%;
+  --card-rx: 0deg;
+  --card-ry: 0deg;
+  --card-light-side: -12px;
+  --card-shadow-side: 12px;
+  position: relative;
+  isolation: isolate;
+  min-height: 210px;
+  overflow: hidden;
+  padding: 0;
+  color: #14120d;
+  background: #d9d9d5;
+  border: 1px solid rgba(255, 255, 255, 0.78);
   border-radius: 18px;
-  box-shadow: 0 22px 60px rgba(36, 34, 30, 0.12);
+  box-shadow: 0 26px 70px rgba(36, 34, 30, 0.18), inset 0 0 0 1px rgba(255, 255, 255, 0.36);
+  transform:
+    perspective(900px)
+    rotateX(var(--card-rx))
+    rotateY(var(--card-ry));
+  transform-style: preserve-3d;
+  transition: transform 160ms ease, box-shadow var(--motion);
+  will-change: transform;
 }
 
-.membership-card span {
-  color: var(--muted);
+.membership-card::before {
+  position: absolute;
+  inset: 0;
+  z-index: -2;
+  content: "";
+  background:
+    linear-gradient(118deg, rgba(255, 255, 255, 0.12) 0 12%, transparent 12% 18%, rgba(255, 255, 255, 0.38) 18% 21%, transparent 21% 35%, rgba(255, 255, 255, 0.28) 35% 40%, transparent 40% 100%),
+    linear-gradient(135deg, #aab2b0 0%, #f3f1ed 38%, #c6c7c6 100%);
+}
+
+.membership-card::after {
+  position: absolute;
+  inset: -35%;
+  z-index: -1;
+  content: "";
+  opacity: 0.72;
+  background:
+    linear-gradient(112deg, transparent 18%, rgba(124, 219, 255, 0.62) 21%, transparent 25%),
+    linear-gradient(130deg, transparent 30%, rgba(243, 120, 255, 0.54) 34%, transparent 39%),
+    linear-gradient(118deg, transparent 45%, rgba(255, 226, 118, 0.54) 49%, transparent 54%),
+    linear-gradient(64deg, transparent 58%, rgba(112, 255, 179, 0.5) 61%, transparent 66%);
+  mix-blend-mode: screen;
+  transition: opacity var(--motion);
+}
+
+.membership-card.gold-card::before {
+  background:
+    linear-gradient(118deg, rgba(255, 255, 255, 0.16) 0 12%, transparent 12% 18%, rgba(255, 255, 255, 0.38) 18% 21%, transparent 21% 35%, rgba(255, 255, 255, 0.22) 35% 42%, transparent 42% 100%),
+    linear-gradient(135deg, #9a7a32 0%, #ffe6a6 34%, #c49a3c 62%, #fff1bf 100%);
+}
+
+.membership-card.gold-card::after {
+  opacity: 0.88;
+}
+
+.membership-card:hover {
+  box-shadow: 0 34px 86px rgba(36, 34, 30, 0.23), inset 0 0 0 1px rgba(255, 255, 255, 0.5);
+}
+
+.card-sheen {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background:
+    linear-gradient(110deg, transparent 0 36%, rgba(255, 255, 255, 0.44) 44%, transparent 54%);
+  mix-blend-mode: soft-light;
+  opacity: 0.62;
+}
+
+.card-edge {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  border-radius: inherit;
+  box-shadow:
+    inset var(--card-light-side) 0 18px rgba(255, 255, 255, 0.3),
+    inset var(--card-shadow-side) 0 18px rgba(25, 22, 17, 0.16);
+}
+
+.card-content {
+  position: relative;
+  z-index: 3;
+  display: grid;
+  align-content: space-between;
+  min-height: 210px;
+  padding: 20px;
+  transform: translateZ(26px);
+}
+
+.card-topline,
+.card-holder {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.card-topline span {
+  color: rgba(32, 29, 22, 0.72);
   font-size: 12px;
   font-weight: 900;
+  letter-spacing: 0.02em;
+}
+
+.card-topline em {
+  font-style: normal;
+  font-weight: 900;
+  letter-spacing: -0.16em;
+  transform: rotate(90deg);
 }
 
 .membership-card strong {
-  font-size: 32px;
+  display: block;
+  font-size: 42px;
+  line-height: 1;
   letter-spacing: 0;
 }
 
-.membership-card p {
-  margin: 0;
-  color: var(--muted);
+.card-holder {
+  justify-content: flex-start;
+}
+
+.card-holder div {
+  display: grid;
+  gap: 2px;
+  padding-left: 2px;
+}
+
+.card-holder b {
+  font-size: 14px;
+}
+
+.card-holder small {
+  color: rgba(32, 29, 22, 0.62);
+  font-size: 11px;
 }
 
 .purchase-panel {

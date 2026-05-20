@@ -124,8 +124,10 @@ const elements = {
   dailyUsageBar: document.getElementById('dailyUsageBar'),
   monthlyUsageBar: document.getElementById('monthlyUsageBar'),
   workspaceUsageBar: document.getElementById('workspaceUsageBar'),
+  membershipCard: document.getElementById('membershipCard'),
   quotaCardPlanName: document.getElementById('quotaCardPlanName'),
   quotaCardUserName: document.getElementById('quotaCardUserName'),
+  quotaCardPlanSubtitle: document.getElementById('quotaCardPlanSubtitle'),
   quotaEstimate: document.getElementById('quotaEstimate'),
   billingPlanDescription: document.getElementById('billingPlanDescription'),
   billingIncludedList: document.getElementById('billingIncludedList'),
@@ -249,7 +251,7 @@ function renderSubscriptionState(subscription) {
   elements.dailyUsageBar.style.width = `${today.percent || 0}%`;
   elements.monthlyUsageBar.style.width = `${month.percent || 0}%`;
   elements.workspaceUsageBar.style.width = `${workspacePercent}%`;
-  elements.quotaCardPlanName.textContent = plan.name || '-';
+  renderMembershipCard(plan);
   elements.quotaEstimate.textContent = plan.unitPriceCents ? `¥${((plan.minimumTopUpCredits || 0) * plan.unitPriceCents / 100).toFixed(2)}` : '¥0.00';
   elements.billingPlanDescription.textContent = `${plan.name || '-'}：每日可用上限 ${formatCredits(plan.dailyLimit)}，工作台 ${formatCredits(plan.workspaceLimit)} 个。`;
   renderUsageLedger(subscription);
@@ -261,6 +263,42 @@ function renderSubscriptionState(subscription) {
     }
   }
   updateWorkspaceButtonState();
+}
+
+function renderMembershipCard(plan) {
+  if (!elements.membershipCard) return;
+  const tier = plan.cardTier || 'FREE';
+  const tone = plan.cardTone === 'silver' ? 'silver' : 'gold';
+  elements.membershipCard.classList.toggle('silver-card', tone === 'silver');
+  elements.membershipCard.classList.toggle('gold-card', tone === 'gold');
+  elements.quotaCardPlanName.textContent = tier;
+  elements.quotaCardPlanSubtitle.textContent = plan.name || '当前套餐';
+}
+
+function updateMembershipCardLight(event) {
+  const card = elements.membershipCard;
+  if (!card) return;
+  const rect = card.getBoundingClientRect();
+  const x = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
+  const y = Math.min(1, Math.max(0, (event.clientY - rect.top) / rect.height));
+  card.style.setProperty('--card-x', `${(x * 100).toFixed(2)}%`);
+  card.style.setProperty('--card-y', `${(y * 100).toFixed(2)}%`);
+  card.style.setProperty('--card-rx', `${((0.5 - y) * 14).toFixed(2)}deg`);
+  card.style.setProperty('--card-ry', `${((x - 0.5) * 18).toFixed(2)}deg`);
+  const side = (x - 0.5) * 12;
+  card.style.setProperty('--card-light-side', `${(-side).toFixed(2)}px`);
+  card.style.setProperty('--card-shadow-side', `${side.toFixed(2)}px`);
+}
+
+function resetMembershipCardLight() {
+  const card = elements.membershipCard;
+  if (!card) return;
+  card.style.setProperty('--card-x', '50%');
+  card.style.setProperty('--card-y', '50%');
+  card.style.setProperty('--card-rx', '0deg');
+  card.style.setProperty('--card-ry', '0deg');
+  card.style.setProperty('--card-light-side', '-12px');
+  card.style.setProperty('--card-shadow-side', '12px');
 }
 
 function renderUsageLedger(subscription) {
@@ -1089,6 +1127,8 @@ elements.logoutButton.addEventListener('click', logoutAccount);
 elements.clearWhatsAppButton.addEventListener('click', clearWhatsAppSession);
 elements.exportSyncButton.addEventListener('click', exportSyncPackage);
 elements.importSyncButton.addEventListener('click', importSyncPackage);
+elements.membershipCard.addEventListener('pointermove', updateMembershipCardLight);
+elements.membershipCard.addEventListener('pointerleave', resetMembershipCardLight);
 elements.workspaceRiskConfirmButton.addEventListener('click', openAnotherWorkspace);
 elements.workspaceRiskCancelButton.addEventListener('click', hideWorkspaceRiskModal);
 elements.workspaceRiskModal.addEventListener('click', event => {

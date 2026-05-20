@@ -15,15 +15,23 @@ test('defines the public pricing catalog from the approved package design', () =
 
   assert.deepEqual(plans.map(plan => plan.id), ['free', 'advanced', 'professional', 'business']);
   assert.equal(getPlan('free').dailyLimit, 10);
+  assert.equal(getPlan('free').cardTier, 'FREE');
+  assert.equal(getPlan('free').cardTone, 'silver');
   assert.equal(getPlan('advanced').unitPriceCents, 30);
+  assert.equal(getPlan('advanced').cardTier, 'PLUS');
+  assert.equal(getPlan('advanced').cardTone, 'gold');
   assert.equal(getPlan('advanced').minimumTopUpCredits, 2000);
   assert.equal(getPlan('advanced').dailyLimit, 200);
   assert.equal(getPlan('advanced').workspaceLimit, 2);
   assert.equal(getPlan('professional').unitPriceCents, 20);
+  assert.equal(getPlan('professional').cardTier, 'PRO');
+  assert.equal(getPlan('professional').cardTone, 'gold');
   assert.equal(getPlan('professional').minimumTopUpCredits, 5000);
   assert.equal(getPlan('professional').dailyLimit, 500);
   assert.equal(getPlan('professional').workspaceLimit, 3);
   assert.equal(getPlan('business').unitPriceCents, 10);
+  assert.equal(getPlan('business').cardTier, 'ULTRA');
+  assert.equal(getPlan('business').cardTone, 'gold');
   assert.equal(getPlan('business').minimumTopUpCredits, 20000);
   assert.equal(getPlan('business').dailyLimit, 1000);
   assert.equal(getPlan('business').workspaceLimit, 5);
