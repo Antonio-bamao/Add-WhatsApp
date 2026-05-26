@@ -1,11 +1,11 @@
 # 当前状态
 
-- 当前阶段：Phase 6，云端商业化底座规划：账号、套餐、额度账本、用量限制、支付订单和推荐奖励。
-- 主线状态：`C:\Users\m1591\Desktop\Add-WhatsApp` 已快进合并第二工作台代理分支，当前主线提交为 `b4264db feat: add secondary workspace proxy guardrails`，本轮服务器商业化计划文档和 `.context` 更新还在未提交工作区。
-- 隔离工作：`C:\Users\m1591\.config\superpowers\worktrees\Add-WhatsApp\codex-risk-workbench-warning` 已合并并删除。删除时预览 EXE 占用目录，停止进程 `18388` 后清理完成。
-- 已完成：第二工作台代理功能进入主线；新增套餐规则核心模块；新增探索方案侧栏分组，包含套餐、用量、额度、账单、推荐奖励；套餐页采用进阶/专业/商业价格方案；主工作台打开独立工作台现在受当前套餐工作台数量限制；任务每日上限会按当前套餐封顶；用量页参考 AI 后台样式重做为使用明细、本日使用情况、本月使用情况；额度页替代积分页；探索方案展开/收缩改为高度和透明度过渡动画；额度页会员卡升级为银/金镭射订阅卡，等级映射为 FREE/PLUS/PRO/ULTRA。
-- 已完成：`docs/whatsapp-desktop-plan.md` 已补充云端商业化落地方案，明确本地执行 + 云端授权架构、服务器模块、数据库表、API 合同、额度扣减规则、每日重置规则、推荐奖励边界、异常处理和分阶段实施任务。
-- 进行中：真实服务器、数据库、支付渠道、额度扣费接口、推荐奖励后台尚未实现；当前探索方案页面仍是本地预览数据。
-- 验证：合并后 `npm test` 通过 72/72，`npm run build` 成功；新增套餐模块后 `npm test` 通过 76/76；新增本日/本月用量模型后 `npm test` 通过 77/77；`npm run build` 成功生成 `dist\Add WhatsApp 0.1.2.exe`。
-- 下一步：先按计划落地最小云端闭环：云端账号、套餐权益、额度账本、每日/月用量、桌面端云端登录和权益读取；推荐奖励放到订单和账本稳定之后实现。
-- 阻塞项：需要确定服务端部署方式、数据库环境、云端域名/API 地址、支付方式先走人工收款还是直接接支付渠道。
+- 当前阶段：Phase 7，官网与下载落地页第一版。
+- 主线状态：`C:\Users\m1591\Desktop\Add-WhatsApp` 正在新增独立 `website/` Next.js 官网应用；桌面端 `src/` 未参与本轮改动。
+- 已完成：`website/` 独立 Next.js App Router 工程已创建；首页、下载页、版本页、公开静态 `/site.css`、站点导航/页脚、`react-globe.gl` 开源 WebGL 地球、`world-atlas` 本地国家边界和下载 manifest 已落地。
+- 已完成：当前 Windows 便携版 `dist\Add WhatsApp 0.1.2.exe` 已复制到 `website\public\downloads\latest\Add-WhatsApp.exe` 和 `website\public\downloads\releases\0.1.2\Add-WhatsApp-0.1.2.exe`；`update.json` 已写入版本、文件名、下载路径、发布日期、大小和 SHA256。
+- 已完成：新增 `docs/repository-structure.md` 记录当前单仓库分目录边界，明确官网不放 API 密钥、后台逻辑、客户数据或 WhatsApp session。
+- 进行中：等待用户确认官网首屏视觉、下载页内容和后续生产部署方式。
+- 验证：`website\npm test` 通过 5/5；`website\npm run build` 成功；根项目 `npm test` 通过 77/77；本地 `http://localhost:3100` 桌面/移动端 Chrome headless 截图已复查，样式不再退化为裸 HTML；浏览器插件调试确认首屏只剩 1 个 WebGL canvas、无旧 `.globe-static` SVG 叠加、无 Server Error；下载页返回 200，`/downloads/latest/Add-WhatsApp.exe` HEAD 长度为 `77060652`。
+- 下一步：确认视觉方向后，可继续补正式品牌文案、隐私/条款页、SEO 图、真实部署配置和以后自动更新/签名方案。
+- 阻塞项：生产域名、托管平台、证书/代码签名策略和长期下载包发布流程还未最终确定。

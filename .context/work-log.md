@@ -95,3 +95,36 @@
 - 结果：`docs/whatsapp-desktop-plan.md` 已补充云端商业化架构，明确桌面端继续本地执行，服务器负责云端账号、套餐权益、额度账本、日/月用量、支付订单、账单、推荐奖励、工作台租约和管理审计；文档详细列出数据库表、API 合同、扣费流程、幂等键、跨天重置、断网补扣、退款拒付、推荐反作弊、套餐升降级和服务不可用等边界。
 - 验证：占位词扫描无命中；`validate_context.py --project-root .` 返回 `context is valid`。
 - 下一步：先落地最小云端闭环：云端账号 + 套餐权益 + 额度账本 + 桌面端鉴权。
+
+## 2026-05-24
+
+- 步骤：落地 Add WhatsApp 官网第一版。
+- 结果：新增独立 `website/` Next.js 应用，包含深色全球科技风首页、下载页、版本页、站点导航/页脚、Three.js 定制大地球、官网直链下载目录和 `update.json`；新增 `docs/repository-structure.md` 记录官网、桌面端和未来后台/API 的边界。
+- 结果：将当前构建产物 `dist\Add WhatsApp 0.1.2.exe` 复制为 `website\public\downloads\latest\Add-WhatsApp.exe` 和 `website\public\downloads\releases\0.1.2\Add-WhatsApp-0.1.2.exe`，manifest 使用 SHA256 `c733f26ee257b5333ece4a9e9e3d16a4a39b511bb708b89190e54fb8ec2111f2`。
+- 验证：先写 `website\tests\website-structure.test.mjs` 并确认测试因官网缺失失败；实现后 `website\npm test` 通过 5/5，`website\npm run build` 成功；本地 Chrome headless 截图检查桌面和移动端首屏，下载页与下载文件 HEAD 检查通过。
+- 下一步：用户确认视觉方向后，继续补正式部署配置、SEO/社交分享图、隐私/条款页和长期版本发布流程。
+
+- 步骤：修复官网本地预览退化为裸 HTML 的问题。
+- 结果：定位到 Next dev 输出的 `/_next/static/css/app/layout.css?...` 在当前环境返回 404，导致用户浏览器看不到设计样式；将主样式改为公开静态 `/site.css`，并从 `app/layout.js` 显式加载；同时移除 `next/dynamic({ ssr:false })` 的地球挂载方式，改为直接使用 Client Component，并增强 CSS fallback，避免客户端 JS 慢加载时首屏无地球。
+- 验证：`/site.css` 返回 200；清理坏掉的 `.next` 缓存并重启 dev server 后，Chrome headless 桌面/移动端截图显示样式和大地球正常；`website\npm test` 通过 5/5，`website\npm run build` 成功，根项目 `npm test` 通过 77/77。
+- 下一步：继续按用户反馈精修视觉，而不是再交付未验证的裸页面。
+
+- 步骤：用浏览器插件调试官网地球地图缺失。
+- 结果：浏览器里确认 `.globe-shell` 和 HUD 已渲染，但 Three.js canvas 未挂载且无控制台错误，导致用户看到的地球仍像空壳；新增服务端直接渲染的 SVG 地球底图，包含发光球体、经纬网格、陆地区块、全球路线和动态节点，Three.js 继续作为增强层，不再作为首屏地图唯一来源。
+- 验证：浏览器插件复查 `http://localhost:3100`，SVG 地球可见，路线 4 条、节点 6 个、陆地区块 4 个，控制台日志为空；`website\npm test` 通过 5/5，`website\npm run build` 成功，根项目 `npm test` 通过 77/77。
+- 下一步：用户确认当前视觉后，再继续做正式部署配置、SEO/社交分享图、隐私/条款页和长期版本发布流程。
+
+- 步骤：修复官网预览 Server Error。
+- 结果：确认报错 `Cannot find module './819.js'` 是因为 Next dev server 仍在运行时执行了 `next build`，生产构建覆盖 `.next` 后，旧 dev server 继续引用已经不存在的热更新 chunk；停止占用 `3100` 的旧 Node 进程，清理 `website\.next`，重新启动 dev server。
+- 验证：`http://localhost:3100` 返回 200 且页面内容不包含 `Server Error` 或 `Cannot find module`；浏览器插件打开首页确认 `Add WhatsApp` 首屏、SVG 地球、4 条路线、6 个节点和 1 个 Three canvas 均存在。
+- 下一步：本地预览期间不要在同一个 `.next` 目录上边跑 dev 边跑 build；如需重新生产构建，构建后必须重启 dev server。
+
+- 步骤：重做官网首屏地球视觉。
+- 结果：参考 Stripe globe、globe.gl 和 react-globe 这类成功案例的共同思路，将 Three.js 中乱飘的 3D 飞线移除，Three 只保留空间氛围、球体深度和星点；核心地图改为 SVG 正交投影层，新增大陆轮廓、国家/地区边界线、球面内统一弧线和克制节点，避免路线飞出球外或弧度不一致。
+- 验证：浏览器插件复查 `http://localhost:3100`，无 Server Error；首屏存在 1 个 canvas、SVG 地球、7 个陆地区块、21 条国家/地区边界线、4 条统一路线和 8 个节点；`website\npm test` 通过 5/5，`website\npm run build` 成功；构建后已清理 `.next` 并重启 dev server，`http://localhost:3100` 返回 200 且不包含 `Server Error` 或 `Cannot find module`。
+- 下一步：继续按用户视觉反馈精修地球精度和品牌首屏，不再把临时 demo 级视觉当正式官网交付。
+
+- 步骤：把官网地球替换为开源方案。
+- 结果：安装 `react-globe.gl`、`topojson-client` 和 `world-atlas`；删除手写 SVG 地球和自研 Three 飞线，改为单一 `react-globe.gl` canvas；使用 `world-atlas/countries-110m.json` 本地国家边界渲染 polygons，并配置 4 条 arc links、8 个 markers 和前 4 个节点 rings。
+- 验证：浏览器插件复查 `http://localhost:3100`，无 Server Error，首屏 `canvasCount=1`、`staticSvgCount=0`，确认没有双地球叠加；`website\npm test` 通过 5/5，`website\npm run build` 成功，根项目 `npm test` 通过 77/77；构建后已清理 `.next` 并重启 dev server，页面返回 200 且不包含 `Server Error` 或 `Cannot find module`。
+- 下一步：继续基于开源地球调视觉参数，不再回到手写叠层地球方案。

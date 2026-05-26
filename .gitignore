@@ -20,6 +20,9 @@ dist/
 build/
 out/
 release/
+website/.next/
+website/out/
+website/.visual-check/
 
 # Local environment
 .env

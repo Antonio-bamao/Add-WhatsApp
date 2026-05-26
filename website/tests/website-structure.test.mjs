@@ -1,0 +1,109 @@
+import { describe, it } from "node:test";
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const websiteRoot = path.resolve(__dirname, "..");
+
+function readJson(relativePath) {
+  return JSON.parse(fs.readFileSync(path.join(websiteRoot, relativePath), "utf8"));
+}
+
+function readText(relativePath) {
+  return fs.readFileSync(path.join(websiteRoot, relativePath), "utf8");
+}
+
+function listFiles(dir) {
+  if (!fs.existsSync(dir)) {
+    return [];
+  }
+
+  return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const fullPath = path.join(dir, entry.name);
+    return entry.isDirectory() ? listFiles(fullPath) : [fullPath];
+  });
+}
+
+describe("public website structure", () => {
+  it("is an isolated Next.js app with the required scripts and dependencies", () => {
+    const packageJson = readJson("package.json");
+
+    assert.equal(packageJson.private, true);
+    assert.equal(packageJson.scripts.dev, "next dev");
+    assert.equal(packageJson.scripts.build, "next build");
+    assert.equal(packageJson.scripts.start, "next start");
+
+    for (const dependency of [
+      "next",
+      "react",
+      "react-dom",
+      "three",
+      "lucide-react",
+      "react-globe.gl",
+      "topojson-client",
+      "world-atlas"
+    ]) {
+      assert.ok(packageJson.dependencies[dependency], `missing dependency: ${dependency}`);
+    }
+  });
+
+  it("defines the Chinese homepage, download page, and release metadata route", () => {
+    const layout = readText("app/layout.js");
+    const homePage = readText("app/page.js");
+    const downloadPage = readText("app/download/page.js");
+    const releasesPage = readText("app/releases/page.js");
+
+    assert.match(layout, /href="\/site\.css"/);
+    assert.match(homePage, /Add WhatsApp/);
+    assert.match(homePage, /官方下载/);
+    assert.match(homePage, /全球/);
+    assert.match(downloadPage, /Windows/);
+    assert.match(downloadPage, /latestRelease\.downloadUrl/);
+    assert.match(releasesPage, /releaseHistory/);
+  });
+
+  it("uses an open-source React globe with local country topology", () => {
+    const homePage = readText("app/page.js");
+    const globe = readText("components/GlobeScene.js");
+
+    assert.match(globe, /"use client"/);
+    assert.match(globe, /react-globe\.gl/);
+    assert.match(globe, /world-atlas\/countries-110m\.json/);
+    assert.match(globe, /topojson-client/);
+    assert.match(globe, /from "three"/);
+    assert.match(globe, /polygonsData/);
+    assert.match(globe, /arcsData/);
+    assert.match(globe, /pointsData/);
+    assert.doesNotMatch(globe, /className="globe-static"/);
+    assert.match(homePage, /import GlobeScene/);
+    assert.doesNotMatch(globe, /unpkg\.com\/globe/i);
+  });
+
+  it("keeps website code isolated from desktop internals and server secrets", () => {
+    const sourceFiles = listFiles(path.join(websiteRoot, "app"))
+      .concat(listFiles(path.join(websiteRoot, "components")))
+      .concat(listFiles(path.join(websiteRoot, "lib")))
+      .filter((file) => /\.(js|jsx|mjs|css|json)$/.test(file));
+
+    assert.ok(sourceFiles.length > 0, "expected website source files");
+
+    const combinedSource = sourceFiles.map((file) => fs.readFileSync(file, "utf8")).join("\n");
+    assert.doesNotMatch(combinedSource, /from ["']\.\.\/(?:server|src)|DATABASE_URL|ADMIN_KEY|SERVICE_ROLE/i);
+  });
+
+  it("publishes the latest download manifest and referenced Windows binaries", () => {
+    const updateJson = readJson("public/downloads/latest/update.json");
+
+    assert.equal(updateJson.version, "0.1.2");
+    assert.equal(updateJson.fileName, "Add-WhatsApp.exe");
+    assert.equal(updateJson.downloadUrl, "/downloads/latest/Add-WhatsApp.exe");
+    assert.match(updateJson.releaseDate, /^\d{4}-\d{2}-\d{2}$/);
+    assert.match(updateJson.sha256, /^[a-f0-9]{64}$/);
+
+    assert.ok(fs.existsSync(path.join(websiteRoot, "public/downloads/latest/Add-WhatsApp.exe")));
+    assert.ok(fs.existsSync(path.join(websiteRoot, "public/downloads/releases/0.1.2/Add-WhatsApp-0.1.2.exe")));
+    assert.ok(fs.existsSync(path.join(websiteRoot, "public/site.css")));
+  });
+});
