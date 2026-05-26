@@ -59,6 +59,7 @@ describe("public website structure", () => {
     assert.match(homePage, /Add WhatsApp/);
     assert.match(homePage, /官方下载/);
     assert.match(homePage, /全球/);
+    assert.doesNotMatch(homePage, /上线前最常见的问题|FAQ/);
     assert.match(downloadPage, /Windows/);
     assert.match(downloadPage, /latestRelease\.downloadUrl/);
     assert.match(releasesPage, /releaseHistory/);
@@ -77,6 +78,7 @@ describe("public website structure", () => {
     assert.match(globe, /arcsData/);
     assert.match(globe, /pointsData/);
     assert.doesNotMatch(globe, /className="globe-static"/);
+    assert.doesNotMatch(globe, /Live route intelligence|Country polygons/);
     assert.match(homePage, /import GlobeScene/);
     assert.doesNotMatch(globe, /unpkg\.com\/globe/i);
   });
@@ -105,5 +107,14 @@ describe("public website structure", () => {
     assert.ok(fs.existsSync(path.join(websiteRoot, "public/downloads/latest/Add-WhatsApp.exe")));
     assert.ok(fs.existsSync(path.join(websiteRoot, "public/downloads/releases/0.1.2/Add-WhatsApp-0.1.2.exe")));
     assert.ok(fs.existsSync(path.join(websiteRoot, "public/site.css")));
+  });
+
+  it("does not publish placeholder support contact details", () => {
+    const sourceFiles = listFiles(websiteRoot).filter((file) =>
+      /\.(js|jsx|mjs|css|html|md|json)$/.test(file)
+    );
+    const combinedSource = sourceFiles.map((file) => fs.readFileSync(file, "utf8")).join("\n");
+
+    assert.doesNotMatch(combinedSource, /support@addwhatsapp\.com/);
   });
 });

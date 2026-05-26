@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Add WhatsApp Admin Preview</title>
+    <link rel="stylesheet" href="./admin.css" />
+  </head>
+  <body>
+    <div class="admin-shell">
+      <aside class="sidebar" aria-label="后台导航">
+        <div class="brand-lockup">
+          <span class="brand-mark" aria-hidden="true">AW</span>
+          <div>
+            <strong>Add WhatsApp</strong>
+            <span>admin.addwhatsapp.com</span>
+          </div>
+        </div>
+
+        <nav class="sidebar-nav">
+          <button type="button" data-route-link="dashboard">运营首页</button>
+          <button type="button" data-module-link="users">用户与云端账号</button>
+          <button type="button" data-module-link="plans">套餐与订阅</button>
+          <button type="button" data-module-link="credits">额度账本</button>
+          <button type="button" data-module-link="usage">用量限额</button>
+          <button type="button" data-module-link="orders">订单与入账</button>
+          <button type="button" data-module-link="referrals">推荐审核</button>
+          <button type="button" data-module-link="workspaces">设备与工作台</button>
+          <button type="button" data-module-link="audit">审计日志</button>
+        </nav>
+
+        <p class="sidebar-note">
+          管理台只放运营与审计能力。公开官网继续留在 website，桌面端继续留在 src，API 后续独立部署到 api.addwhatsapp.com。
+        </p>
+      </aside>
+
+      <main class="main" data-page-outlet></main>
+    </div>
+
+    <script type="module" src="./admin.js"></script>
+  </body>
+</html>

@@ -15,6 +15,8 @@
 | 本地套餐状态与真实支付未接入 | 用户看到套餐页但没有线上订单系统 | 误解为已经有自动充值/账单能力 | 用量、账单、积分页标注当前为规则/占位；后续再接充值账本、支付回调和扣费流水 |
 | 官网下载包过期 | 桌面端重新打包后未同步 `website/public/downloads` 和 `update.json` | 用户下载旧版本或校验信息不一致 | 每次发布执行复制 EXE、计算 SHA256、更新 latest/release 目录和版本页，再跑 website 测试与 build |
 | 公开官网误放敏感配置 | 官网后续接后台/API 时混入密钥、数据库 URL 或客户数据 | 公开站点泄露管理能力或用户数据 | 官网目录只放公开内容和下载元数据；后台走 `admin.addwhatsapp.com`，API 走 `api.addwhatsapp.com`，结构测试扫描敏感导入和密钥字样 |
+| 后台人工操作无审计 | 管理员改套餐、补额度、释放租约或审核推荐时只改状态不写日志 | 资金和权限问题无法追溯，误操作难以修正 | 后台管理台把审计日志作为一等模块；余额只能通过账本调整，敏感动作必须记录管理员、对象、前后摘要、时间和 IP |
+| 内存预览服务被误认为生产后端 | `server/` 当前为了无依赖本地预览使用内存存储 | 重启后数据丢失，无法支撑真实付费、退款和审计 | README 和 `.context` 标明内存存储仅用于本地预览；生产化必须接 PostgreSQL schema 和事务仓储 |
 | Next dev CSS 资源失效 | 当前环境下 Next dev 虚拟 CSS 路径返回 404 或 `.next` 热更新缓存损坏 | 官网退化成浏览器默认裸 HTML，用户误以为页面没做 | 主样式改为公开静态 `/site.css` 并由 layout 显式加载；开发预览异常时清理 `website/.next` 后重启 dev server |
 | Three.js 地球未挂载 | 浏览器环境或热更新状态导致 client effect 没创建 canvas，且没有明显控制台错误 | 首屏只剩发光空壳，看不到地图、路线和节点 | 地球核心视觉改为服务端 SVG 底图，Three.js 只做增强；浏览器插件检查 SVG、路线、节点和控制台 |
 | Dev server 与生产构建共用 `.next` | `next dev` 运行中又执行 `next build` | dev server 引用旧 chunk，出现 `Cannot find module './xxx.js'` 的 Server Error | 构建后停止旧 dev server、清理 `website/.next` 并重启；后续避免在同一目录同时跑 dev 和 build |

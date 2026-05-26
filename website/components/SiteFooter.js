@@ -10,7 +10,6 @@ export function SiteFooter() {
       <div className="footer-links">
         <Link href="/download">官方下载</Link>
         <Link href="/releases">版本记录</Link>
-        <a href="mailto:support@addwhatsapp.com">support@addwhatsapp.com</a>
       </div>
     </footer>
   );

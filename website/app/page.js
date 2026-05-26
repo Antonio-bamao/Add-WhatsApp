@@ -47,21 +47,6 @@ const workflow = [
   "运行任务并导出明细"
 ];
 
-const faqs = [
-  {
-    q: "官网下载安装到电脑会不会需要特殊配置？",
-    a: "第一版提供 Windows 便携版下载，下载后按页面说明启动即可；后续如果做安装器，会在下载页分开标注。"
-  },
-  {
-    q: "官网和后台管理是不是同一个系统？",
-    a: "不是。官网在 addwhatsapp.com，后台以后放在 admin.addwhatsapp.com，API 放在 api.addwhatsapp.com，互相隔离。"
-  },
-  {
-    q: "以后软件更新怎么办？",
-    a: "下载页会始终指向 latest 目录，版本页保留历史版本。以后接自动更新时，也可以复用 update.json。"
-  }
-];
-
 export default function HomePage() {
   return (
     <>
@@ -177,20 +162,6 @@ export default function HomePage() {
           </div>
         </section>
 
-        <section className="section faq-section">
-          <div className="section-heading compact">
-            <p className="eyebrow">FAQ</p>
-            <h2>上线前最常见的问题</h2>
-          </div>
-          <div className="faq-list">
-            {faqs.map((item) => (
-              <article className="faq-item" key={item.q}>
-                <h3>{item.q}</h3>
-                <p>{item.a}</p>
-              </article>
-            ))}
-          </div>
-        </section>
       </main>
       <SiteFooter />
     </>

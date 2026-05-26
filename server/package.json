@@ -1,0 +1,12 @@
+{
+  "name": "add-whatsapp-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Cloud API skeleton for Add WhatsApp billing and admin operations.",
+  "main": "src/app.js",
+  "scripts": {
+    "dev": "node src/app.js",
+    "test": "node --test tests/*.test.mjs"
+  }
+}

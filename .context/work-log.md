@@ -128,3 +128,38 @@
 - 结果：安装 `react-globe.gl`、`topojson-client` 和 `world-atlas`；删除手写 SVG 地球和自研 Three 飞线，改为单一 `react-globe.gl` canvas；使用 `world-atlas/countries-110m.json` 本地国家边界渲染 polygons，并配置 4 条 arc links、8 个 markers 和前 4 个节点 rings。
 - 验证：浏览器插件复查 `http://localhost:3100`，无 Server Error，首屏 `canvasCount=1`、`staticSvgCount=0`，确认没有双地球叠加；`website\npm test` 通过 5/5，`website\npm run build` 成功，根项目 `npm test` 通过 77/77；构建后已清理 `.next` 并重启 dev server，页面返回 200 且不包含 `Server Error` 或 `Cannot find module`。
 - 下一步：继续基于开源地球调视觉参数，不再回到手写叠层地球方案。
+
+- 步骤：按反馈精简地球浮层并增加线路密度。
+- 结果：删除首屏地球上的 `Live route intelligence` 和 `Country polygons · Arc links` 两个 HUD 文案；将 arc links 从 12 条扩展到 20 条，增加非洲、欧洲、中东可见半球线路；拉长 dash 段并提高最小线宽，让射线在截图和浏览器预览中更明显。
+- 验证：浏览器插件复查 `http://localhost:3100`，无 Server Error，`canvasCount=1`、`hudCount=0`，页面文本不再包含 `Live route intelligence` 或 `Country polygons`；`website\npm test` 通过 5/5，`website\npm run build` 成功，根项目 `npm test` 通过 77/77；构建后已清理 `.next` 并重启 dev server，页面返回 200 且不包含 `Server Error` 或 `Cannot find module`。
+- 下一步：如继续增强地球视觉，应优先调 `react-globe.gl` 的 arcs/points 参数，不再增加额外浮层文案。
+
+- 步骤：删除官网 FAQ 区块和占位邮箱。
+- 结果：首页移除“上线前最常见的问题”整块 FAQ；页脚移除 `support@addwhatsapp.com`，只保留官方下载和版本记录；结构测试新增断言，防止占位邮箱和 FAQ 文案重新出现。
+- 验证：`website\npm test` 通过 6/6，`website\npm run build` 成功；重启 `http://localhost:3100` 后返回 200 且不包含 `support@addwhatsapp.com`、`上线前最常见的问题` 或 Server Error；浏览器插件确认页脚仅显示 Add WhatsApp、说明文案、官方下载和版本记录。
+- 下一步：如后续需要联系方式，先确认真实邮箱或客服入口后再加回官网。
+
+## 2026-05-26
+
+- 步骤：新增后台管理台 v0。
+- 结果：新增独立 `admin/` 静态管理台预览，不放进 `website/`；页面按云端商业化文档一一对应用户与云端账号、套餐与订阅、额度账本、用量限额、订单与入账、推荐审核、设备与工作台、审计日志 8 个后台模块；同时把桌面端套餐页、用量页、额度页、账单页、推荐奖励页对应到后台管理面、权威数据源和核对项。
+- 结果：新增 `admin/tests/admin-structure.test.mjs` 锁定后台独立边界、模块映射、桌面页映射和敏感操作审计可见性；更新 `docs/repository-structure.md` 与 `.context/current-status.md` / `.context/task-breakdown.md`，记录 `admin/`、`website/`、`src/` 的边界。
+- 验证：先运行 `admin\npm test` 确认 4 个测试因缺少后台文件失败；实现后 `admin\npm test` 通过 4/4；本地 `http://127.0.0.1:3220/` 浏览器验证模块数 8、映射行 5、运营队列 3、无 console error/warning、无横向溢出；临时静态服务器已停止。
+- 下一步：确认后台管理台 v0 信息架构后，进入真实 `server/` API、数据库 schema、管理员登录权限和审计写入。
+
+- 步骤：修复后台预览打不开。
+- 结果：确认 `127.0.0.1:3220` 连接被拒绝是因为上一步验证后临时静态服务器已停止；新增 `admin` 的 `npm run dev` 固定启动脚本，README 写明启动后打开 `http://127.0.0.1:3220/`。
+- 验证：先补结构测试断言 `dev` 脚本并确认测试失败；补脚本后 `admin\npm test` 通过 4/4；启动预览后 `Invoke-WebRequest http://127.0.0.1:3220/` 返回 200。
+- 下一步：用户预览后台 v0 后确认是否继续接真实 API。
+
+- 步骤：新增云端 API 和账本服务骨架。
+- 结果：新增独立 `server/`，包含无外部依赖的本地预览 HTTP API、`billingService` 服务层和 `src/db/schema.sql` PostgreSQL 目标表；实现云端账号注册/登录、权益查询、成功添加幂等扣费、人工调账审计、订单创建/人工入账、工作台租约上限和审计日志查询。
+- 结果：新增 `server/tests/billing-service.test.mjs` 和 `server/tests/http-api.test.mjs`，先确认缺少服务文件导致测试失败，再实现服务端模块；更新仓库结构和 `.context` 记录 `server/` 边界。
+- 验证：`server\npm test` 通过 7/7，覆盖 14 张目标表、权益计算、幂等扣费、人工调账审计、订单入账和工作台租约限制。
+- 下一步：把 `admin/` 管理台接入 `server/` API，替换本地预览数据。
+
+- 步骤：将后台管理台从总览长页改为每模块独立页面。
+- 结果：`admin/` 首页只保留运营摘要、模块入口、待处理队列和桌面端页面映射；8 个后台模块改为 hash 路由独立页：`#/users`、`#/plans`、`#/credits`、`#/usage`、`#/orders`、`#/referrals`、`#/workspaces`、`#/audit`。
+- 结果：新增每个模块的页面标题、说明、详情区、记录表和守则区；侧栏当前模块高亮，不再在同一页面堆叠全部模块详情。
+- 验证：先改 `admin/tests/admin-structure.test.mjs` 要求单页面出口、模块路由和页面配置并确认测试失败；实现后 `admin\npm test` 通过 4/4；浏览器验证运营首页 `moduleLinks=8`、`modulePanels=0`，`#/referrals` 页面只显示推荐审核详情，`detailSections=3`、`recordRows=3`、无 console error/warning、无横向溢出。
+- 下一步：继续把每个模块页接入 `server/` API。

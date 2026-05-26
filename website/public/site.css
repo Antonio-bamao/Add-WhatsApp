@@ -246,40 +246,33 @@ h3 {
 .hero-visual {
   min-height: 610px;
   position: relative;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .globe-shell,
 .globe-fallback {
   position: absolute;
-  inset: -8% -8% -2% -4%;
-  min-height: 560px;
+  top: -22px;
+  right: -34px;
+  width: 760px;
+  height: 640px;
 }
 
 .globe-open-source {
   display: grid;
   place-items: center;
   overflow: visible;
+  contain: layout;
 }
 
 .globe-shell canvas {
   position: relative;
   z-index: 2;
   display: block;
-  width: 100%;
-  height: 100%;
+  width: 760px !important;
+  height: 640px !important;
   opacity: 1;
   mix-blend-mode: normal;
-  -webkit-mask-image: radial-gradient(circle at 50% 50%, #000 0 58%, rgba(0, 0, 0, 0.82) 66%, transparent 79%);
-  mask-image: radial-gradient(circle at 50% 50%, #000 0 58%, rgba(0, 0, 0, 0.82) 66%, transparent 79%);
-}
-
-.globe-vignette {
-  position: absolute;
-  z-index: 3;
-  inset: 0;
-  pointer-events: none;
-  background: radial-gradient(circle at 50% 50%, transparent 0 54%, rgba(2, 8, 7, 0.28) 74%, transparent 86%);
 }
 
 .globe-loading {
@@ -404,15 +397,6 @@ h3 {
   to {
     stroke-dashoffset: -60;
   }
-}
-
-.globe-shell::before {
-  content: "";
-  position: absolute;
-  inset: 9% 4% 6%;
-  border: 1px solid rgba(160, 255, 235, 0.09);
-  border-radius: 50%;
-  pointer-events: none;
 }
 
 .globe-fallback {
@@ -816,14 +800,19 @@ dd {
   }
 
   .hero-visual {
-    min-height: 500px;
+    min-height: 540px;
     order: -1;
+    overflow: hidden;
   }
 
   .globe-shell,
   .globe-fallback {
-    inset: 0 -8% -5%;
-    min-height: 500px;
+    top: -58px;
+    right: 50%;
+    width: 760px;
+    height: 640px;
+    transform: translateX(50%) scale(0.78);
+    transform-origin: center top;
   }
 
   .signal-band,
@@ -859,12 +848,17 @@ dd {
   }
 
   .hero-visual {
-    min-height: 360px;
+    min-height: 420px;
   }
 
   .globe-shell,
   .globe-fallback {
-    min-height: 360px;
+    top: -46px;
+    right: 50%;
+    width: 760px;
+    height: 640px;
+    transform: translateX(50%) scale(0.58);
+    transform-origin: center top;
   }
 
   .globe-hud {
