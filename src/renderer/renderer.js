@@ -131,7 +131,16 @@ const elements = {
   quotaEstimate: document.getElementById('quotaEstimate'),
   billingPlanDescription: document.getElementById('billingPlanDescription'),
   billingIncludedList: document.getElementById('billingIncludedList'),
-  billingExcludedList: document.getElementById('billingExcludedList')
+  billingExcludedList: document.getElementById('billingExcludedList'),
+  cloudAccountPanel: document.getElementById('cloudAccountPanel'),
+  cloudLoginForm: document.getElementById('cloudLoginForm'),
+  cloudUsernameInput: document.getElementById('cloudUsernameInput'),
+  cloudPasswordInput: document.getElementById('cloudPasswordInput'),
+  cloudStatusText: document.getElementById('cloudStatusText'),
+  cloudPlanBadge: document.getElementById('cloudPlanBadge'),
+  cloudLoginButton: document.getElementById('cloudLoginButton'),
+  cloudRefreshButton: document.getElementById('cloudRefreshButton'),
+  cloudLogoutButton: document.getElementById('cloudLogoutButton')
 };
 
 const PAGE_ACTIONS = new Set(['importPage']);
@@ -161,6 +170,7 @@ function setAuthMessage(message, tone = '') {
 function applyAuthState(auth) {
   state.auth = auth || { authenticated: false, user: null };
   if (state.auth.subscription) renderSubscriptionState(state.auth.subscription);
+  renderCloudState(state.auth.cloud);
   const authenticated = Boolean(state.auth.authenticated && state.auth.user);
   elements.authGate.hidden = authenticated;
   elements.appShell.hidden = !authenticated;
@@ -229,6 +239,21 @@ function renderPlanCards(subscription) {
     `;
     elements.planCards.appendChild(card);
   }
+}
+
+function renderCloudState(cloud) {
+  if (!elements.cloudStatusText) return;
+  const connected = Boolean(cloud && cloud.authenticated && cloud.user);
+  const entitlements = cloud && cloud.entitlements ? cloud.entitlements : null;
+  const cloudName = connected ? (cloud.user.username || cloud.user.email || '云端账号') : '';
+  elements.cloudPlanBadge.textContent = entitlements && entitlements.planId
+    ? `云端：${entitlements.planId}`
+    : '本地预览';
+  elements.cloudStatusText.textContent = connected
+    ? `${cloudName} 已连接后台 API，余额 ${formatCredits(entitlements && entitlements.balanceCredits)}，今日已用 ${formatCredits(entitlements && entitlements.usedToday)}。`
+    : '未连接后台 API，当前显示本地预览额度。';
+  elements.cloudRefreshButton.disabled = !connected;
+  elements.cloudLogoutButton.disabled = !connected;
 }
 
 function renderSubscriptionState(subscription) {
@@ -435,6 +460,47 @@ async function logoutAccount() {
   }
   applyAuthState({ authenticated: false, user: null });
   switchAuthMode('login');
+}
+
+async function loginCloudAccount(event) {
+  event.preventDefault();
+  elements.cloudLoginButton.disabled = true;
+  elements.cloudStatusText.textContent = '正在连接后台 API...';
+  const response = await window.addWhatsapp.loginCloudAccount({
+    username: elements.cloudUsernameInput.value,
+    password: elements.cloudPasswordInput.value
+  });
+  elements.cloudLoginButton.disabled = false;
+  if (!response.ok) {
+    elements.cloudStatusText.textContent = response.error || '云端登录失败。';
+    return;
+  }
+  elements.cloudPasswordInput.value = '';
+  if (response.subscription) renderSubscriptionState(response.subscription);
+  renderCloudState(response.cloud);
+}
+
+async function refreshCloudEntitlements() {
+  elements.cloudRefreshButton.disabled = true;
+  elements.cloudStatusText.textContent = '正在刷新云端套餐...';
+  const response = await window.addWhatsapp.refreshCloudEntitlements();
+  if (response.ok && response.subscription) {
+    renderSubscriptionState(response.subscription);
+    renderCloudState(response.cloud);
+  } else {
+    elements.cloudStatusText.textContent = response.error || '刷新云端套餐失败。';
+    renderCloudState(response.cloud || (state.auth && state.auth.cloud));
+  }
+}
+
+async function logoutCloudAccount() {
+  const response = await window.addWhatsapp.logoutCloudAccount();
+  if (!response.ok) {
+    elements.cloudStatusText.textContent = response.error || '退出云端失败。';
+    return;
+  }
+  if (response.subscription) renderSubscriptionState(response.subscription);
+  renderCloudState(response.cloud);
 }
 
 function showWorkspaceRiskModal() {
@@ -821,6 +887,8 @@ function taskEventMessage(event) {
     'row:sent': `第 ${event.row.rowNumber} 行已发送：${languageLabel(event.row.language)}`,
     'row:failed': `第 ${event.row.rowNumber} 行发送失败：${event.error}`,
     'row:fatal': `自动化浏览器已关闭或失联，停在第 ${event.row.rowNumber} 行：${event.error}`,
+    'cloud:usage-synced': event.message,
+    'cloud:usage-sync-failed': event.message,
     'task:finished': event.message,
     'task:error': event.message
   };
@@ -1110,6 +1178,9 @@ for (const tab of elements.authTabs) {
 elements.loginForm.addEventListener('submit', handleLogin);
 elements.registerForm.addEventListener('submit', handleRegister);
 elements.resetForm.addEventListener('submit', handleResetPassword);
+elements.cloudLoginForm.addEventListener('submit', loginCloudAccount);
+elements.cloudRefreshButton.addEventListener('click', refreshCloudEntitlements);
+elements.cloudLogoutButton.addEventListener('click', logoutCloudAccount);
 elements.downloadRecoveryButton.addEventListener('click', downloadRecovery);
 elements.importButton.addEventListener('click', importContacts);
 elements.dropImportButton.addEventListener('click', importContacts);

@@ -1,0 +1,83 @@
+const { createEntitlementState } = require('./billingPlans');
+
+const DEFAULT_API_BASE_URL = 'http://127.0.0.1:4110';
+
+class CloudApiClient {
+  constructor({ baseUrl = DEFAULT_API_BASE_URL, fetchImpl = globalThis.fetch } = {}) {
+    this.baseUrl = String(baseUrl || DEFAULT_API_BASE_URL).replace(/\/+$/, '');
+    this.fetchImpl = fetchImpl;
+    if (typeof this.fetchImpl !== 'function') {
+      throw new Error('当前运行环境不支持云端 API 请求。');
+    }
+  }
+
+  async login({ username, password, deviceId }) {
+    return this.request('/v1/auth/login', {
+      method: 'POST',
+      body: { username, password, deviceId }
+    });
+  }
+
+  async getEntitlements(accessToken) {
+    return this.request('/v1/me/entitlements', {
+      headers: { authorization: `Bearer ${accessToken}` }
+    });
+  }
+
+  async consumeCredit(accessToken, payload) {
+    return this.request('/v1/credits/consume', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${accessToken}` },
+      body: payload
+    });
+  }
+
+  async issueWorkspaceLease(accessToken, payload) {
+    return this.request('/v1/workspaces/leases', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${accessToken}` },
+      body: payload
+    });
+  }
+
+  async request(path, options = {}) {
+    const headers = {
+      'content-type': 'application/json',
+      ...(options.headers || {})
+    };
+    const response = await this.fetchImpl(`${this.baseUrl}${path}`, {
+      method: options.method || 'GET',
+      headers,
+      body: options.body ? JSON.stringify(options.body) : undefined
+    });
+    const payload = await response.json();
+    if (!response.ok) {
+      const error = new Error(payload && payload.error ? payload.error : `CLOUD_API_${response.status}`);
+      error.status = response.status;
+      throw error;
+    }
+    return payload;
+  }
+}
+
+function mapCloudEntitlements(payload = {}) {
+  const entitlement = createEntitlementState(payload.planId, {
+    balanceCredits: payload.balanceCredits,
+    usedToday: payload.usedToday,
+    usedThisMonth: payload.usedThisMonth,
+    nextResetAt: payload.resetAt
+  });
+  return {
+    ...entitlement,
+    cloudUserId: payload.userId,
+    availableNow: Number.isFinite(Number(payload.availableToday)) ? Number(payload.availableToday) : entitlement.availableNow,
+    nextResetAt: payload.resetAt || entitlement.nextResetAt,
+    resetPolicy: '每日上限按服务器 Asia/Shanghai 业务日重置，未使用账户余额长期保留。'
+  };
+}
+
+module.exports = {
+  CloudApiClient,
+  DEFAULT_API_BASE_URL,
+  mapCloudEntitlements
+};

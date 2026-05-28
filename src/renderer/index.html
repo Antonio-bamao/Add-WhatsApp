@@ -686,6 +686,31 @@
 
         <section id="accountPage" class="page" data-title="管理本地账号、扫码缓存和跨设备同步" data-eyebrow="设置">
           <section class="account-grid">
+            <article id="cloudAccountPanel" class="panel account-panel cloud-account-panel">
+              <div class="panel-head">
+                <div>
+                  <h3>云端账号和套餐</h3>
+                  <p id="cloudStatusText">未连接后台 API，当前显示本地预览额度。</p>
+                </div>
+                <span id="cloudPlanBadge" class="table-state">本地预览</span>
+              </div>
+              <form id="cloudLoginForm" class="cloud-login-form">
+                <label class="field">
+                  <span>云端账号</span>
+                  <input id="cloudUsernameInput" type="text" autocomplete="username" />
+                </label>
+                <label class="field">
+                  <span>云端密码</span>
+                  <input id="cloudPasswordInput" type="password" autocomplete="current-password" />
+                </label>
+                <div class="task-actions">
+                  <button id="cloudLoginButton" class="button primary" type="submit">登录云端</button>
+                  <button id="cloudRefreshButton" class="button secondary" type="button">刷新套餐</button>
+                </div>
+                <button id="cloudLogoutButton" class="button ghost" type="button">退出云端账号</button>
+              </form>
+            </article>
+
             <article class="panel account-panel">
               <div class="panel-head">
                 <div>
@@ -711,7 +736,7 @@
               <button id="clearWhatsAppButton" class="button ghost" type="button">清除当前账号 WhatsApp 缓存</button>
             </article>
 
-            <article class="panel account-panel">
+            <article class="panel account-panel sync-panel">
               <div class="panel-head">
                 <div>
                   <h3>跨设备同步包</h3>

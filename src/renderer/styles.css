@@ -2000,12 +2000,21 @@ td {
   min-height: 190px;
 }
 
-.account-panel:last-child {
+.sync-panel {
   grid-column: 1 / -1;
 }
 
 .account-actions,
 .sync-actions {
+  display: grid;
+  gap: 14px;
+}
+
+.cloud-account-panel {
+  min-height: 250px;
+}
+
+.cloud-login-form {
   display: grid;
   gap: 14px;
 }

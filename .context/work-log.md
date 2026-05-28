@@ -181,3 +181,12 @@
 - 结果：PostgreSQL schema 新增 `admin_users`、`admin_sessions`，本地迁移写入 `admin-preview` 管理员哈希种子；`admin/` 侧边栏新增本地管理员登录表单，登录后将 `adminAccessToken` 写入 sessionStorage 并带 token 请求 API。
 - 验证：先写普通用户不能调用后台调账、管理员登录后才能调账、schema 管理员表和后台登录 UI 的失败测试；实现后 `server\npm test` 通过 10/10，`admin\npm test` 通过 5/5，真实 `server\npm run test:postgres` 通过 1/1。
 - 下一步：接桌面端云端登录、权益读取和成功添加扣费。
+
+## 2026-05-28
+
+- 步骤：接桌面端云端登录、权益读取和成功添加扣费。
+- 结果：新增 `src/core/cloudApiClient.js`、`src/core/cloudSessionStore.js`、`src/main/cloudDesktopController.js` 和 `src/core/taskBilling.js`；桌面端主进程使用 `ADD_WHATSAPP_API_URL` 或默认 `http://127.0.0.1:4110` 连接云端 API，云端 token 存在本机 `cloud-session.json`，不保存云端密码。
+- 结果：`src/renderer/index.html` 设置页新增“云端账号和套餐”卡片，支持云端登录、刷新套餐和退出云端；`authState()` 会返回 `cloud` 状态，云端权益会映射到现有套餐/额度/工作台显示。
+- 结果：发送任务结束后用 `selectNewlySentRows` 只选本轮新增成功发送行，再通过 `cloudController.consumeSuccessfulAdds` 逐条调用 `/v1/credits/consume`；历史进度里的旧成功行不会再次扣费，云端同步失败只写任务日志，不打断本地任务记录。
+- 验证：先写云端 client/session/controller/renderer/taskBilling 测试并确认失败；实现后根项目 `npm test` 通过 87/87，`server\npm test` 通过 10/10，`admin\npm test` 通过 5/5，`website\npm test` 通过 6/6，根项目 `npm run build` 成功生成 `dist\Add WhatsApp 0.1.2.exe`。
+- 下一步：把工作台云端租约接到主/第二工作台启动流程，然后补后台真实操作表单和支付/人工入账流程。

@@ -13,6 +13,7 @@ const { SyncPackageStore } = require('../core/syncPackageStore');
 const { sourceIdentityFor } = require('../core/progressIdentity');
 const { migrateLegacyUserData } = require('../core/legacyMigration');
 const { runSendTask } = require('../core/taskRunner');
+const { selectNewlySentRows } = require('../core/taskBilling');
 const { JsonTemplateStore } = require('../core/templateStore');
 const { JsonHistoryStore } = require('../core/historyStore');
 const {
@@ -22,7 +23,10 @@ const {
   resolveTaskDailyLimit,
   usageSummary
 } = require('../core/billingPlans');
+const { CloudApiClient, DEFAULT_API_BASE_URL, mapCloudEntitlements } = require('../core/cloudApiClient');
+const { CloudSessionStore } = require('../core/cloudSessionStore');
 const { createWhatsAppService } = require('./whatsappService');
+const { createCloudDesktopController } = require('./cloudDesktopController');
 const { WhatsAppSessionManager } = require('./whatsappSessionManager');
 const { LocalProxyBridge } = require('./proxyBridge');
 const {
@@ -69,13 +73,18 @@ let historyStore = null;
 let activeRun = null;
 let proxyMonitorTimer = null;
 let activeProxyBridge = null;
-let subscriptionState = createEntitlementState('advanced', {
-  balanceCredits: 2000,
-  usedToday: 0,
-  usedThisMonth: 0,
-  monthlyLimit: 6000
-});
+let cloudController = null;
+let subscriptionState = defaultSubscriptionState();
 const openSecondaryWorkspaces = new Set();
+
+function defaultSubscriptionState() {
+  return createEntitlementState('advanced', {
+    balanceCredits: 2000,
+    usedToday: 0,
+    usedThisMonth: 0,
+    monthlyLimit: 6000
+  });
+}
 
 function sendToRenderer(channel, payload) {
   if (mainWindow && !mainWindow.isDestroyed()) {
@@ -120,6 +129,13 @@ app.whenReady().then(() => {
     usersPath: path.join(userDataPath, 'auth', 'users.json'),
     sessionPath: path.join(userDataPath, 'auth', 'session.json')
   });
+  cloudController = createCloudDesktopController({
+    client: new CloudApiClient({
+      baseUrl: process.env.ADD_WHATSAPP_API_URL || DEFAULT_API_BASE_URL
+    }),
+    sessionStore: new CloudSessionStore(path.join(userDataPath, 'auth', 'cloud-session.json')),
+    deviceId: stableDeviceId(userDataPath)
+  });
   accountContext = new AccountContext({ userDataPath });
   syncPackageStore = new SyncPackageStore();
   proxySettingsStore = new JsonProxySettingsStore(path.join(userDataPath, 'settings', 'proxy.json'));
@@ -128,6 +144,7 @@ app.whenReady().then(() => {
     proxyServer: workspaceProxyServer,
     createService: config => createWhatsAppService(app, event => sendToRenderer('task:event', event), config)
   });
+  restoreCloudEntitlements();
   restoreAuthenticatedSession();
   createWindow();
   createTray();
@@ -174,6 +191,27 @@ function requireAuthenticated() {
   return user;
 }
 
+function stableDeviceId(seed) {
+  return crypto
+    .createHash('sha256')
+    .update(String(seed || 'add-whatsapp-desktop'))
+    .digest('hex')
+    .slice(0, 24);
+}
+
+function cloudState() {
+  return cloudController
+    ? cloudController.getState()
+    : { authenticated: false, user: null, entitlements: null };
+}
+
+function restoreCloudEntitlements() {
+  const cloud = cloudState();
+  if (cloud.authenticated && cloud.entitlements) {
+    subscriptionState = mapCloudEntitlements(cloud.entitlements);
+  }
+}
+
 function authState() {
   try {
     const user = accountContext.getCurrentUser();
@@ -186,6 +224,7 @@ function authState() {
         isSecondary: Boolean(workspaceId),
         proxy: workspaceId ? publicProxySettings(proxySettingsStore.load()) : null
       },
+      cloud: cloudState(),
       subscription: publicSubscriptionState()
     };
   } catch (error) {
@@ -198,6 +237,7 @@ function authState() {
         isSecondary: Boolean(workspaceId),
         proxy: workspaceId && proxySettingsStore ? publicProxySettings(proxySettingsStore.load()) : null
       },
+      cloud: cloudState(),
       subscription: publicSubscriptionState(),
       error: error.message
     };
@@ -377,6 +417,44 @@ ipcMain.handle('auth:clear-whatsapp-session', async () => {
     return { ok: true, accountId: user.accountId };
   } catch (error) {
     return protectedError(error);
+  }
+});
+
+ipcMain.handle('cloud:login', async (_event, payload = {}) => {
+  try {
+    const result = await cloudController.login({
+      username: payload.username,
+      password: payload.password
+    });
+    subscriptionState = result.subscription;
+    sendToRenderer('auth:changed', authState());
+    return result;
+  } catch (error) {
+    return { ok: false, error: error.message };
+  }
+});
+
+ipcMain.handle('cloud:refresh-entitlements', async () => {
+  try {
+    const result = await cloudController.refreshEntitlements();
+    if (result.ok) {
+      subscriptionState = result.subscription;
+      sendToRenderer('auth:changed', authState());
+    }
+    return result;
+  } catch (error) {
+    return { ok: false, error: error.message };
+  }
+});
+
+ipcMain.handle('cloud:logout', async () => {
+  try {
+    const result = cloudController.logout();
+    subscriptionState = defaultSubscriptionState();
+    sendToRenderer('auth:changed', authState());
+    return { ...result, subscription: publicSubscriptionState() };
+  } catch (error) {
+    return { ok: false, error: error.message };
   }
 });
 
@@ -688,6 +766,7 @@ async function runTask(config) {
     const whatsappService = await whatsappSessionManager.switchToAccount(accountContext.requireCurrentUser());
     const client = await whatsappService.ensureReady();
     const progressStore = new JsonProgressStore(progressPath);
+    const sentBeforeCount = progressStore.load().sent.length;
 
     const result = await runSendTask({
       rows: importedRows,
@@ -706,6 +785,8 @@ async function runTask(config) {
       shouldStop: () => stopRequested,
       onEvent: event => sendToRenderer('task:event', event)
     });
+
+    await syncCloudUsageAfterTask({ taskId, result, sentBeforeCount, sentAt: new Date().toISOString() });
 
     sendToRenderer('task:event', {
       type: 'task:finished',
@@ -740,6 +821,33 @@ async function runTask(config) {
     currentTask = null;
     stopRequested = false;
     activeRun = null;
+  }
+}
+
+async function syncCloudUsageAfterTask({ taskId, result, sentBeforeCount, sentAt }) {
+  if (!cloudController || !result || !result.progress) return;
+  const sentRows = selectNewlySentRows(result.progress, sentBeforeCount);
+  if (!sentRows.length) return;
+  try {
+    const cloudResult = await cloudController.consumeSuccessfulAdds({
+      taskId,
+      sentRows,
+      workspaceId: workspaceId || 'main',
+      sentAt
+    });
+    if (cloudResult.ok && cloudResult.subscription) {
+      subscriptionState = cloudResult.subscription;
+      sendToRenderer('auth:changed', authState());
+      sendToRenderer('task:event', {
+        type: 'cloud:usage-synced',
+        message: `云端已同步 ${cloudResult.consumed || sentRows.length} 个成功添加额度。`
+      });
+    }
+  } catch (error) {
+    sendToRenderer('task:event', {
+      type: 'cloud:usage-sync-failed',
+      message: `云端额度同步失败：${error.message}`
+    });
   }
 }
 
