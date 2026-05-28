@@ -1,0 +1,20 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: add-whatsapp-postgres
+    environment:
+      POSTGRES_USER: addwhatsapp
+      POSTGRES_PASSWORD: addwhatsapp_dev_password
+      POSTGRES_DB: addwhatsapp
+    ports:
+      - "55433:5432"
+    volumes:
+      - add_whatsapp_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U addwhatsapp -d addwhatsapp"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+volumes:
+  add_whatsapp_pgdata:

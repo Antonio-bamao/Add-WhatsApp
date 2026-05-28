@@ -1,8 +1,22 @@
-import { actionQueue, adminModules, auditTrail, desktopAdminMappings, getModuleByKey } from "./admin-data.mjs";
+import { actionQueue, adminModules, auditTrail, desktopAdminMappings } from "./admin-data.mjs";
 
 const pageOutlet = document.querySelector("[data-page-outlet]");
 const moduleButtons = document.querySelectorAll("[data-module-link]");
 const routeButtons = document.querySelectorAll("[data-route-link]");
+const adminLoginForm = document.querySelector("[data-admin-login]");
+const adminUsernameInput = document.querySelector("[data-admin-username]");
+const adminPasswordInput = document.querySelector("[data-admin-password]");
+const adminLoginStatus = document.querySelector("[data-admin-login-status]");
+const API_BASE_URL = window.ADD_WHATSAPP_API_URL || "http://127.0.0.1:4110";
+const ADMIN_TOKEN_STORAGE_KEY = "addWhatsappAdminAccessToken";
+let adminAccessToken = window.sessionStorage.getItem(ADMIN_TOKEN_STORAGE_KEY) || "";
+
+let runtimeState = {
+  adminModules,
+  actionQueue,
+  auditTrail,
+  environmentStatus: "API 未连接"
+};
 
 function statusTone(status) {
   if (/待接|后置/.test(status)) return "neutral";
@@ -55,7 +69,7 @@ function renderMappings() {
 function renderActionQueue() {
   return `
     <ul class="queue-list">
-      ${actionQueue
+      ${runtimeState.actionQueue
         .map(
           (item) => `
             <li class="queue-item queue-item--${item.severity}">
@@ -73,7 +87,7 @@ function renderActionQueue() {
 function renderAuditTrail() {
   return table(
     ["时间", "管理员", "动作", "对象", "之前", "之后"],
-    auditTrail.map((row) => [row.at, row.actor, `<code>${row.action}</code>`, row.target, row.before, row.after])
+    runtimeState.auditTrail.map((row) => [row.at, row.actor, `<code>${row.action}</code>`, row.target, row.before, row.after])
   );
 }
 
@@ -83,7 +97,7 @@ function renderDashboard() {
       eyebrow: "Admin console v0",
       title: "运营首页",
       description: "这里保留全局摘要和待处理事项。具体管理动作已经拆到左侧每一个模块页里，不再把 8 个模块详情堆在同一个长页面。",
-      status: "本地预览数据"
+      status: runtimeState.environmentStatus
     })}
 
     <section class="summary-grid" aria-label="运营摘要">
@@ -97,7 +111,7 @@ function renderDashboard() {
       <section class="section-block">
         <h2>模块入口</h2>
         <div class="module-directory">
-          ${adminModules
+          ${runtimeState.adminModules
             .map(
               (module) => `
                 <a class="module-link-card" href="${module.route}">
@@ -185,7 +199,11 @@ function renderModulePage(module) {
 
 function activeKeyFromHash() {
   const key = window.location.hash.replace(/^#\//, "");
-  return getModuleByKey(key) ? key : "dashboard";
+  return runtimeState.adminModules.some((module) => module.key === key) ? key : "dashboard";
+}
+
+function getRuntimeModuleByKey(key) {
+  return runtimeState.adminModules.find((module) => module.key === key);
 }
 
 function updateNavigation(activeKey) {
@@ -204,7 +222,7 @@ function renderRoute() {
   if (activeKey === "dashboard") {
     renderDashboard();
   } else {
-    renderModulePage(getModuleByKey(activeKey));
+    renderModulePage(getRuntimeModuleByKey(activeKey));
   }
 
   window.scrollTo({ top: 0, left: 0 });
@@ -225,7 +243,66 @@ moduleButtons.forEach((button) => {
 window.addEventListener("hashchange", renderRoute);
 renderRoute();
 
+function applyConsoleSnapshot(snapshot) {
+  runtimeState = {
+    adminModules: adminModules.map((module) => ({
+      ...module,
+      ...(snapshot.modules?.[module.key] || {})
+    })),
+    actionQueue: snapshot.actionQueue || actionQueue,
+    auditTrail: snapshot.auditTrail || auditTrail,
+    environmentStatus: "本地 API 预览"
+  };
+  renderRoute();
+}
+
+async function loadConsoleSnapshot() {
+  try {
+    const response = await fetch(`${API_BASE_URL}/v1/admin/console`, {
+      headers: adminAccessToken ? { authorization: `Bearer ${adminAccessToken}` } : {}
+    });
+    if (!response.ok) throw new Error(`ADMIN_CONSOLE_API_${response.status}`);
+    applyConsoleSnapshot(await response.json());
+  } catch {
+    runtimeState = { ...runtimeState, environmentStatus: "API 未连接" };
+    renderRoute();
+  }
+}
+
+loadConsoleSnapshot();
+
+async function loginAdmin(event) {
+  event.preventDefault();
+  adminLoginStatus.textContent = "正在登录...";
+  try {
+    const response = await fetch(`${API_BASE_URL}/v1/admin/auth/login`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        username: adminUsernameInput.value,
+        password: adminPasswordInput.value
+      })
+    });
+    if (!response.ok) throw new Error(`ADMIN_LOGIN_${response.status}`);
+    const payload = await response.json();
+    adminAccessToken = payload.adminAccessToken;
+    window.sessionStorage.setItem(ADMIN_TOKEN_STORAGE_KEY, adminAccessToken);
+    adminPasswordInput.value = "";
+    adminLoginStatus.textContent = `已登录：${payload.admin.username}`;
+    await loadConsoleSnapshot();
+  } catch {
+    adminAccessToken = "";
+    window.sessionStorage.removeItem(ADMIN_TOKEN_STORAGE_KEY);
+    adminLoginStatus.textContent = "登录失败，请确认 API 和管理员密码。";
+  }
+}
+
+adminLoginForm.addEventListener("submit", loginAdmin);
+
 Object.assign(window, {
+  applyConsoleSnapshot,
+  loginAdmin,
+  loadConsoleSnapshot,
   renderDashboard,
   renderMappings,
   renderModulePage,

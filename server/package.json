@@ -7,6 +7,10 @@
   "main": "src/app.js",
   "scripts": {
     "dev": "node src/app.js",
-    "test": "node --test tests/*.test.mjs"
+    "test": "node --test tests/*.test.mjs",
+    "test:postgres": "node --test tests/postgres-runtime.test.mjs"
+  },
+  "dependencies": {
+    "pg": "^8.21.0"
   }
 }

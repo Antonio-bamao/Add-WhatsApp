@@ -1,4 +1,4 @@
-CREATE TABLE users (
+CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
   username TEXT NOT NULL UNIQUE,
   password_hash TEXT NOT NULL,
@@ -8,7 +8,7 @@ CREATE TABLE users (
   updated_at TEXT NOT NULL
 );
 
-CREATE TABLE sessions (
+CREATE TABLE IF NOT EXISTS sessions (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL REFERENCES users(id),
   refresh_token_hash TEXT NOT NULL,
@@ -18,7 +18,7 @@ CREATE TABLE sessions (
   created_at TEXT NOT NULL
 );
 
-CREATE TABLE devices (
+CREATE TABLE IF NOT EXISTS devices (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL REFERENCES users(id),
   device_fingerprint_hash TEXT NOT NULL,
@@ -27,7 +27,7 @@ CREATE TABLE devices (
   status TEXT NOT NULL DEFAULT 'active'
 );
 
-CREATE TABLE plans (
+CREATE TABLE IF NOT EXISTS plans (
   id TEXT PRIMARY KEY,
   display_name TEXT NOT NULL,
   card_tier TEXT NOT NULL,
@@ -39,7 +39,7 @@ CREATE TABLE plans (
   status TEXT NOT NULL DEFAULT 'active'
 );
 
-CREATE TABLE subscriptions (
+CREATE TABLE IF NOT EXISTS subscriptions (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL REFERENCES users(id),
   plan_id TEXT NOT NULL REFERENCES plans(id),
@@ -49,7 +49,7 @@ CREATE TABLE subscriptions (
   changed_at TEXT NOT NULL
 );
 
-CREATE TABLE credit_ledger (
+CREATE TABLE IF NOT EXISTS credit_ledger (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL REFERENCES users(id),
   type TEXT NOT NULL,
@@ -63,7 +63,7 @@ CREATE TABLE credit_ledger (
   created_at TEXT NOT NULL
 );
 
-CREATE TABLE usage_daily (
+CREATE TABLE IF NOT EXISTS usage_daily (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL REFERENCES users(id),
   business_date TEXT NOT NULL,
@@ -75,7 +75,7 @@ CREATE TABLE usage_daily (
   UNIQUE (user_id, business_date)
 );
 
-CREATE TABLE usage_monthly (
+CREATE TABLE IF NOT EXISTS usage_monthly (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL REFERENCES users(id),
   business_month TEXT NOT NULL,
@@ -86,7 +86,7 @@ CREATE TABLE usage_monthly (
   UNIQUE (user_id, business_month)
 );
 
-CREATE TABLE orders (
+CREATE TABLE IF NOT EXISTS orders (
   id TEXT PRIMARY KEY,
   order_no TEXT NOT NULL UNIQUE,
   user_id TEXT NOT NULL REFERENCES users(id),
@@ -101,7 +101,7 @@ CREATE TABLE orders (
   closed_at TEXT
 );
 
-CREATE TABLE payment_events (
+CREATE TABLE IF NOT EXISTS payment_events (
   id TEXT PRIMARY KEY,
   provider TEXT NOT NULL,
   provider_event_id TEXT NOT NULL UNIQUE,
@@ -112,7 +112,7 @@ CREATE TABLE payment_events (
   created_at TEXT NOT NULL
 );
 
-CREATE TABLE referral_codes (
+CREATE TABLE IF NOT EXISTS referral_codes (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL REFERENCES users(id),
   code TEXT NOT NULL UNIQUE,
@@ -120,7 +120,7 @@ CREATE TABLE referral_codes (
   created_at TEXT NOT NULL
 );
 
-CREATE TABLE referral_records (
+CREATE TABLE IF NOT EXISTS referral_records (
   id TEXT PRIMARY KEY,
   referrer_user_id TEXT NOT NULL REFERENCES users(id),
   referred_user_id TEXT NOT NULL UNIQUE REFERENCES users(id),
@@ -133,7 +133,7 @@ CREATE TABLE referral_records (
   rewarded_at TEXT
 );
 
-CREATE TABLE workspace_leases (
+CREATE TABLE IF NOT EXISTS workspace_leases (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL REFERENCES users(id),
   device_id TEXT NOT NULL,
@@ -146,7 +146,26 @@ CREATE TABLE workspace_leases (
   released_at TEXT
 );
 
-CREATE TABLE admin_audit_logs (
+CREATE TABLE IF NOT EXISTS admin_users (
+  id TEXT PRIMARY KEY,
+  username TEXT NOT NULL UNIQUE,
+  password_hash TEXT NOT NULL,
+  role TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'active',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS admin_sessions (
+  id TEXT PRIMARY KEY,
+  admin_user_id TEXT NOT NULL REFERENCES admin_users(id),
+  refresh_token_hash TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  revoked_at TEXT,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS admin_audit_logs (
   id TEXT PRIMARY KEY,
   admin_user_id TEXT NOT NULL,
   target_type TEXT NOT NULL,
@@ -157,3 +176,52 @@ CREATE TABLE admin_audit_logs (
   ip TEXT,
   created_at TEXT NOT NULL
 );
+
+INSERT INTO plans (
+  id,
+  display_name,
+  card_tier,
+  unit_price_cents,
+  daily_limit,
+  workspace_limit,
+  minimum_top_up_credits,
+  template_limit,
+  status
+) VALUES
+  ('free', '免费版', 'FREE', 0, 10, 1, 0, 1, 'active'),
+  ('advanced', '进阶版', 'PLUS', 30, 200, 2, 2000, 2, 'active'),
+  ('professional', '专业版', 'PRO', 20, 500, 3, 5000, 4, 'active'),
+  ('business', '商业版', 'ULTRA', 10, 1000, 5, 20000, 8, 'active')
+ON CONFLICT (id) DO UPDATE SET
+  display_name = EXCLUDED.display_name,
+  card_tier = EXCLUDED.card_tier,
+  unit_price_cents = EXCLUDED.unit_price_cents,
+  daily_limit = EXCLUDED.daily_limit,
+  workspace_limit = EXCLUDED.workspace_limit,
+  minimum_top_up_credits = EXCLUDED.minimum_top_up_credits,
+  template_limit = EXCLUDED.template_limit,
+  status = EXCLUDED.status;
+
+INSERT INTO admin_users (
+  id,
+  username,
+  password_hash,
+  role,
+  status,
+  created_at,
+  updated_at
+) VALUES (
+  'admin-preview',
+  'admin-preview',
+  'scrypt:addwhatsappdevsalt0011223344:ee989fa30bb0e6aad75d75b4d3f2094fc589036cb0db78d246cad02fa4751f2711641eb59de59224605fad5809f4e6e6ffdab83eb4f11b085ba57f73486b423b',
+  'owner',
+  'active',
+  '2026-05-26T00:00:00.000Z',
+  '2026-05-26T00:00:00.000Z'
+)
+ON CONFLICT (id) DO UPDATE SET
+  username = EXCLUDED.username,
+  password_hash = EXCLUDED.password_hash,
+  role = EXCLUDED.role,
+  status = EXCLUDED.status,
+  updated_at = EXCLUDED.updated_at;

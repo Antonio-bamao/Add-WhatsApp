@@ -1,10 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
-import { createAppServer } from "../src/app.js";
+import { createAppServer, createRuntimeFromEnv } from "../src/app.js";
 
-async function withServer(testFn) {
-  const server = createAppServer();
+async function withServer(testFn, options = {}) {
+  const server = createAppServer(options);
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const { port } = server.address();
 
@@ -45,9 +45,24 @@ describe("cloud API skeleton", () => {
       const token = registered.payload.accessToken;
       const auth = { authorization: `Bearer ${token}` };
 
-      const adjusted = await request(baseUrl, "/v1/admin/credits/adjust", {
+      const rejectedAdjustment = await request(baseUrl, "/v1/admin/credits/adjust", {
         method: "POST",
         headers: auth,
+        body: { userId: registered.payload.user.id, amount: 300, reason: "manual transfer" }
+      });
+      assert.equal(rejectedAdjustment.response.status, 403);
+
+      const adminLogin = await request(baseUrl, "/v1/admin/auth/login", {
+        method: "POST",
+        body: { username: "admin-preview", password: "AdminPass123" }
+      });
+      assert.equal(adminLogin.response.status, 200);
+      assert.ok(adminLogin.payload.adminAccessToken);
+      const adminAuth = { authorization: `Bearer ${adminLogin.payload.adminAccessToken}` };
+
+      const adjusted = await request(baseUrl, "/v1/admin/credits/adjust", {
+        method: "POST",
+        headers: adminAuth,
         body: { userId: registered.payload.user.id, amount: 300, reason: "manual transfer" }
       });
       assert.equal(adjusted.response.status, 200);
@@ -79,9 +94,46 @@ describe("cloud API skeleton", () => {
       assert.equal(lease.response.status, 201);
       assert.ok(lease.payload.leaseId);
 
-      const audit = await request(baseUrl, "/v1/admin/audit-logs", { headers: auth });
+      const audit = await request(baseUrl, "/v1/admin/audit-logs", { headers: adminAuth });
       assert.equal(audit.response.status, 200);
       assert.ok(audit.payload.items.some((entry) => entry.action === "credit.adjustment"));
+
+      const consoleSnapshot = await request(baseUrl, "/v1/admin/console");
+      assert.equal(consoleSnapshot.response.status, 200);
+      assert.equal(consoleSnapshot.payload.source, "server-local-preview");
+      assert.equal(consoleSnapshot.payload.summary.users, 1);
+      assert.equal(consoleSnapshot.payload.modules.users.records.length, 1);
+      assert.equal(consoleSnapshot.payload.modules.plans.records.length, 4);
+      assert.ok(consoleSnapshot.payload.auditTrail.some((entry) => entry.action === "credit.adjustment"));
     });
+  });
+
+  it("routes through an async billing runtime instead of a hard-coded memory store", async () => {
+    const runtime = {
+      mode: "test-runtime",
+      getAdminConsoleSnapshot: async () => ({
+        source: "test-runtime",
+        summary: { users: 9 },
+        modules: { users: { records: [["runtime-user", "active", "PLUS", "test"]] } },
+        actionQueue: [],
+        auditTrail: []
+      })
+    };
+
+    await withServer(async (baseUrl) => {
+      const health = await request(baseUrl, "/v1/health");
+      assert.equal(health.payload.mode, "test-runtime");
+
+      const consoleSnapshot = await request(baseUrl, "/v1/admin/console");
+      assert.equal(consoleSnapshot.payload.source, "test-runtime");
+      assert.equal(consoleSnapshot.payload.summary.users, 9);
+    }, { runtime });
+  });
+
+  it("selects the PostgreSQL runtime when DATABASE_URL is configured", async () => {
+    const runtime = createRuntimeFromEnv({ DATABASE_URL: "postgres://user:pass@127.0.0.1:5432/addwhatsapp" });
+
+    assert.equal(runtime.mode, "postgres");
+    await runtime.close();
   });
 });

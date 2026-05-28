@@ -163,3 +163,21 @@
 - 结果：新增每个模块的页面标题、说明、详情区、记录表和守则区；侧栏当前模块高亮，不再在同一页面堆叠全部模块详情。
 - 验证：先改 `admin/tests/admin-structure.test.mjs` 要求单页面出口、模块路由和页面配置并确认测试失败；实现后 `admin\npm test` 通过 4/4；浏览器验证运营首页 `moduleLinks=8`、`modulePanels=0`，`#/referrals` 页面只显示推荐审核详情，`detailSections=3`、`recordRows=3`、无 console error/warning、无横向溢出。
 - 下一步：继续把每个模块页接入 `server/` API。
+
+- 步骤：联调后台管理台与本地云端 API，并初始化项目数据库。
+- 结果：`server/` 新增 `/v1/admin/console` 快照接口，按后台 8 个模块返回运行时摘要、模块记录、待处理队列和审计日志；`admin/` 运行时优先从 `http://127.0.0.1:4110/v1/admin/console` 拉取数据，API 不通时回退本地预览数据。
+- 结果：新增 `server/docker-compose.yml` 和 `server/scripts/apply-schema.ps1`；`server/src/db/schema.sql` 改为幂等建表并写入 FREE、PLUS、PRO、ULTRA 4 个套餐种子；本机 Docker 已启动 `add-whatsapp-postgres`，端口 `55433->5432`，状态 healthy。
+- 验证：先新增后台 fetch/API 快照测试和 Docker 迁移入口测试并确认失败；实现后 `server\npm test` 通过 8/8，`admin\npm test` 通过 5/5，根项目 `npm test` 通过 77/77，`website\npm test` 通过 6/6；`/v1/health`、`/v1/admin/console` 和 `http://127.0.0.1:3220/` 均返回 200；PostgreSQL `plans` 表已查询到 4 个套餐。
+- 下一步：把 `server/` 的内存预览存储替换为 PostgreSQL 仓储层，再补管理员登录/权限和桌面端云端登录。
+
+- 步骤：将 `server/` 运行时接入 PostgreSQL 持久化。
+- 结果：新增 runtime 抽象，`createAppServer` 不再硬编码内存 store；新增 `createRuntimeFromEnv`，默认内存预览，设置 `DATABASE_URL` 后切换到 PostgreSQL；新增 `server/src/db/postgresRuntime.js`，覆盖注册、登录、权益、调账、扣费、订单、工作台租约、审计日志和后台快照读取。
+- 结果：新增 `server\npm run test:postgres`，用 `ADD_WHATSAPP_TEST_DATABASE_URL` 指向本地 `add-whatsapp-postgres` 做真实持久化验证；新增 `pg` 依赖。
+- 验证：先写 runtime 抽象测试和 Postgres 持久化测试并确认失败；实现后 `server\npm test` 通过 10/10，`server\npm run test:postgres` 通过 1/1；用 `DATABASE_URL` 临时启动 API 后，`/v1/health` 返回 `mode: postgres`，`/v1/admin/console` 返回 `source: postgres` 并读取数据库中的用户、套餐、账本和审计。
+- 下一步：补管理员登录/权限，避免后台敏感接口继续借用普通用户 token；随后接桌面端云端登录和扣费。
+
+- 步骤：补后台管理员登录和敏感接口鉴权。
+- 结果：`server/` 新增 `/v1/admin/auth/login`，内存 runtime 和 PostgreSQL runtime 均支持管理员登录；后台调账、订单入账和审计日志读取改为要求管理员 token，普通用户 token 调用调账接口返回禁止。
+- 结果：PostgreSQL schema 新增 `admin_users`、`admin_sessions`，本地迁移写入 `admin-preview` 管理员哈希种子；`admin/` 侧边栏新增本地管理员登录表单，登录后将 `adminAccessToken` 写入 sessionStorage 并带 token 请求 API。
+- 验证：先写普通用户不能调用后台调账、管理员登录后才能调账、schema 管理员表和后台登录 UI 的失败测试；实现后 `server\npm test` 通过 10/10，`admin\npm test` 通过 5/5，真实 `server\npm run test:postgres` 通过 1/1。
+- 下一步：接桌面端云端登录、权益读取和成功添加扣费。

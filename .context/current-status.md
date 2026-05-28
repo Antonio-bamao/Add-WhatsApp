@@ -1,17 +1,26 @@
 # 当前状态
 
-- 当前阶段：Phase 8，后台管理台与云端 API 骨架第一版。
-- 主线状态：`C:\Users\m1591\Desktop\Add-WhatsApp` 已新增独立 `admin/` 管理台预览和 `server/` 云端 API 骨架；`website/` 继续作为公开官网，桌面端 `src/` 未参与本轮改动。
+- 当前阶段：Phase 8.3，后台管理台、云端 API、PostgreSQL 持久化和管理员鉴权已跑通。
+- 主线状态：`C:\Users\m1591\Desktop\Add-WhatsApp` 已新增独立 `admin/` 管理台预览、`server/` 云端 API 骨架和项目专用 `add-whatsapp-postgres` 本地数据库；`website/` 继续作为公开官网，桌面端 `src/` 未参与本轮改动。
 - 已完成：`website/` 独立 Next.js App Router 工程已创建；首页、下载页、版本页、公开静态 `/site.css`、站点导航/页脚、`react-globe.gl` 开源 WebGL 地球、`world-atlas` 本地国家边界和下载 manifest 已落地。
 - 已完成：当前 Windows 便携版 `dist\Add WhatsApp 0.1.2.exe` 已复制到 `website\public\downloads\latest\Add-WhatsApp.exe` 和 `website\public\downloads\releases\0.1.2\Add-WhatsApp-0.1.2.exe`；`update.json` 已写入版本、文件名、下载路径、发布日期、大小和 SHA256。
 - 已完成：新增 `docs/repository-structure.md` 记录当前单仓库分目录边界，明确官网不放 API 密钥、后台逻辑、客户数据或 WhatsApp session，并新增 `admin/` 管理台边界。
 - 已完成：新增 `admin/` 静态管理台 v0，按云端商业化文档一一对应 8 个后台模块：用户与云端账号、套餐与订阅、额度账本、用量限额、订单与入账、推荐审核、设备与工作台、审计日志；后台 UI 已改为“一个模块一个页面”，不再把全部模块详情挤在同一个长页面。
 - 已完成：`admin/` 将桌面端探索方案 5 个页面映射到后台管理面：套餐页、用量页、额度页、账单页、推荐奖励页。
-- 已完成：新增 `server/` 本地预览 API，包含云端账号注册/登录、权益查询、成功添加扣费、人工调账、订单创建/人工入账、工作台租约和审计日志；新增 `server/src/db/schema.sql` 记录 PostgreSQL 目标表。
-- 进行中：等待确认是否把 `admin/` 管理台接入 `server/` API，并继续补真实数据库迁移、管理员权限和登录。
+- 已完成：新增 `server/` 本地预览 API，包含云端账号注册/登录、权益查询、成功添加扣费、人工调账、订单创建/人工入账、工作台租约、审计日志和 `/v1/admin/console` 后台管理台快照接口；新增 `server/src/db/schema.sql` 记录 PostgreSQL 目标表和套餐种子数据。
+- 已完成：`admin/` 管理台已从静态预览数据升级为优先调用 `http://127.0.0.1:4110/v1/admin/console`，API 不通时回退到本地预览数据。
+- 已完成：新增 `server/docker-compose.yml` 与 `server/scripts/apply-schema.ps1`；本机已启动 Docker 容器 `add-whatsapp-postgres`，端口 `55433->5432`；已迁移 14 张表并写入 4 个套餐种子。
+- 已完成：`server/` 新增 runtime 抽象，默认继续使用内存预览；设置 `DATABASE_URL=postgres://addwhatsapp:addwhatsapp_dev_password@127.0.0.1:55433/addwhatsapp` 后切换到 PostgreSQL runtime。
+- 已完成：新增 `server/src/db/postgresRuntime.js`，已支持云端账号注册/登录、权益读取、人工调账、扣费、订单、工作台租约、审计日志和后台快照读取的 PostgreSQL 路径。
+- 已完成：新增管理员登录与敏感接口鉴权，`/v1/admin/auth/login` 返回 `adminAccessToken`；普通用户 token 调用后台调账接口会被拒绝，管理员 token 才能执行调账、订单入账和审计日志读取。
+- 已完成：`admin/` 侧边栏新增本地管理员登录表单，登录后保存 session token 并带 token 读取 API；API 不通时仍回退本地预览数据。
+- 进行中：下一步接桌面端云端登录、权益读取、成功添加扣费和工作台云端租约；PostgreSQL runtime 还需要继续补更严格的测试数据清理策略和支付回调。
 - 验证：`website\npm test` 通过 6/6；`website\npm run build` 成功；根项目 `npm test` 通过 77/77；本地 `http://localhost:3100` 桌面/移动端 Chrome headless 截图已复查，样式不再退化为裸 HTML；浏览器插件调试确认首屏只剩 1 个 WebGL canvas、无旧 `.globe-static` SVG 叠加、无 Server Error，地球 HUD 文案已删除，路线扩展到 20 条；下载页返回 200，`/downloads/latest/Add-WhatsApp.exe` HEAD 长度为 `77060652`。
-- 验证：`admin\npm test` 通过 4/4；本地 `http://127.0.0.1:3220/` 浏览器验证模块数 8、映射行 5、运营队列 3、无 console error/warning、无横向溢出；`admin` 已新增 `npm run dev` 固定预览命令，当前 `http://127.0.0.1:3220/` 返回 200。
+- 验证：`admin\npm test` 通过 5/5；本地 `http://127.0.0.1:3220/` 返回 200；管理台 JS 已包含 `ADD_WHATSAPP_API_URL`、`/v1/admin/console`、API 回退逻辑和运行时快照合并逻辑。
 - 验证：后台拆页后，浏览器验证运营首页只显示 8 个模块入口且不渲染 8 个模块详情；`#/referrals` 只显示推荐审核模块详情，3 个详情区、3 条记录、无 console error/warning、无横向溢出。
-- 验证：`server\npm test` 通过 7/7，覆盖 14 张目标表、权益计算、幂等扣费、人工调账审计、订单入账和工作台租约限制。
-- 下一步：把 `admin/` 的本地预览数据切换为调用 `server/` API；再补真实 PostgreSQL 迁移、管理员角色权限、API token 存储和桌面端云端登录。
-- 阻塞项：真实数据库连接、管理员登录方式、支付渠道/人工收款流程、生产域名和部署平台还未最终确定。
+- 验证：`server\npm test` 通过 10/10，覆盖 16 张目标表、套餐/管理员种子、Docker/Postgres 迁移入口、runtime 抽象、`DATABASE_URL` 切换、权益计算、幂等扣费、管理员鉴权、人工调账审计、订单入账、工作台租约限制和后台快照 API。
+- 验证：`server\npm run test:postgres` 在真实本地 PostgreSQL 上通过 1/1，证明用户和额度账本能跨 runtime 重启保留，且普通用户 token 不能调账，管理员登录后才能调账。
+- 验证：用 `DATABASE_URL` 临时启动 `server` 后，`/v1/health` 返回 `mode: postgres`，`/v1/admin/console` 返回 `source: postgres` 并读取到用户、套餐、账本和审计。
+- 验证：根项目 `npm test` 通过 77/77；`website\npm test` 通过 6/6；`admin\npm test` 通过 5/5；`server\npm test` 通过 8/8。
+- 下一步：接桌面端云端登录、权益读取和成功添加扣费；再把工作台云端租约接到主/第二工作台启动流程。
+- 阻塞项：管理员登录方式、支付渠道/人工收款流程、生产域名和部署平台还未最终确定。

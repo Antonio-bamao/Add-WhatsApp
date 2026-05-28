@@ -95,4 +95,21 @@ describe("admin console structure", () => {
     assert.match(css, /\.detail-grid/);
     assert.match(css, /@media \(max-width: 860px\)/);
   });
+
+  it("loads runtime data from the local server API before falling back to preview data", () => {
+    const html = readText("public/index.html");
+    const js = readText("public/admin.js");
+
+    assert.match(js, /ADD_WHATSAPP_API_URL/);
+    assert.match(js, /adminAccessToken/);
+    assert.match(js, /\/v1\/admin\/auth\/login/);
+    assert.match(js, /\/v1\/admin\/console/);
+    assert.match(js, /fetch/);
+    assert.match(js, /applyConsoleSnapshot/);
+    assert.match(html, /data-admin-login/);
+    assert.match(html, /data-admin-username/);
+    assert.match(html, /data-admin-password/);
+    assert.match(js, /本地 API 预览/);
+    assert.match(js, /API 未连接/);
+  });
 });

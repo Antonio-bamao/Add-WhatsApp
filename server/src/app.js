@@ -1,17 +1,6 @@
 import http from "node:http";
-import {
-  adjustCredits,
-  authenticateAccessToken,
-  consumeCredit,
-  createCloudStore,
-  createOrder,
-  getEntitlements,
-  issueWorkspaceLease,
-  listAuditLogs,
-  loginUser,
-  markOrderPaid,
-  registerUser
-} from "./services/billingService.js";
+import { createPostgresRuntime } from "./db/postgresRuntime.js";
+import { createMemoryRuntime } from "./services/billingService.js";
 
 function jsonResponse(response, statusCode, payload) {
   response.writeHead(statusCode, {
@@ -31,11 +20,18 @@ async function readJson(request) {
   return text ? JSON.parse(text) : {};
 }
 
-function authUserId(store, request) {
+async function authUserId(runtime, request) {
   const header = request.headers.authorization || "";
   const match = /^Bearer\s+(.+)$/i.exec(header);
   if (!match) throw new Error("UNAUTHORIZED");
-  return authenticateAccessToken(store, match[1]);
+  return runtime.authenticateAccessToken(match[1]);
+}
+
+async function authAdminId(runtime, request) {
+  const header = request.headers.authorization || "";
+  const match = /^Bearer\s+(.+)$/i.exec(header);
+  if (!match) throw new Error("ADMIN_UNAUTHORIZED");
+  return runtime.authenticateAdminToken(match[1]);
 }
 
 function clientIp(request) {
@@ -43,6 +39,7 @@ function clientIp(request) {
 }
 
 function errorStatus(error) {
+  if (/ADMIN_FORBIDDEN/.test(error.message)) return 403;
   if (/UNAUTHORIZED|AUTH_FAILED/.test(error.message)) return 401;
   if (/NOT_FOUND/.test(error.message)) return 404;
   if (/LIMIT|INSUFFICIENT|NO_AVAILABLE/.test(error.message)) return 409;
@@ -51,7 +48,7 @@ function errorStatus(error) {
 }
 
 export function createAppServer(options = {}) {
-  const store = options.store || createCloudStore(options);
+  const runtime = options.runtime || createMemoryRuntime(options);
 
   return http.createServer(async (request, response) => {
     try {
@@ -63,69 +60,80 @@ export function createAppServer(options = {}) {
       const url = new URL(request.url, "http://127.0.0.1");
 
       if (request.method === "GET" && url.pathname === "/v1/health") {
-        jsonResponse(response, 200, { ok: true, service: "add-whatsapp-server", mode: "local-preview" });
+        jsonResponse(response, 200, { ok: true, service: "add-whatsapp-server", mode: runtime.mode });
+        return;
+      }
+
+      if (request.method === "GET" && url.pathname === "/v1/admin/console") {
+        jsonResponse(response, 200, await runtime.getAdminConsoleSnapshot());
         return;
       }
 
       if (request.method === "POST" && url.pathname === "/v1/auth/register") {
         const body = await readJson(request);
-        const user = registerUser(store, body);
-        const session = loginUser(store, { username: body.username, password: body.password, deviceId: body.deviceId || "registered-device" });
+        const user = await runtime.registerUser(body);
+        const session = await runtime.loginUser({ username: body.username, password: body.password, deviceId: body.deviceId || "registered-device" });
         jsonResponse(response, 201, { user, accessToken: session.accessToken, refreshToken: session.refreshToken });
         return;
       }
 
       if (request.method === "POST" && url.pathname === "/v1/auth/login") {
         const body = await readJson(request);
-        jsonResponse(response, 200, loginUser(store, body));
+        jsonResponse(response, 200, await runtime.loginUser(body));
+        return;
+      }
+
+      if (request.method === "POST" && url.pathname === "/v1/admin/auth/login") {
+        const body = await readJson(request);
+        jsonResponse(response, 200, await runtime.loginAdmin(body));
         return;
       }
 
       if (request.method === "GET" && url.pathname === "/v1/me/entitlements") {
-        const userId = authUserId(store, request);
-        jsonResponse(response, 200, getEntitlements(store, userId));
+        const userId = await authUserId(runtime, request);
+        jsonResponse(response, 200, await runtime.getEntitlements(userId));
         return;
       }
 
       if (request.method === "POST" && url.pathname === "/v1/credits/consume") {
-        const userId = authUserId(store, request);
+        const userId = await authUserId(runtime, request);
         const body = await readJson(request);
-        jsonResponse(response, 200, consumeCredit(store, { ...body, userId }));
+        jsonResponse(response, 200, await runtime.consumeCredit({ ...body, userId }));
         return;
       }
 
       if (request.method === "POST" && url.pathname === "/v1/orders") {
-        const userId = authUserId(store, request);
+        const userId = await authUserId(runtime, request);
         const body = await readJson(request);
-        jsonResponse(response, 201, createOrder(store, { ...body, userId }));
+        jsonResponse(response, 201, await runtime.createOrder({ ...body, userId }));
         return;
       }
 
       if (request.method === "POST" && /^\/v1\/admin\/orders\/[^/]+\/mark-paid$/.test(url.pathname)) {
-        const adminUserId = authUserId(store, request);
+        const adminUserId = await authAdminId(runtime, request);
         const orderId = url.pathname.split("/")[4];
         const body = await readJson(request);
-        jsonResponse(response, 200, markOrderPaid(store, { ...body, orderId, adminUserId, ip: clientIp(request) }));
+        jsonResponse(response, 200, await runtime.markOrderPaid({ ...body, orderId, adminUserId, ip: clientIp(request) }));
         return;
       }
 
       if (request.method === "POST" && url.pathname === "/v1/admin/credits/adjust") {
-        const adminUserId = authUserId(store, request);
+        const adminUserId = await authAdminId(runtime, request);
         const body = await readJson(request);
-        jsonResponse(response, 200, adjustCredits(store, { ...body, adminUserId, ip: clientIp(request) }));
+        jsonResponse(response, 200, await runtime.adjustCredits({ ...body, adminUserId, ip: clientIp(request) }));
         return;
       }
 
       if (request.method === "POST" && url.pathname === "/v1/workspaces/leases") {
-        const userId = authUserId(store, request);
+        const userId = await authUserId(runtime, request);
         const body = await readJson(request);
-        jsonResponse(response, 201, issueWorkspaceLease(store, { ...body, userId }));
+        jsonResponse(response, 201, await runtime.issueWorkspaceLease({ ...body, userId }));
         return;
       }
 
       if (request.method === "GET" && url.pathname === "/v1/admin/audit-logs") {
-        authUserId(store, request);
-        jsonResponse(response, 200, { items: listAuditLogs(store) });
+        await authAdminId(runtime, request);
+        jsonResponse(response, 200, { items: await runtime.listAuditLogs() });
         return;
       }
 
@@ -136,9 +144,17 @@ export function createAppServer(options = {}) {
   });
 }
 
+export function createRuntimeFromEnv(env = process.env) {
+  if (env.DATABASE_URL) {
+    return createPostgresRuntime({ databaseUrl: env.DATABASE_URL });
+  }
+  return createMemoryRuntime();
+}
+
 if (import.meta.url === `file:///${process.argv[1]?.replaceAll("\\", "/")}`) {
   const port = Number(process.env.PORT || 4110);
-  createAppServer().listen(port, "127.0.0.1", () => {
-    console.log(`Add WhatsApp server listening at http://127.0.0.1:${port}`);
+  const runtime = createRuntimeFromEnv();
+  createAppServer({ runtime }).listen(port, "127.0.0.1", () => {
+    console.log(`Add WhatsApp server listening at http://127.0.0.1:${port} (${runtime.mode})`);
   });
 }

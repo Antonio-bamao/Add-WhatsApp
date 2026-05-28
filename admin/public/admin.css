@@ -117,6 +117,46 @@ button {
   font-size: 13px;
 }
 
+.admin-login {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.admin-login label {
+  display: grid;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.admin-login input {
+  width: 100%;
+  min-height: 36px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 7px 9px;
+  color: var(--text);
+}
+
+.admin-login button {
+  min-height: 36px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--brand);
+  color: #ffffff;
+  font-weight: 800;
+}
+
+.admin-login small {
+  color: var(--muted);
+}
+
 .main {
   padding: 28px;
 }

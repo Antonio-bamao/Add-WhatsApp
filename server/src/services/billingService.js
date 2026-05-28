@@ -216,6 +216,20 @@ export function createCloudStore(options = {}) {
     workspaceLeases: new Map(),
     auditLogs: [],
     accessTokens: new Map(),
+    adminUsers: new Map([
+      [
+        "admin-preview",
+        {
+          id: "admin-preview",
+          username: "admin-preview",
+          passwordHash: hashPassword("AdminPass123"),
+          role: "owner",
+          status: "active",
+          createdAt: "2026-05-26T00:00:00.000Z"
+        }
+      ]
+    ]),
+    adminAccessTokens: new Map(),
     now: () => fixedNow || new Date()
   };
 }
@@ -288,6 +302,24 @@ export function authenticateAccessToken(store, accessToken) {
   if (!userId) throw new Error("UNAUTHORIZED");
   getUser(store, userId);
   return userId;
+}
+
+export function loginAdmin(store, { username, password }) {
+  const normalized = normalizeUsername(username);
+  const admin = store.adminUsers.get(normalized);
+  if (!admin || admin.status !== "active" || !verifyPassword(password, admin.passwordHash)) {
+    throw new Error("AUTH_FAILED");
+  }
+  const adminAccessToken = createId("admin_token");
+  store.adminAccessTokens.set(adminAccessToken, admin.id);
+  return { admin: { id: admin.id, username: admin.username, role: admin.role }, adminAccessToken };
+}
+
+export function authenticateAdminToken(store, accessToken) {
+  const adminUserId = store.adminAccessTokens.get(accessToken);
+  if (adminUserId) return adminUserId;
+  if (store.accessTokens.has(accessToken)) throw new Error("ADMIN_FORBIDDEN");
+  throw new Error("ADMIN_UNAUTHORIZED");
 }
 
 export function getEntitlements(store, userId) {
@@ -460,4 +492,161 @@ export function issueWorkspaceLease(store, { userId, deviceId, workspaceKind, pr
 
 export function listAuditLogs(store) {
   return [...store.auditLogs].reverse();
+}
+
+function tableRows(items, mapper) {
+  return items.length > 0 ? items.map(mapper) : [["暂无记录", "empty", "等待 API 写入", "本地预览"]];
+}
+
+function auditPreviewRows(auditLogs) {
+  return auditLogs.map((entry) => ({
+    at: entry.createdAt.replace("T", " ").slice(0, 16),
+    actor: entry.adminUserId,
+    action: entry.action,
+    target: `${entry.targetType}:${entry.targetId}`,
+    before: entry.beforeJson,
+    after: entry.afterJson
+  }));
+}
+
+export function getAdminConsoleSnapshot(store) {
+  const users = [...store.users.values()];
+  const plans = Object.values(PLAN_CATALOG);
+  const orders = [...store.orders.values()];
+  const leases = [...store.workspaceLeases.values()];
+  const dailyUsage = [...store.usageDaily.values()];
+  const referralCodes = [...store.referralCodes.values()];
+  const auditTrail = auditPreviewRows(listAuditLogs(store));
+
+  const modules = {
+    users: {
+      metric: String(users.length),
+      status: "本地 API 预览",
+      records: tableRows(users, (user) => {
+        const subscription = getSubscription(store, user.id);
+        return [user.username, user.status, subscription.planId, `${[...store.sessions.values()].filter((session) => session.userId === user.id).length} sessions`];
+      })
+    },
+    plans: {
+      metric: String(plans.length),
+      status: "API 已接",
+      records: plans.map((plan) => [
+        plan.cardTier,
+        `${plan.dailyLimit} / 天`,
+        `${plan.workspaceLimit} 工作台`,
+        `${plan.unitPriceCents / 100} 元`
+      ])
+    },
+    credits: {
+      metric: String(store.creditLedger.reduce((sum, entry) => sum + Math.max(0, entry.amount), 0)),
+      status: "API 已接",
+      records: tableRows(store.creditLedger.slice(-6).reverse(), (entry) => [
+        entry.type,
+        String(entry.amount),
+        entry.idempotencyKey,
+        `balance ${entry.balanceAfter}`
+      ])
+    },
+    usage: {
+      metric: `${dailyUsage.reduce((sum, entry) => sum + entry.usedCount, 0)}`,
+      status: "API 已接",
+      records: tableRows(dailyUsage, (entry) => [
+        entry.businessDate,
+        entry.planIdSnapshot,
+        String(entry.usedCount),
+        `${Math.max(0, entry.dailyLimit - entry.usedCount)} remaining`
+      ])
+    },
+    orders: {
+      metric: String(orders.filter((order) => order.status !== "paid").length),
+      status: "API 已接",
+      records: tableRows(orders, (order) => [
+        order.orderNo,
+        order.status,
+        `${order.credits} credits`,
+        order.providerTradeNo || "manual"
+      ])
+    },
+    referrals: {
+      metric: String(referralCodes.length),
+      status: "API 已接",
+      records: tableRows(referralCodes, (code) => [
+        code.code,
+        code.status,
+        code.userId,
+        "等待首充奖励规则"
+      ])
+    },
+    workspaces: {
+      metric: String(leases.filter((lease) => lease.status === "active").length),
+      status: "API 已接",
+      records: tableRows(leases, (lease) => [
+        lease.id,
+        lease.workspaceKind,
+        lease.status,
+        `expires ${lease.expiresAt.slice(11, 19)}`
+      ])
+    },
+    audit: {
+      metric: "100%",
+      status: "API 已接",
+      records: tableRows(auditTrail, (entry) => [
+        entry.action,
+        entry.target,
+        entry.before,
+        entry.after
+      ])
+    }
+  };
+
+  return {
+    source: "server-local-preview",
+    generatedAt: isoNow(store),
+    summary: {
+      users: users.length,
+      plans: plans.length,
+      creditEntries: store.creditLedger.length,
+      orders: orders.length,
+      activeLeases: leases.filter((lease) => lease.status === "active").length,
+      auditLogs: auditTrail.length
+    },
+    modules,
+    actionQueue: [
+      {
+        label: "API 联调",
+        target: "admin -> server",
+        detail: "后台管理台正在读取本地 API 快照",
+        severity: "info"
+      },
+      {
+        label: "数据库迁移",
+        target: "PostgreSQL schema",
+        detail: "下一步把 schema.sql 应用到项目专用 Postgres",
+        severity: "warn"
+      }
+    ],
+    auditTrail
+  };
+}
+
+export function createMemoryRuntime(options = {}) {
+  const store = options.store || createCloudStore(options);
+
+  return {
+    mode: "local-preview",
+    store,
+    authenticateAccessToken: (accessToken) => authenticateAccessToken(store, accessToken),
+    authenticateAdminToken: (accessToken) => authenticateAdminToken(store, accessToken),
+    registerUser: (body) => registerUser(store, body),
+    loginUser: (body) => loginUser(store, body),
+    loginAdmin: (body) => loginAdmin(store, body),
+    getEntitlements: (userId) => getEntitlements(store, userId),
+    consumeCredit: (body) => consumeCredit(store, body),
+    createOrder: (body) => createOrder(store, body),
+    markOrderPaid: (body) => markOrderPaid(store, body),
+    adjustCredits: (body) => adjustCredits(store, body),
+    issueWorkspaceLease: (body) => issueWorkspaceLease(store, body),
+    listAuditLogs: () => listAuditLogs(store),
+    getAdminConsoleSnapshot: () => getAdminConsoleSnapshot(store)
+  };
 }

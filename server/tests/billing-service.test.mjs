@@ -36,10 +36,31 @@ describe("cloud billing service", () => {
       "referral_codes",
       "referral_records",
       "workspace_leases",
+      "admin_users",
+      "admin_sessions",
       "admin_audit_logs"
     ]) {
-      assert.match(schema, new RegExp(`CREATE TABLE ${table}\\b`, "i"), `missing table: ${table}`);
+      assert.match(schema, new RegExp(`CREATE TABLE(?: IF NOT EXISTS)? ${table}\\b`, "i"), `missing table: ${table}`);
     }
+
+    assert.match(schema, /INSERT INTO plans/i);
+    assert.match(schema, /advanced/);
+    assert.match(schema, /professional/);
+    assert.match(schema, /business/);
+    assert.match(schema, /INSERT INTO admin_users/i);
+    assert.doesNotMatch(schema, /AdminPass123/);
+  });
+
+  it("provides local Docker and migration entrypoints for visible PostgreSQL setup", () => {
+    const compose = fs.readFileSync(path.join(serverRoot, "docker-compose.yml"), "utf8");
+    const applySchema = fs.readFileSync(path.join(serverRoot, "scripts/apply-schema.ps1"), "utf8");
+
+    assert.match(compose, /container_name:\s*add-whatsapp-postgres/);
+    assert.match(compose, /POSTGRES_DB:\s*addwhatsapp/);
+    assert.match(compose, /55433:5432/);
+    assert.match(applySchema, /schema\.sql/);
+    assert.match(applySchema, /docker exec/);
+    assert.match(applySchema, /\\dt/);
   });
 
   it("separates credit balance from daily usage when calculating entitlements", () => {

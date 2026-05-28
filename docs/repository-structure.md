@@ -21,11 +21,12 @@ Add-WhatsApp/
 - `src/` remains the desktop app.
 - `website/` owns the public marketing website and download pages.
 - `admin/` owns the management console surface for cloud accounts, plans, credits, usage, orders, referrals, workspace leases, and audit review.
-- `server/` owns the API skeleton, billing rules, audit rules, and target PostgreSQL schema.
+- `server/` owns the API skeleton, billing rules, audit rules, local admin auth/snapshot API, and PostgreSQL schema/migration entrypoint.
 - Website code must not import desktop internals directly.
 - Website code must not hold admin secrets, database URLs, customer data, WhatsApp sessions, or imported spreadsheets.
 - Admin preview code must not store customer spreadsheets, full phone lists, local task files, WhatsApp login/cache data, or production credentials.
 - Server code must keep customer spreadsheets, full phone lists, WhatsApp sessions, and desktop cache data out of cloud storage by default.
+- Local PostgreSQL runs as `add-whatsapp-postgres` on port `55433`; `server/` uses the in-memory preview store by default and switches to PostgreSQL when `DATABASE_URL` is set.
 
 ## Future Split Criteria
 
