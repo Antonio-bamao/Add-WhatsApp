@@ -12,6 +12,8 @@ import {
   getEntitlements,
   issueWorkspaceLease,
   markOrderPaid,
+  processPaymentEvent,
+  processPendingOrderCredits,
   releaseWorkspaceLease,
   renewWorkspaceLease,
   registerUser
@@ -155,6 +157,56 @@ describe("cloud billing service", () => {
     assert.equal(getEntitlements(store, user.id).balanceCredits, 2000);
     assert.equal(store.creditLedger.filter((entry) => entry.type === "purchase").length, 1);
     assert.equal(store.orders.get(order.id).status, "paid");
+  });
+
+  it("processes paid payment callbacks idempotently before crediting orders", () => {
+    const store = createCloudStore();
+    const user = registerUser(store, { username: "callback-user", password: "StrongPass123", planId: "advanced" });
+    const order = createOrder(store, { userId: user.id, planId: "advanced", credits: 2000, amountCents: 60000 });
+
+    const first = processPaymentEvent(store, {
+      provider: "manual",
+      providerEventId: "evt-paid-1",
+      orderId: order.id,
+      eventType: "payment_succeeded",
+      providerTradeNo: "manual-trade-1",
+      payload: { paidAt: "2026-05-29T10:00:00+08:00" }
+    });
+    const duplicate = processPaymentEvent(store, {
+      provider: "manual",
+      providerEventId: "evt-paid-1",
+      orderId: order.id,
+      eventType: "payment_succeeded",
+      providerTradeNo: "manual-trade-1",
+      payload: { duplicate: true }
+    });
+
+    assert.equal(first.idempotentReplay, false);
+    assert.equal(duplicate.idempotentReplay, true);
+    assert.equal(getEntitlements(store, user.id).balanceCredits, 2000);
+    assert.equal(store.paymentEvents.size, 1);
+    assert.equal(store.creditLedger.filter((entry) => entry.type === "purchase").length, 1);
+  });
+
+  it("retries paid pending credit orders without duplicating purchase ledger entries", () => {
+    const store = createCloudStore();
+    const user = registerUser(store, { username: "compensate-user", password: "StrongPass123", planId: "professional" });
+    const order = createOrder(store, { userId: user.id, planId: "professional", credits: 5000, amountCents: 100000 });
+    store.orders.set(order.id, {
+      ...order,
+      status: "paid_pending_credit",
+      providerTradeNo: "manual-pending-1",
+      paidAt: "2026-05-29T10:05:00+08:00"
+    });
+
+    const first = processPendingOrderCredits(store, { limit: 10 });
+    const second = processPendingOrderCredits(store, { limit: 10 });
+
+    assert.equal(first.processedCount, 1);
+    assert.equal(second.processedCount, 0);
+    assert.equal(getEntitlements(store, user.id).balanceCredits, 5000);
+    assert.equal(store.orders.get(order.id).status, "paid");
+    assert.equal(store.creditLedger.filter((entry) => entry.type === "purchase").length, 1);
   });
 
   it("enforces workspace lease limits from the active plan", () => {

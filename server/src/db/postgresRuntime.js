@@ -78,6 +78,38 @@ function toAuditPreview(row) {
   };
 }
 
+function toOrder(row, balanceCredits = undefined) {
+  const order = {
+    id: row.id,
+    orderNo: row.order_no,
+    userId: row.user_id,
+    planId: row.plan_id,
+    credits: Number(row.credits),
+    amountCents: Number(row.amount_cents),
+    status: row.status,
+    paymentProvider: row.payment_provider,
+    providerTradeNo: row.provider_trade_no,
+    createdAt: row.created_at,
+    paidAt: row.paid_at,
+    closedAt: row.closed_at
+  };
+  if (balanceCredits !== undefined) order.balanceCredits = balanceCredits;
+  return order;
+}
+
+function toPaymentEvent(row) {
+  return {
+    id: row.id,
+    provider: row.provider,
+    providerEventId: row.provider_event_id,
+    orderId: row.order_id,
+    eventType: row.event_type,
+    payloadJson: row.payload_json,
+    processedAt: row.processed_at,
+    createdAt: row.created_at
+  };
+}
+
 function tableRows(items, mapper) {
   return items.length > 0 ? items.map(mapper) : [["暂无记录", "empty", "等待 API 写入", "PostgreSQL"]];
 }
@@ -197,6 +229,42 @@ async function appendAuditLog(client, { adminUserId, action, targetType, targetI
     [entry.id, entry.adminUserId, entry.targetType, entry.targetId, entry.action, entry.beforeJson, entry.afterJson, entry.ip, entry.createdAt]
   );
   return entry;
+}
+
+async function orderByIdOrNumber(client, { orderId, orderNo, forUpdate = false }) {
+  const lock = forUpdate ? " FOR UPDATE" : "";
+  if (orderId) {
+    const result = await client.query(`SELECT * FROM orders WHERE id = $1${lock}`, [orderId]);
+    return result.rows[0] || null;
+  }
+  if (orderNo) {
+    const result = await client.query(`SELECT * FROM orders WHERE order_no = $1${lock}`, [orderNo]);
+    return result.rows[0] || null;
+  }
+  return null;
+}
+
+async function creditPaidOrder(client, order, { providerTradeNo, notePrefix = "payment" } = {}) {
+  const now = isoNow();
+  await client.query(
+    "UPDATE orders SET status = 'paid', provider_trade_no = COALESCE($1, provider_trade_no), paid_at = COALESCE(paid_at, $2) WHERE id = $3",
+    [providerTradeNo || null, now, order.id]
+  );
+  try {
+    await appendLedger(client, {
+      userId: order.user_id,
+      type: "purchase",
+      amount: Number(order.credits),
+      idempotencyKey: `purchase:${order.id}`,
+      relatedOrderId: order.id,
+      note: `${notePrefix} ${providerTradeNo || order.provider_trade_no || ""}`.trim()
+    });
+  } catch (error) {
+    await client.query("UPDATE orders SET status = 'paid_pending_credit' WHERE id = $1", [order.id]);
+    throw error;
+  }
+  const updated = await client.query("SELECT * FROM orders WHERE id = $1", [order.id]);
+  return updated.rows[0];
 }
 
 export function createPostgresRuntime({ databaseUrl, pool } = {}) {
@@ -471,28 +539,108 @@ export function createPostgresRuntime({ databaseUrl, pool } = {}) {
       const client = await db.connect();
       try {
         await client.query("BEGIN");
-        const orderResult = await client.query("SELECT * FROM orders WHERE id = $1", [orderId]);
-        const order = orderResult.rows[0];
+        const order = await orderByIdOrNumber(client, { orderId, forUpdate: true });
         if (!order) throw new Error("ORDER_NOT_FOUND");
         const before = { status: order.status, balanceCredits: await balanceFor(client, order.user_id) };
         if (order.status !== "paid") {
-          await client.query("UPDATE orders SET status = 'paid', provider_trade_no = $1, paid_at = $2 WHERE id = $3", [providerTradeNo || null, isoNow(), order.id]);
-          await appendLedger(client, {
-            userId: order.user_id,
-            type: "purchase",
-            amount: Number(order.credits),
-            idempotencyKey: `purchase:${order.id}`,
-            relatedOrderId: order.id,
-            note: `manual payment ${providerTradeNo || ""}`.trim()
-          });
+          await creditPaidOrder(client, order, { providerTradeNo, notePrefix: "manual payment" });
         }
         const after = { status: "paid", balanceCredits: await balanceFor(client, order.user_id) };
         await appendAuditLog(client, { adminUserId, action: "order.mark_paid", targetType: "order", targetId: order.id, before, after, ip });
         await client.query("COMMIT");
-        return { ...order, status: "paid", providerTradeNo: providerTradeNo || null, balanceCredits: after.balanceCredits };
+        const updated = await orderByIdOrNumber(client, { orderId });
+        return toOrder(updated, after.balanceCredits);
       } catch (error) {
         await client.query("ROLLBACK");
         throw error;
+      } finally {
+        client.release();
+      }
+    },
+
+    async processPaymentEvent({ provider, providerEventId, orderId, orderNo, eventType, providerTradeNo, payload }) {
+      const normalizedProvider = String(provider || "").trim().toLowerCase();
+      const normalizedEventId = String(providerEventId || "").trim();
+      if (!normalizedProvider) throw new Error("PAYMENT_PROVIDER_REQUIRED");
+      if (!normalizedEventId) throw new Error("PAYMENT_EVENT_ID_REQUIRED");
+      if (!eventType) throw new Error("PAYMENT_EVENT_TYPE_REQUIRED");
+
+      const client = await db.connect();
+      try {
+        await client.query("BEGIN");
+        const existing = await client.query("SELECT * FROM payment_events WHERE provider_event_id = $1", [normalizedEventId]);
+        if (existing.rows[0]) {
+          const existingOrder = await orderByIdOrNumber(client, { orderId: existing.rows[0].order_id });
+          const balanceCredits = existingOrder ? await balanceFor(client, existingOrder.user_id) : undefined;
+          await client.query("COMMIT");
+          return {
+            event: toPaymentEvent(existing.rows[0]),
+            order: existingOrder ? toOrder(existingOrder, balanceCredits) : null,
+            idempotentReplay: true
+          };
+        }
+
+        const order = await orderByIdOrNumber(client, { orderId, orderNo, forUpdate: true });
+        if (!order) throw new Error("ORDER_NOT_FOUND");
+        const event = {
+          id: createId("payment_event"),
+          provider: normalizedProvider,
+          providerEventId: normalizedEventId,
+          orderId: order.id,
+          eventType,
+          payloadJson: JSON.stringify(payload ?? {}),
+          processedAt: null,
+          createdAt: isoNow()
+        };
+        await client.query(
+          `INSERT INTO payment_events (id, provider, provider_event_id, order_id, event_type, payload_json, processed_at, created_at)
+           VALUES ($1, $2, $3, $4, $5, $6, NULL, $7)`,
+          [event.id, event.provider, event.providerEventId, event.orderId, event.eventType, event.payloadJson, event.createdAt]
+        );
+
+        let updatedOrder = order;
+        if (["payment_succeeded", "paid", "trade_success"].includes(String(eventType))) {
+          updatedOrder = await creditPaidOrder(client, order, { providerTradeNo, notePrefix: `${normalizedProvider} payment` });
+          event.processedAt = isoNow();
+          await client.query("UPDATE payment_events SET processed_at = $1 WHERE id = $2", [event.processedAt, event.id]);
+        }
+        const balanceCredits = await balanceFor(client, updatedOrder.user_id);
+        await client.query("COMMIT");
+        return {
+          event,
+          order: toOrder(updatedOrder, balanceCredits),
+          idempotentReplay: false,
+          creditStatus: updatedOrder.status === "paid_pending_credit" ? "pending" : "credited"
+        };
+      } catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+      } finally {
+        client.release();
+      }
+    },
+
+    async processPendingOrderCredits({ limit = 20 } = {}) {
+      const client = await db.connect();
+      const failures = [];
+      let processedCount = 0;
+      try {
+        const pending = await client.query("SELECT * FROM orders WHERE status = 'paid_pending_credit' ORDER BY paid_at, created_at LIMIT $1", [Number(limit) || 20]);
+        for (const order of pending.rows) {
+          try {
+            await client.query("BEGIN");
+            const locked = await orderByIdOrNumber(client, { orderId: order.id, forUpdate: true });
+            if (locked?.status === "paid_pending_credit") {
+              await creditPaidOrder(client, locked, { providerTradeNo: locked.provider_trade_no, notePrefix: "payment compensation" });
+              processedCount += 1;
+            }
+            await client.query("COMMIT");
+          } catch (error) {
+            await client.query("ROLLBACK");
+            failures.push({ orderId: order.id, error: error.message });
+          }
+        }
+        return { processedCount, failedCount: failures.length, failures };
       } finally {
         client.release();
       }
@@ -651,6 +799,7 @@ export function createPostgresRuntime({ databaseUrl, pool } = {}) {
         const ledger = await client.query("SELECT * FROM credit_ledger ORDER BY created_at DESC LIMIT 50");
         const dailyUsage = await client.query("SELECT * FROM usage_daily ORDER BY business_date DESC LIMIT 50");
         const orders = await client.query("SELECT * FROM orders ORDER BY created_at DESC LIMIT 50");
+        const paymentEvents = await client.query("SELECT * FROM payment_events ORDER BY created_at DESC LIMIT 50");
         const referralCodes = await client.query("SELECT * FROM referral_codes ORDER BY created_at DESC LIMIT 50");
         const leases = await client.query("SELECT * FROM workspace_leases ORDER BY created_at DESC LIMIT 50");
         const auditLogs = await client.query("SELECT * FROM admin_audit_logs ORDER BY created_at DESC LIMIT 50");
@@ -664,6 +813,7 @@ export function createPostgresRuntime({ databaseUrl, pool } = {}) {
             plans: plans.rows.length,
             creditEntries: ledger.rows.length,
             orders: orders.rows.length,
+            paymentEvents: paymentEvents.rows.length,
             activeLeases: leases.rows.filter((lease) => lease.status === "active").length,
             auditLogs: auditLogs.rows.length
           },

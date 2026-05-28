@@ -1,6 +1,7 @@
 import http from "node:http";
 import { createPostgresRuntime } from "./db/postgresRuntime.js";
 import { createMemoryRuntime } from "./services/billingService.js";
+import { parseMockAlipayNotification } from "./services/paymentProviders.js";
 
 function jsonResponse(response, statusCode, payload) {
   response.writeHead(statusCode, {
@@ -40,6 +41,7 @@ function clientIp(request) {
 
 function errorStatus(error) {
   if (/ADMIN_FORBIDDEN/.test(error.message)) return 403;
+  if (/SIGNATURE/.test(error.message)) return 401;
   if (/UNAUTHORIZED|AUTH_FAILED|NOT_ACTIVE/.test(error.message)) return 401;
   if (/NOT_FOUND/.test(error.message)) return 404;
   if (/LIMIT|INSUFFICIENT|NO_AVAILABLE/.test(error.message)) return 409;
@@ -49,6 +51,7 @@ function errorStatus(error) {
 
 export function createAppServer(options = {}) {
   const runtime = options.runtime || createMemoryRuntime(options);
+  const env = options.env || process.env;
 
   return http.createServer(async (request, response) => {
     try {
@@ -109,11 +112,32 @@ export function createAppServer(options = {}) {
         return;
       }
 
+      if (request.method === "POST" && url.pathname === "/v1/payments/events") {
+        await authAdminId(runtime, request);
+        const body = await readJson(request);
+        jsonResponse(response, 200, await runtime.processPaymentEvent(body));
+        return;
+      }
+
+      if (request.method === "POST" && url.pathname === "/v1/payments/mock-alipay/notify") {
+        const body = await readJson(request);
+        const event = parseMockAlipayNotification(body, { secret: env.MOCK_ALIPAY_WEBHOOK_SECRET });
+        jsonResponse(response, 200, await runtime.processPaymentEvent(event));
+        return;
+      }
+
       if (request.method === "POST" && /^\/v1\/admin\/orders\/[^/]+\/mark-paid$/.test(url.pathname)) {
         const adminUserId = await authAdminId(runtime, request);
         const orderId = url.pathname.split("/")[4];
         const body = await readJson(request);
         jsonResponse(response, 200, await runtime.markOrderPaid({ ...body, orderId, adminUserId, ip: clientIp(request) }));
+        return;
+      }
+
+      if (request.method === "POST" && url.pathname === "/v1/admin/orders/compensate") {
+        await authAdminId(runtime, request);
+        const body = await readJson(request);
+        jsonResponse(response, 200, await runtime.processPendingOrderCredits(body));
         return;
       }
 

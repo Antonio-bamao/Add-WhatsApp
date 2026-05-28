@@ -2,11 +2,12 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
 import { createAppServer } from "../src/app.js";
+import { signMockAlipayPayload } from "../src/services/paymentProviders.js";
 
 const databaseUrl = process.env.ADD_WHATSAPP_TEST_DATABASE_URL || "";
 
-async function withServer(runtime, testFn) {
-  const server = createAppServer({ runtime });
+async function withServer(runtime, testFn, options = {}) {
+  const server = createAppServer({ runtime, ...options });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const { port } = server.address();
 
@@ -85,6 +86,58 @@ describe("PostgreSQL billing runtime", { skip: !databaseUrl }, () => {
       assert.equal(entitlements.payload.planId, "advanced");
 
       const auth = { authorization: `Bearer ${login.payload.accessToken}` };
+      const order = await request(baseUrl, "/v1/orders", {
+        method: "POST",
+        headers: auth,
+        body: { planId: "advanced", credits: 2000, amountCents: 60000 }
+      });
+      assert.equal(order.response.status, 201);
+
+      const mockAlipaySecret = "pg_mock_alipay_secret";
+      const payload = {
+        app_id: "mock-app",
+        notify_id: `pg-paid-${Date.now()}`,
+        out_trade_no: order.payload.orderNo,
+        trade_no: `pg-manual-${Date.now()}`,
+        trade_status: "TRADE_SUCCESS",
+        total_amount: "600.00"
+      };
+      const signedPayload = {
+        ...payload,
+        sign: signMockAlipayPayload(payload, mockAlipaySecret)
+      };
+      const paid = await request(baseUrl, "/v1/payments/mock-alipay/notify", {
+        method: "POST",
+        body: signedPayload
+      });
+      assert.equal(paid.response.status, 200);
+      assert.equal(paid.payload.order.status, "paid");
+
+      const duplicatePaid = await request(baseUrl, "/v1/payments/mock-alipay/notify", {
+        method: "POST",
+        body: signedPayload
+      });
+      assert.equal(duplicatePaid.response.status, 200);
+      assert.equal(duplicatePaid.payload.idempotentReplay, true);
+
+      const adminLogin = await request(baseUrl, "/v1/admin/auth/login", {
+        method: "POST",
+        body: { username: "admin-preview", password: "AdminPass123" }
+      });
+      const adminAuth = { authorization: `Bearer ${adminLogin.payload.adminAccessToken}` };
+
+      const compensated = await request(baseUrl, "/v1/admin/orders/compensate", {
+        method: "POST",
+        headers: adminAuth,
+        body: { limit: 10 }
+      });
+      assert.equal(compensated.response.status, 200);
+      assert.equal(compensated.payload.processedCount, 0);
+
+      const afterPaid = await request(baseUrl, "/v1/me/entitlements", { headers: auth });
+      assert.equal(afterPaid.response.status, 200);
+      assert.equal(afterPaid.payload.balanceCredits, 2123);
+
       const lease = await request(baseUrl, "/v1/workspaces/leases", {
         method: "POST",
         headers: auth,
@@ -113,12 +166,6 @@ describe("PostgreSQL billing runtime", { skip: !databaseUrl }, () => {
         body: { deviceId: "restart-device", workspaceKind: "secondary", processNonce: `pg-admin-${Date.now()}` }
       });
       assert.equal(secondLease.response.status, 201);
-
-      const adminLogin = await request(baseUrl, "/v1/admin/auth/login", {
-        method: "POST",
-        body: { username: "admin-preview", password: "AdminPass123" }
-      });
-      const adminAuth = { authorization: `Bearer ${adminLogin.payload.adminAccessToken}` };
       const adminReleased = await request(baseUrl, `/v1/admin/workspaces/leases/${secondLease.payload.leaseId}/release`, {
         method: "POST",
         headers: adminAuth,
@@ -152,6 +199,6 @@ describe("PostgreSQL billing runtime", { skip: !databaseUrl }, () => {
       assert.equal(consoleSnapshot.payload.source, "postgres");
       assert.ok(consoleSnapshot.payload.summary.users >= 1);
       assert.ok(consoleSnapshot.payload.summary.creditEntries >= 1);
-    });
+    }, { env: { MOCK_ALIPAY_WEBHOOK_SECRET: "pg_mock_alipay_secret" } });
   });
 });

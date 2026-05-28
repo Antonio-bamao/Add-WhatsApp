@@ -210,3 +210,24 @@
 - 结果：`server/` 新增 `/v1/admin/users/:id/status` 和 `/v1/admin/workspaces/leases/:id/release`；内存 runtime 与 PostgreSQL runtime 均写入审计日志，冻结用户后云端权益请求返回未授权。
 - 验证：先写 admin/server 失败测试确认缺少表单和接口；实现后根项目 `npm test` 通过 92/92，`admin\npm test` 通过 6/6，`server\npm test` 通过 12/12，真实 PostgreSQL `server\npm run test:postgres` 通过 1/1，`website\npm test` 通过 6/6，根项目 `npm run build` 成功；浏览器验证 `http://127.0.0.1:3220/#/credits` 无 console error/warning，额度页显示真实操作表单并读取 PostgreSQL 快照；`.context` 校验通过。
 - 下一步：补支付回调、`paid_pending_credit` 补偿队列和后台列表筛选/复制 ID 能力。
+
+## 2026-05-29T00:00:00+08:00｜补支付回调幂等与订单补偿队列底座
+- 目标：补支付回调幂等与订单补偿队列底座
+- 动作：在 server 内存 runtime 和 PostgreSQL runtime 中新增支付事件处理 processPaymentEvent、paid_pending_credit 补偿 processPendingOrderCredits，并接入 /v1/payments/events 与 /v1/admin/orders/compensate；补充服务层和 HTTP 层测试覆盖重复回调不重复入账、待入账订单补偿只执行一次。
+- 结果：支付侧最小闭环已建立：provider_event_id 防重复事件，credit_ledger purchase:{orderId} 防重复入账，人工入账、支付回调、补偿队列共享同一 purchase 账本幂等键。
+- 验证：server npm test 14/14 通过；server npm run test:postgres 1/1 通过；根项目 npm test 92/92 通过。
+- 下一步：继续补后台订单/支付事件列表筛选、支付渠道签名校验配置，以及更严格的 PostgreSQL 测试数据清理策略。
+
+## 2026-05-29T00:00:00+08:00｜补支付渠道抽象和 mock_alipay webhook 签名校验框架
+- 目标：补支付渠道抽象和 mock_alipay webhook 签名校验框架
+- 动作：新增 server/src/services/paymentProviders.js，提供 mock_alipay HMAC 签名生成、验签和字段映射；新增 /v1/payments/mock-alipay/notify webhook 路由，验签后转入现有 processPaymentEvent 幂等入账；扩展服务层、HTTP 和 PostgreSQL 测试覆盖签名成功、重复通知、篡改拒绝和数据库 runtime 入账。
+- 结果：真实支付宝接入前的服务器侧支付适配层已建立；支付密钥通过 server 环境变量 MOCK_ALIPAY_WEBHOOK_SECRET 注入，桌面端、官网和后台前端不接触密钥。
+- 验证：server npm test 17/17 通过；server npm run test:postgres 1/1 通过；根项目 npm test 92/92 通过。
+- 下一步：继续补真实支付宝/微信支付接入前的生产配置清单、webhook RSA 验签适配点，以及后台支付事件运营视图。
+
+## 2026-05-29T00:00:00+08:00｜收紧通用支付事件入口权限
+- 目标：收紧通用支付事件入口权限
+- 动作：将 /v1/payments/events 改为必须管理员鉴权；外部支付通知只允许走带签名校验的 provider webhook，例如 /v1/payments/mock-alipay/notify；补测试证明匿名通用支付事件会被拒绝，管理员事件仍可用于人工/内部联调。
+- 结果：支付事件入口边界更清晰：公开 webhook 必须验签，通用内部事件必须管理员鉴权，避免匿名请求绕过 provider 签名直接触发订单入账。
+- 验证：server npm test 17/17 通过；server npm run test:postgres 1/1 通过；根项目 npm test 92/92 通过。
+- 下一步：继续补后台支付事件运营视图和真实支付宝 RSA 验签适配。

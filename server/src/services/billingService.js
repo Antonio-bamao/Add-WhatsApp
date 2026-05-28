@@ -218,6 +218,7 @@ export function createCloudStore(options = {}) {
     usageDaily: new Map(),
     usageMonthly: new Map(),
     orders: new Map(),
+    paymentEvents: new Map(),
     referralCodes: new Map(),
     workspaceLeases: new Map(),
     auditLogs: [],
@@ -439,23 +440,40 @@ export function createOrder(store, { userId, planId, credits, amountCents }) {
   return { ...order };
 }
 
-export function markOrderPaid(store, { orderId, adminUserId, providerTradeNo, ip }) {
-  const order = store.orders.get(orderId);
-  if (!order) throw new Error("ORDER_NOT_FOUND");
-  const before = { status: order.status, balanceCredits: balanceFor(store, order.userId) };
+function orderByIdOrNumber(store, { orderId, orderNo }) {
+  if (orderId) return store.orders.get(orderId);
+  if (orderNo) return [...store.orders.values()].find((order) => order.orderNo === orderNo);
+  return null;
+}
 
-  if (order.status !== "paid") {
-    order.status = "paid";
-    order.providerTradeNo = providerTradeNo || null;
-    order.paidAt = isoNow(store);
+function creditPaidOrder(store, order, { providerTradeNo, notePrefix = "payment" } = {}) {
+  const beforeStatus = order.status;
+  order.status = "paid";
+  order.providerTradeNo = providerTradeNo || order.providerTradeNo || null;
+  order.paidAt = order.paidAt || isoNow(store);
+  try {
     appendLedger(store, {
       userId: order.userId,
       type: "purchase",
       amount: order.credits,
       idempotencyKey: `purchase:${order.id}`,
       relatedOrderId: order.id,
-      note: `manual payment ${providerTradeNo || ""}`.trim()
+      note: `${notePrefix} ${order.providerTradeNo || ""}`.trim()
     });
+  } catch (error) {
+    order.status = "paid_pending_credit";
+    throw error;
+  }
+  return { beforeStatus, order };
+}
+
+export function markOrderPaid(store, { orderId, adminUserId, providerTradeNo, ip }) {
+  const order = store.orders.get(orderId);
+  if (!order) throw new Error("ORDER_NOT_FOUND");
+  const before = { status: order.status, balanceCredits: balanceFor(store, order.userId) };
+
+  if (order.status !== "paid") {
+    creditPaidOrder(store, order, { providerTradeNo, notePrefix: "manual payment" });
   }
 
   appendAuditLog(store, {
@@ -468,6 +486,81 @@ export function markOrderPaid(store, { orderId, adminUserId, providerTradeNo, ip
     ip
   });
   return { ...order, balanceCredits: balanceFor(store, order.userId) };
+}
+
+export function processPaymentEvent(store, { provider, providerEventId, orderId, orderNo, eventType, providerTradeNo, payload }) {
+  const normalizedProvider = String(provider || "").trim().toLowerCase();
+  const normalizedEventId = String(providerEventId || "").trim();
+  if (!normalizedProvider) throw new Error("PAYMENT_PROVIDER_REQUIRED");
+  if (!normalizedEventId) throw new Error("PAYMENT_EVENT_ID_REQUIRED");
+  if (!eventType) throw new Error("PAYMENT_EVENT_TYPE_REQUIRED");
+
+  const existing = store.paymentEvents.get(normalizedEventId);
+  if (existing) {
+    const existingOrder = store.orders.get(existing.orderId);
+    return {
+      event: { ...existing },
+      order: existingOrder ? { ...existingOrder, balanceCredits: balanceFor(store, existingOrder.userId) } : null,
+      idempotentReplay: true
+    };
+  }
+
+  const order = orderByIdOrNumber(store, { orderId, orderNo });
+  if (!order) throw new Error("ORDER_NOT_FOUND");
+
+  const event = {
+    id: createId("payment_event"),
+    provider: normalizedProvider,
+    providerEventId: normalizedEventId,
+    orderId: order.id,
+    eventType,
+    payloadJson: JSON.stringify(payload ?? {}),
+    processedAt: null,
+    createdAt: isoNow(store)
+  };
+  store.paymentEvents.set(normalizedEventId, event);
+
+  if (["payment_succeeded", "paid", "trade_success"].includes(String(eventType))) {
+    try {
+      creditPaidOrder(store, order, { providerTradeNo, notePrefix: `${normalizedProvider} payment` });
+      event.processedAt = isoNow(store);
+    } catch (error) {
+      event.processedAt = null;
+      return {
+        event: { ...event },
+        order: { ...order, balanceCredits: balanceFor(store, order.userId) },
+        idempotentReplay: false,
+        creditStatus: "pending",
+        error: error.message
+      };
+    }
+  }
+
+  return {
+    event: { ...event },
+    order: { ...order, balanceCredits: balanceFor(store, order.userId) },
+    idempotentReplay: false,
+    creditStatus: order.status === "paid_pending_credit" ? "pending" : "credited"
+  };
+}
+
+export function processPendingOrderCredits(store, { limit = 20 } = {}) {
+  const pendingOrders = [...store.orders.values()]
+    .filter((order) => order.status === "paid_pending_credit")
+    .slice(0, Number(limit) || 20);
+  const failures = [];
+  let processedCount = 0;
+
+  for (const order of pendingOrders) {
+    try {
+      creditPaidOrder(store, order, { providerTradeNo: order.providerTradeNo, notePrefix: "payment compensation" });
+      processedCount += 1;
+    } catch (error) {
+      failures.push({ orderId: order.id, error: error.message });
+    }
+  }
+
+  return { processedCount, failedCount: failures.length, failures };
 }
 
 export function issueWorkspaceLease(store, { userId, deviceId, workspaceKind, processNonce }) {
@@ -583,6 +676,7 @@ export function getAdminConsoleSnapshot(store) {
   const users = [...store.users.values()];
   const plans = Object.values(PLAN_CATALOG);
   const orders = [...store.orders.values()];
+  const paymentEvents = [...store.paymentEvents.values()];
   const leases = [...store.workspaceLeases.values()];
   const dailyUsage = [...store.usageDaily.values()];
   const referralCodes = [...store.referralCodes.values()];
@@ -677,6 +771,7 @@ export function getAdminConsoleSnapshot(store) {
       plans: plans.length,
       creditEntries: store.creditLedger.length,
       orders: orders.length,
+      paymentEvents: paymentEvents.length,
       activeLeases: leases.filter((lease) => lease.status === "active").length,
       auditLogs: auditTrail.length
     },
@@ -714,6 +809,8 @@ export function createMemoryRuntime(options = {}) {
     consumeCredit: (body) => consumeCredit(store, body),
     createOrder: (body) => createOrder(store, body),
     markOrderPaid: (body) => markOrderPaid(store, body),
+    processPaymentEvent: (body) => processPaymentEvent(store, body),
+    processPendingOrderCredits: (body) => processPendingOrderCredits(store, body),
     adjustCredits: (body) => adjustCredits(store, body),
     issueWorkspaceLease: (body) => issueWorkspaceLease(store, body),
     renewWorkspaceLease: (body) => renewWorkspaceLease(store, body),
