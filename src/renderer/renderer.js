@@ -889,6 +889,8 @@ function taskEventMessage(event) {
     'row:fatal': `自动化浏览器已关闭或失联，停在第 ${event.row.rowNumber} 行：${event.error}`,
     'cloud:usage-synced': event.message,
     'cloud:usage-sync-failed': event.message,
+    'cloud:workspace-lease-renew-failed': event.message,
+    'cloud:workspace-lease-release-failed': event.message,
     'task:finished': event.message,
     'task:error': event.message
   };

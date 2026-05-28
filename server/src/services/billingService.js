@@ -490,6 +490,30 @@ export function issueWorkspaceLease(store, { userId, deviceId, workspaceKind, pr
   return { leaseId: lease.id, expiresAt: lease.expiresAt, activeCount: activeLeases.length + 1, workspaceLimit: plan.workspaceLimit };
 }
 
+export function renewWorkspaceLease(store, { userId, leaseId }) {
+  const lease = workspaceLeaseForUser(store, userId, leaseId);
+  if (lease.status !== "active") throw new Error("WORKSPACE_LEASE_NOT_ACTIVE");
+  lease.expiresAt = new Date(store.now().getTime() + 60 * 1000).toISOString();
+  lease.renewedAt = isoNow(store);
+  return { leaseId: lease.id, status: lease.status, expiresAt: lease.expiresAt, renewedAt: lease.renewedAt };
+}
+
+export function releaseWorkspaceLease(store, { userId, leaseId }) {
+  const lease = workspaceLeaseForUser(store, userId, leaseId);
+  if (lease.status !== "released") {
+    lease.status = "released";
+    lease.releasedAt = isoNow(store);
+  }
+  return { leaseId: lease.id, status: lease.status, releasedAt: lease.releasedAt };
+}
+
+function workspaceLeaseForUser(store, userId, leaseId) {
+  getUser(store, userId);
+  const lease = store.workspaceLeases.get(leaseId);
+  if (!lease || lease.userId !== userId) throw new Error("WORKSPACE_LEASE_NOT_FOUND");
+  return lease;
+}
+
 export function listAuditLogs(store) {
   return [...store.auditLogs].reverse();
 }
@@ -646,6 +670,8 @@ export function createMemoryRuntime(options = {}) {
     markOrderPaid: (body) => markOrderPaid(store, body),
     adjustCredits: (body) => adjustCredits(store, body),
     issueWorkspaceLease: (body) => issueWorkspaceLease(store, body),
+    renewWorkspaceLease: (body) => renewWorkspaceLease(store, body),
+    releaseWorkspaceLease: (body) => releaseWorkspaceLease(store, body),
     listAuditLogs: () => listAuditLogs(store),
     getAdminConsoleSnapshot: () => getAdminConsoleSnapshot(store)
   };

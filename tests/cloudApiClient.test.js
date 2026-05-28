@@ -93,6 +93,32 @@ test('issues workspace leases with bearer auth', async () => {
   assert.equal(lease.activeCount, 2);
 });
 
+test('renews and releases workspace leases with bearer auth', async () => {
+  const requests = [];
+  const client = new CloudApiClient({
+    baseUrl: 'http://127.0.0.1:4110',
+    fetchImpl: async (url, options = {}) => {
+      requests.push({ url, options });
+      assert.equal(options.method, 'POST');
+      assert.equal(options.headers.authorization, 'Bearer access-1');
+      if (url.endsWith('/v1/workspaces/leases/lease-1/renew')) {
+        return response(200, { leaseId: 'lease-1', status: 'active', expiresAt: '2026-05-28T12:02:00.000Z' });
+      }
+      if (url.endsWith('/v1/workspaces/leases/lease-1/release')) {
+        return response(200, { leaseId: 'lease-1', status: 'released', releasedAt: '2026-05-28T12:01:10.000Z' });
+      }
+      throw new Error(`unexpected url: ${url}`);
+    }
+  });
+
+  const renewed = await client.renewWorkspaceLease('access-1', 'lease-1');
+  const released = await client.releaseWorkspaceLease('access-1', 'lease-1');
+
+  assert.equal(renewed.status, 'active');
+  assert.equal(released.status, 'released');
+  assert.equal(requests.length, 2);
+});
+
 function response(status, payload) {
   return {
     ok: status >= 200 && status < 300,

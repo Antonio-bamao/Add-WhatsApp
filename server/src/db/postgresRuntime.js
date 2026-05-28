@@ -519,6 +519,46 @@ export function createPostgresRuntime({ databaseUrl, pool } = {}) {
       }
     },
 
+    async renewWorkspaceLease({ userId, leaseId }) {
+      const client = await db.connect();
+      try {
+        await requireActiveUser(client, userId);
+        const existing = await client.query("SELECT * FROM workspace_leases WHERE id = $1 AND user_id = $2", [leaseId, userId]);
+        const lease = existing.rows[0];
+        if (!lease) throw new Error("WORKSPACE_LEASE_NOT_FOUND");
+        if (lease.status !== "active") throw new Error("WORKSPACE_LEASE_NOT_ACTIVE");
+        const now = isoNow();
+        const expiresAt = new Date(Date.now() + 60 * 1000).toISOString();
+        await client.query(
+          "UPDATE workspace_leases SET expires_at = $1, renewed_at = $2 WHERE id = $3",
+          [expiresAt, now, leaseId]
+        );
+        return { leaseId, status: "active", expiresAt, renewedAt: now };
+      } finally {
+        client.release();
+      }
+    },
+
+    async releaseWorkspaceLease({ userId, leaseId }) {
+      const client = await db.connect();
+      try {
+        await requireActiveUser(client, userId);
+        const existing = await client.query("SELECT * FROM workspace_leases WHERE id = $1 AND user_id = $2", [leaseId, userId]);
+        const lease = existing.rows[0];
+        if (!lease) throw new Error("WORKSPACE_LEASE_NOT_FOUND");
+        const releasedAt = lease.released_at || isoNow();
+        if (lease.status !== "released") {
+          await client.query(
+            "UPDATE workspace_leases SET status = 'released', released_at = $1 WHERE id = $2",
+            [releasedAt, leaseId]
+          );
+        }
+        return { leaseId, status: "released", releasedAt };
+      } finally {
+        client.release();
+      }
+    },
+
     async listAuditLogs() {
       const result = await db.query("SELECT * FROM admin_audit_logs ORDER BY created_at DESC LIMIT 100");
       return result.rows.map((row) => ({

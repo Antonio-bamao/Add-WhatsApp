@@ -84,6 +84,29 @@ describe("PostgreSQL billing runtime", { skip: !databaseUrl }, () => {
       assert.equal(entitlements.payload.balanceCredits, 123);
       assert.equal(entitlements.payload.planId, "advanced");
 
+      const auth = { authorization: `Bearer ${login.payload.accessToken}` };
+      const lease = await request(baseUrl, "/v1/workspaces/leases", {
+        method: "POST",
+        headers: auth,
+        body: { deviceId: "restart-device", workspaceKind: "secondary", processNonce: `pg-${Date.now()}` }
+      });
+      assert.equal(lease.response.status, 201);
+      assert.ok(lease.payload.leaseId);
+
+      const renewed = await request(baseUrl, `/v1/workspaces/leases/${lease.payload.leaseId}/renew`, {
+        method: "POST",
+        headers: auth
+      });
+      assert.equal(renewed.response.status, 200);
+      assert.equal(renewed.payload.status, "active");
+
+      const released = await request(baseUrl, `/v1/workspaces/leases/${lease.payload.leaseId}/release`, {
+        method: "POST",
+        headers: auth
+      });
+      assert.equal(released.response.status, 200);
+      assert.equal(released.payload.status, "released");
+
       const consoleSnapshot = await request(baseUrl, "/v1/admin/console");
       assert.equal(consoleSnapshot.payload.source, "postgres");
       assert.ok(consoleSnapshot.payload.summary.users >= 1);

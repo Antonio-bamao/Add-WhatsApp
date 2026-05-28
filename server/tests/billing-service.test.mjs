@@ -12,6 +12,8 @@ import {
   getEntitlements,
   issueWorkspaceLease,
   markOrderPaid,
+  releaseWorkspaceLease,
+  renewWorkspaceLease,
   registerUser
 } from "../src/services/billingService.js";
 
@@ -165,6 +167,27 @@ describe("cloud billing service", () => {
     assert.throws(
       () => issueWorkspaceLease(store, { userId: user.id, deviceId: "device-1", workspaceKind: "secondary", processNonce: "p3" }),
       /WORKSPACE_LIMIT_REACHED/
+    );
+  });
+
+  it("renews and releases workspace leases for the owning user", () => {
+    const store = createCloudStore({ now: new Date("2026-05-28T10:00:00+08:00") });
+    const user = registerUser(store, { username: "lease-lifecycle-user", password: "StrongPass123", planId: "advanced" });
+    const lease = issueWorkspaceLease(store, { userId: user.id, deviceId: "device-1", workspaceKind: "secondary", processNonce: "p1" });
+
+    store.now = () => new Date("2026-05-28T10:00:30+08:00");
+    const renewed = renewWorkspaceLease(store, { userId: user.id, leaseId: lease.leaseId });
+    assert.equal(renewed.leaseId, lease.leaseId);
+    assert.equal(renewed.status, "active");
+    assert.notEqual(renewed.expiresAt, lease.expiresAt);
+
+    const released = releaseWorkspaceLease(store, { userId: user.id, leaseId: lease.leaseId });
+    assert.equal(released.status, "released");
+    assert.equal(store.workspaceLeases.get(lease.leaseId).status, "released");
+
+    assert.throws(
+      () => renewWorkspaceLease(store, { userId: user.id, leaseId: lease.leaseId }),
+      /WORKSPACE_LEASE_NOT_ACTIVE/
     );
   });
 });

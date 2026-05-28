@@ -170,6 +170,45 @@ test('cloud controller skips workspace leases without a cloud session', async ()
   assert.equal(result.authRequired, true);
 });
 
+test('cloud controller renews and releases workspace leases', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'add-whatsapp-cloud-lease-cycle-'));
+  const sessionStore = new CloudSessionStore(path.join(dir, 'cloud-session.json'));
+  sessionStore.save({
+    user: { id: 'user-1', username: 'cloud-user' },
+    accessToken: 'access-1',
+    refreshToken: 'refresh-1',
+    entitlements: { userId: 'user-1', planId: 'professional', balanceCredits: 2000 }
+  });
+  const paths = [];
+  const client = new CloudApiClient({
+    baseUrl: 'http://api.test',
+    fetchImpl: async (url, options = {}) => {
+      assert.equal(options.headers.authorization, 'Bearer access-1');
+      paths.push(url);
+      if (url.endsWith('/v1/workspaces/leases/lease-1/renew')) {
+        return response(200, { leaseId: 'lease-1', status: 'active', expiresAt: '2026-05-28T12:02:00.000Z' });
+      }
+      if (url.endsWith('/v1/workspaces/leases/lease-1/release')) {
+        return response(200, { leaseId: 'lease-1', status: 'released', releasedAt: '2026-05-28T12:01:10.000Z' });
+      }
+      throw new Error(`unexpected ${url}`);
+    }
+  });
+  const { createCloudDesktopController } = require('../src/main/cloudDesktopController');
+  const controller = createCloudDesktopController({ client, sessionStore, deviceId: 'desktop-1' });
+
+  const renewed = await controller.renewWorkspaceLease({ leaseId: 'lease-1' });
+  const released = await controller.releaseWorkspaceLease({ leaseId: 'lease-1' });
+
+  assert.equal(renewed.ok, true);
+  assert.equal(renewed.lease.status, 'active');
+  assert.equal(released.lease.status, 'released');
+  assert.deepEqual(paths, [
+    'http://api.test/v1/workspaces/leases/lease-1/renew',
+    'http://api.test/v1/workspaces/leases/lease-1/release'
+  ]);
+});
+
 function response(status, payload) {
   return {
     ok: status >= 200 && status < 300,

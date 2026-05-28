@@ -48,6 +48,7 @@ const {
 } = require('./workspaceProfiles');
 
 const PROXY_MONITOR_INTERVAL_MS = 5 * 60 * 1000;
+const CLOUD_LEASE_RENEW_INTERVAL_MS = 30 * 1000;
 const workspaceId = parseWorkspaceId(process.argv);
 const workspaceProxyServer = parseWorkspaceProxy(process.argv);
 if (workspaceId) {
@@ -76,6 +77,7 @@ let activeProxyBridge = null;
 let cloudController = null;
 let subscriptionState = defaultSubscriptionState();
 const openSecondaryWorkspaces = new Set();
+const activeCloudWorkspaceLeases = new Map();
 
 function defaultSubscriptionState() {
   return createEntitlementState('advanced', {
@@ -483,8 +485,10 @@ ipcMain.handle('workspace:open-another-account', async (_event, payload = {}) =>
       windowsHide: false
     });
     openSecondaryWorkspaces.add(nextWorkspaceId);
+    registerCloudWorkspaceLease(nextWorkspaceId, cloudLease.lease);
     child.once('exit', () => {
       openSecondaryWorkspaces.delete(nextWorkspaceId);
+      releaseCloudWorkspaceLease(nextWorkspaceId);
       sendToRenderer('auth:changed', authState());
     });
     child.unref();
@@ -514,6 +518,44 @@ async function issueCloudWorkspaceLease(nextWorkspaceId) {
         ? '云端工作台数量已达到当前套餐上限。'
         : `云端工作台租约申请失败：${error.message}`
     };
+  }
+}
+
+function registerCloudWorkspaceLease(nextWorkspaceId, lease) {
+  if (!lease || !lease.leaseId || !cloudController) return;
+  const interval = setInterval(() => {
+    renewCloudWorkspaceLease(nextWorkspaceId);
+  }, CLOUD_LEASE_RENEW_INTERVAL_MS);
+  if (typeof interval.unref === 'function') interval.unref();
+  activeCloudWorkspaceLeases.set(nextWorkspaceId, { leaseId: lease.leaseId, interval });
+}
+
+async function renewCloudWorkspaceLease(nextWorkspaceId) {
+  const tracked = activeCloudWorkspaceLeases.get(nextWorkspaceId);
+  if (!tracked || !cloudController) return;
+  try {
+    await cloudController.renewWorkspaceLease({ leaseId: tracked.leaseId });
+  } catch (error) {
+    sendToRenderer('task:event', {
+      type: 'cloud:workspace-lease-renew-failed',
+      message: `云端工作台租约续租失败：${error.message}`
+    });
+  }
+}
+
+async function releaseCloudWorkspaceLease(nextWorkspaceId) {
+  const tracked = activeCloudWorkspaceLeases.get(nextWorkspaceId);
+  if (!tracked) return;
+  clearInterval(tracked.interval);
+  activeCloudWorkspaceLeases.delete(nextWorkspaceId);
+  if (!cloudController) return;
+  try {
+    await cloudController.releaseWorkspaceLease({ leaseId: tracked.leaseId });
+  } catch (error) {
+    sendToRenderer('task:event', {
+      type: 'cloud:workspace-lease-release-failed',
+      message: `云端工作台租约释放失败：${error.message}`
+    });
   }
 }
 

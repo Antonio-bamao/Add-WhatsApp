@@ -196,3 +196,9 @@
 - 结果：`workspace:open-another-account` 在真正启动第二工作台进程前先申请云端租约；后台返回 `WORKSPACE_LIMIT_REACHED` 时会阻止新窗口启动，并显示云端工作台上限提示。
 - 验证：先写 controller lease 测试并确认缺少方法失败；实现后根项目 `npm test` 通过 90/90，`server\npm test` 通过 10/10，`admin\npm test` 通过 5/5，`website\npm test` 通过 6/6，根项目 `npm run build` 成功生成 `dist\Add WhatsApp 0.1.2.exe`。
 - 下一步：补云端工作台 lease 续租/释放 API 和后台真实操作表单，避免 60 秒一次性租约在长期工作台中失真。
+
+- 步骤：补云端工作台租约续租/释放生命周期。
+- 结果：`server/` 新增用户鉴权的 `/v1/workspaces/leases/:id/renew` 和 `/v1/workspaces/leases/:id/release`；内存 runtime 与 PostgreSQL runtime 均实现 `renewWorkspaceLease` / `releaseWorkspaceLease`，只允许租约所属用户续租或释放。
+- 结果：桌面端 `CloudApiClient` 与 `cloudDesktopController` 新增 renew/release 方法；主进程在打开第二工作台后记录 `leaseId`，每 30 秒续租一次，第二工作台子进程退出时释放租约，续租/释放失败会进入任务日志但不破坏本地窗口清理。
+- 验证：先写 server 和 desktop 续租/释放测试并确认失败；实现后 `server\npm test` 通过 11/11，真实 `server\npm run test:postgres` 通过 1/1，根项目 `npm test` 通过 92/92，`admin\npm test` 通过 5/5，`website\npm test` 通过 6/6，根项目 `npm run build` 成功生成 `dist\Add WhatsApp 0.1.2.exe`。
+- 下一步：补后台真实操作表单，尤其是人工调账、订单入账、异常工作台租约释放和账号冻结。

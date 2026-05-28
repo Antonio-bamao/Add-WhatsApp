@@ -131,6 +131,20 @@ export function createAppServer(options = {}) {
         return;
       }
 
+      if (request.method === "POST" && /^\/v1\/workspaces\/leases\/[^/]+\/renew$/.test(url.pathname)) {
+        const userId = await authUserId(runtime, request);
+        const leaseId = url.pathname.split("/")[4];
+        jsonResponse(response, 200, await runtime.renewWorkspaceLease({ userId, leaseId }));
+        return;
+      }
+
+      if (request.method === "POST" && /^\/v1\/workspaces\/leases\/[^/]+\/release$/.test(url.pathname)) {
+        const userId = await authUserId(runtime, request);
+        const leaseId = url.pathname.split("/")[4];
+        jsonResponse(response, 200, await runtime.releaseWorkspaceLease({ userId, leaseId }));
+        return;
+      }
+
       if (request.method === "GET" && url.pathname === "/v1/admin/audit-logs") {
         await authAdminId(runtime, request);
         jsonResponse(response, 200, { items: await runtime.listAuditLogs() });

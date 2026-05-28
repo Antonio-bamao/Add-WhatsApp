@@ -40,6 +40,20 @@ class CloudApiClient {
     });
   }
 
+  async renewWorkspaceLease(accessToken, leaseId) {
+    return this.request(`/v1/workspaces/leases/${encodeURIComponent(leaseId)}/renew`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${accessToken}` }
+    });
+  }
+
+  async releaseWorkspaceLease(accessToken, leaseId) {
+    return this.request(`/v1/workspaces/leases/${encodeURIComponent(leaseId)}/release`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${accessToken}` }
+    });
+  }
+
   async request(path, options = {}) {
     const headers = {
       'content-type': 'application/json',

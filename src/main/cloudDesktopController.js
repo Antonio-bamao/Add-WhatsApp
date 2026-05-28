@@ -75,6 +75,24 @@ function createCloudDesktopController({ client, sessionStore, deviceId = 'deskto
     return { ok: true, lease };
   }
 
+  async function renewWorkspaceLease({ leaseId }) {
+    const session = sessionStore.load();
+    if (!session.authenticated || !session.accessToken) {
+      return { ok: true, skipped: true, authRequired: true };
+    }
+    const lease = await client.renewWorkspaceLease(session.accessToken, leaseId);
+    return { ok: true, lease };
+  }
+
+  async function releaseWorkspaceLease({ leaseId }) {
+    const session = sessionStore.load();
+    if (!session.authenticated || !session.accessToken) {
+      return { ok: true, skipped: true, authRequired: true };
+    }
+    const lease = await client.releaseWorkspaceLease(session.accessToken, leaseId);
+    return { ok: true, lease };
+  }
+
   function logout() {
     sessionStore.clear();
     return { ok: true, cloud: publicCloudState(sessionStore.load()) };
@@ -88,6 +106,8 @@ function createCloudDesktopController({ client, sessionStore, deviceId = 'deskto
     getState,
     consumeSuccessfulAdds,
     issueWorkspaceLease,
+    renewWorkspaceLease,
+    releaseWorkspaceLease,
     login,
     logout,
     refreshEntitlements

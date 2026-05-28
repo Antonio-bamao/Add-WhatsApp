@@ -94,6 +94,20 @@ describe("cloud API skeleton", () => {
       assert.equal(lease.response.status, 201);
       assert.ok(lease.payload.leaseId);
 
+      const renewedLease = await request(baseUrl, `/v1/workspaces/leases/${lease.payload.leaseId}/renew`, {
+        method: "POST",
+        headers: auth
+      });
+      assert.equal(renewedLease.response.status, 200);
+      assert.equal(renewedLease.payload.status, "active");
+
+      const releasedLease = await request(baseUrl, `/v1/workspaces/leases/${lease.payload.leaseId}/release`, {
+        method: "POST",
+        headers: auth
+      });
+      assert.equal(releasedLease.response.status, 200);
+      assert.equal(releasedLease.payload.status, "released");
+
       const audit = await request(baseUrl, "/v1/admin/audit-logs", { headers: adminAuth });
       assert.equal(audit.response.status, 200);
       assert.ok(audit.payload.items.some((entry) => entry.action === "credit.adjustment"));
