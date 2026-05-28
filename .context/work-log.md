@@ -202,3 +202,11 @@
 - 结果：桌面端 `CloudApiClient` 与 `cloudDesktopController` 新增 renew/release 方法；主进程在打开第二工作台后记录 `leaseId`，每 30 秒续租一次，第二工作台子进程退出时释放租约，续租/释放失败会进入任务日志但不破坏本地窗口清理。
 - 验证：先写 server 和 desktop 续租/释放测试并确认失败；实现后 `server\npm test` 通过 11/11，真实 `server\npm run test:postgres` 通过 1/1，根项目 `npm test` 通过 92/92，`admin\npm test` 通过 5/5，`website\npm test` 通过 6/6，根项目 `npm run build` 成功生成 `dist\Add WhatsApp 0.1.2.exe`。
 - 下一步：补后台真实操作表单，尤其是人工调账、订单入账、异常工作台租约释放和账号冻结。
+
+## 2026-05-29
+
+- 步骤：补后台真实运营操作表单。
+- 结果：`admin/` 在用户、额度、订单、工作台模块分别新增冻结/恢复账号、人工调账、人工标记已支付、释放异常租约表单；表单要求管理员登录 token，提交后刷新后台 API 快照。
+- 结果：`server/` 新增 `/v1/admin/users/:id/status` 和 `/v1/admin/workspaces/leases/:id/release`；内存 runtime 与 PostgreSQL runtime 均写入审计日志，冻结用户后云端权益请求返回未授权。
+- 验证：先写 admin/server 失败测试确认缺少表单和接口；实现后根项目 `npm test` 通过 92/92，`admin\npm test` 通过 6/6，`server\npm test` 通过 12/12，真实 PostgreSQL `server\npm run test:postgres` 通过 1/1，`website\npm test` 通过 6/6，根项目 `npm run build` 成功；浏览器验证 `http://127.0.0.1:3220/#/credits` 无 console error/warning，额度页显示真实操作表单并读取 PostgreSQL 快照；`.context` 校验通过。
+- 下一步：补支付回调、`paid_pending_credit` 补偿队列和后台列表筛选/复制 ID 能力。

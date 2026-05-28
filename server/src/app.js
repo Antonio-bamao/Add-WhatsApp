@@ -40,7 +40,7 @@ function clientIp(request) {
 
 function errorStatus(error) {
   if (/ADMIN_FORBIDDEN/.test(error.message)) return 403;
-  if (/UNAUTHORIZED|AUTH_FAILED/.test(error.message)) return 401;
+  if (/UNAUTHORIZED|AUTH_FAILED|NOT_ACTIVE/.test(error.message)) return 401;
   if (/NOT_FOUND/.test(error.message)) return 404;
   if (/LIMIT|INSUFFICIENT|NO_AVAILABLE/.test(error.message)) return 409;
   if (/INVALID|REQUIRED|WEAK|EXISTS/.test(error.message)) return 400;
@@ -121,6 +121,22 @@ export function createAppServer(options = {}) {
         const adminUserId = await authAdminId(runtime, request);
         const body = await readJson(request);
         jsonResponse(response, 200, await runtime.adjustCredits({ ...body, adminUserId, ip: clientIp(request) }));
+        return;
+      }
+
+      if (request.method === "POST" && /^\/v1\/admin\/users\/[^/]+\/status$/.test(url.pathname)) {
+        const adminUserId = await authAdminId(runtime, request);
+        const userId = url.pathname.split("/")[4];
+        const body = await readJson(request);
+        jsonResponse(response, 200, await runtime.setUserStatus({ ...body, userId, adminUserId, ip: clientIp(request) }));
+        return;
+      }
+
+      if (request.method === "POST" && /^\/v1\/admin\/workspaces\/leases\/[^/]+\/release$/.test(url.pathname)) {
+        const adminUserId = await authAdminId(runtime, request);
+        const leaseId = url.pathname.split("/")[5];
+        const body = await readJson(request);
+        jsonResponse(response, 200, await runtime.adminReleaseWorkspaceLease({ ...body, leaseId, adminUserId, ip: clientIp(request) }));
         return;
       }
 

@@ -19,7 +19,9 @@
 - 已完成：发送任务结束后只选择本轮新增的成功发送行，逐条调用 `/v1/credits/consume` 做成功添加扣费；失败、未注册、无效、暂停和历史已发送行不会重复扣费。
 - 已完成：第二工作台启动流程已接入 `/v1/workspaces/leases`；云端已登录时，主进程会先用即将打开的 `workspaceId` 申请云端租约，后台拒绝时不会启动新工作台；未登录云端时继续允许本地预览模式。
 - 已完成：云端工作台租约新增续租/释放 API，内存 runtime 和 PostgreSQL runtime 均支持 `/v1/workspaces/leases/:id/renew` 与 `/v1/workspaces/leases/:id/release`；桌面端会在第二工作台存活期间每 30 秒续租，子进程退出时释放租约。
-- 进行中：下一步补后台真实操作表单：人工调账、订单入账、工作台释放和账号冻结；PostgreSQL runtime 还需要继续补更严格的测试数据清理策略和支付回调。
+- 已完成：后台真实操作表单已接入第一批运营动作：额度页人工调账、订单页人工标记已支付、工作台页管理员释放异常租约、用户页冻结/恢复账号；提交成功后会刷新后台 API 快照，敏感动作继续写审计日志。
+- 已完成：`server/` 新增管理员释放工作台租约和用户状态变更接口；内存 runtime 与 PostgreSQL runtime 均支持对应操作，冻结用户后云端权益请求会被拒绝。
+- 进行中：下一步补支付回调、订单补偿队列、后台操作列表筛选和更严格的 PostgreSQL 测试数据清理策略。
 - 验证：`website\npm test` 通过 6/6；`website\npm run build` 成功；根项目 `npm test` 通过 77/77；本地 `http://localhost:3100` 桌面/移动端 Chrome headless 截图已复查，样式不再退化为裸 HTML；浏览器插件调试确认首屏只剩 1 个 WebGL canvas、无旧 `.globe-static` SVG 叠加、无 Server Error，地球 HUD 文案已删除，路线扩展到 20 条；下载页返回 200，`/downloads/latest/Add-WhatsApp.exe` HEAD 长度为 `77060652`。
 - 验证：`admin\npm test` 通过 5/5；本地 `http://127.0.0.1:3220/` 返回 200；管理台 JS 已包含 `ADD_WHATSAPP_API_URL`、`/v1/admin/console`、API 回退逻辑和运行时快照合并逻辑。
 - 验证：后台拆页后，浏览器验证运营首页只显示 8 个模块入口且不渲染 8 个模块详情；`#/referrals` 只显示推荐审核模块详情，3 个详情区、3 条记录、无 console error/warning、无横向溢出。
@@ -27,5 +29,6 @@
 - 验证：`server\npm run test:postgres` 在真实本地 PostgreSQL 上通过 1/1，证明用户和额度账本能跨 runtime 重启保留，且普通用户 token 不能调账，管理员登录后才能调账。
 - 验证：用 `DATABASE_URL` 临时启动 `server` 后，`/v1/health` 返回 `mode: postgres`，`/v1/admin/console` 返回 `source: postgres` 并读取到用户、套餐、账本和审计。
 - 验证：根项目 `npm test` 通过 92/92；`server\npm test` 通过 11/11；`server\npm run test:postgres` 通过 1/1；`admin\npm test` 通过 5/5；`website\npm test` 通过 6/6；根项目 `npm run build` 成功生成 `dist\Add WhatsApp 0.1.2.exe`。
-- 下一步：补后台真实操作表单和支付/人工入账流程；后台工作台页后续要能主动释放异常租约。
+- 验证：后台真实操作表单后，根项目 `npm test` 通过 92/92；`server\npm test` 通过 12/12；真实 PostgreSQL `server\npm run test:postgres` 通过 1/1；`admin\npm test` 通过 6/6；`website\npm test` 通过 6/6；根项目 `npm run build` 成功；`.context` 校验通过。
+- 下一步：继续补支付回调和 paid_pending_credit 补偿队列；后台列表需要从快照表格升级为可筛选、可定位、可复制 ID 的运营视图。
 - 阻塞项：管理员登录方式、支付渠道/人工收款流程、生产域名和部署平台还未最终确定。

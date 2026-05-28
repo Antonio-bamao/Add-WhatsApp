@@ -31,7 +31,8 @@ body {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
@@ -338,6 +339,76 @@ h3 {
   text-wrap: pretty;
 }
 
+.operation-panel {
+  display: grid;
+  grid-template-columns: minmax(240px, 0.7fr) minmax(0, 1.3fr);
+  gap: 18px;
+  align-items: start;
+  margin-bottom: 24px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  padding: 20px;
+}
+
+.operation-panel p {
+  margin-bottom: 0;
+  color: var(--muted);
+}
+
+.operation-form {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.operation-form label {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.operation-form input,
+.operation-form select {
+  width: 100%;
+  min-height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #ffffff;
+  padding: 8px 10px;
+  color: var(--text);
+}
+
+.operation-form button {
+  min-height: 38px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--brand);
+  color: #ffffff;
+  padding: 8px 13px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.operation-status {
+  grid-column: 1 / -1;
+  min-height: 20px;
+  color: var(--muted);
+}
+
+.operation-status[data-tone="good"] {
+  color: var(--brand-dark);
+}
+
+.operation-status[data-tone="danger"] {
+  color: var(--danger);
+}
+
 .status-pill {
   display: inline-flex;
   align-items: center;
@@ -510,7 +581,9 @@ code {
   .summary-grid,
   .page-layout,
   .detail-grid,
-  .module-hero {
+  .module-hero,
+  .operation-panel,
+  .operation-form {
     grid-template-columns: 1fr;
   }
 

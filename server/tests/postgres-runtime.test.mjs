@@ -107,6 +107,47 @@ describe("PostgreSQL billing runtime", { skip: !databaseUrl }, () => {
       assert.equal(released.response.status, 200);
       assert.equal(released.payload.status, "released");
 
+      const secondLease = await request(baseUrl, "/v1/workspaces/leases", {
+        method: "POST",
+        headers: auth,
+        body: { deviceId: "restart-device", workspaceKind: "secondary", processNonce: `pg-admin-${Date.now()}` }
+      });
+      assert.equal(secondLease.response.status, 201);
+
+      const adminLogin = await request(baseUrl, "/v1/admin/auth/login", {
+        method: "POST",
+        body: { username: "admin-preview", password: "AdminPass123" }
+      });
+      const adminAuth = { authorization: `Bearer ${adminLogin.payload.adminAccessToken}` };
+      const adminReleased = await request(baseUrl, `/v1/admin/workspaces/leases/${secondLease.payload.leaseId}/release`, {
+        method: "POST",
+        headers: adminAuth,
+        body: { reason: "postgres stale lease cleanup" }
+      });
+      assert.equal(adminReleased.response.status, 200);
+      assert.equal(adminReleased.payload.status, "released");
+
+      const frozen = await request(baseUrl, `/v1/admin/users/${registeredUserId}/status`, {
+        method: "POST",
+        headers: adminAuth,
+        body: { status: "frozen", reason: "postgres risk review" }
+      });
+      assert.equal(frozen.response.status, 200);
+      assert.equal(frozen.payload.status, "frozen");
+
+      const rejectedWhileFrozen = await request(baseUrl, "/v1/me/entitlements", {
+        headers: auth
+      });
+      assert.equal(rejectedWhileFrozen.response.status, 401);
+
+      const restored = await request(baseUrl, `/v1/admin/users/${registeredUserId}/status`, {
+        method: "POST",
+        headers: adminAuth,
+        body: { status: "active", reason: "postgres test restore" }
+      });
+      assert.equal(restored.response.status, 200);
+      assert.equal(restored.payload.status, "active");
+
       const consoleSnapshot = await request(baseUrl, "/v1/admin/console");
       assert.equal(consoleSnapshot.payload.source, "postgres");
       assert.ok(consoleSnapshot.payload.summary.users >= 1);

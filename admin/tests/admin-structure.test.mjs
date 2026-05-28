@@ -112,4 +112,37 @@ describe("admin console structure", () => {
     assert.match(js, /本地 API 预览/);
     assert.match(js, /API 未连接/);
   });
+
+  it("exposes real admin operation forms for the first运营闭环", () => {
+    const js = readText("public/admin.js");
+    const css = readText("public/admin.css");
+
+    for (const endpoint of [
+      "/v1/admin/credits/adjust",
+      "/v1/admin/orders/",
+      "/v1/admin/workspaces/leases/",
+      "/v1/admin/users/"
+    ]) {
+      assert.match(js, new RegExp(endpoint.replaceAll("/", "\\/")));
+    }
+
+    for (const expectedFunction of [
+      "renderOperationPanel",
+      "submitCreditAdjustment",
+      "submitOrderMarkPaid",
+      "submitWorkspaceRelease",
+      "submitUserStatusChange"
+    ]) {
+      assert.match(js, new RegExp(expectedFunction));
+    }
+
+    assert.match(js, /data-operation-form="credits-adjust"/);
+    assert.match(js, /data-operation-form="order-mark-paid"/);
+    assert.match(js, /data-operation-form="workspace-release"/);
+    assert.match(js, /data-operation-form="user-status"/);
+    assert.match(js, /loadConsoleSnapshot\(\)/);
+    assert.match(css, /\.operation-panel/);
+    assert.match(css, /\.operation-form/);
+    assert.match(css, /\.operation-status/);
+  });
 });

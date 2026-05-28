@@ -104,6 +104,12 @@ function getUser(store, userId) {
   return user;
 }
 
+function findUser(store, userId) {
+  const user = store.users.get(userId);
+  if (!user) throw new Error("USER_NOT_FOUND");
+  return user;
+}
+
 function getSubscription(store, userId) {
   return store.subscriptions.get(userId) || {
     id: createId("sub"),
@@ -507,6 +513,46 @@ export function releaseWorkspaceLease(store, { userId, leaseId }) {
   return { leaseId: lease.id, status: lease.status, releasedAt: lease.releasedAt };
 }
 
+export function adminReleaseWorkspaceLease(store, { leaseId, adminUserId, reason, ip }) {
+  const lease = store.workspaceLeases.get(leaseId);
+  if (!lease) throw new Error("WORKSPACE_LEASE_NOT_FOUND");
+  const before = { status: lease.status, releasedAt: lease.releasedAt };
+  if (lease.status !== "released") {
+    lease.status = "released";
+    lease.releasedAt = isoNow(store);
+  }
+  const after = { status: lease.status, releasedAt: lease.releasedAt, reason: reason || "admin release" };
+  appendAuditLog(store, {
+    adminUserId,
+    action: "workspace.release",
+    targetType: "workspace_lease",
+    targetId: lease.id,
+    before,
+    after,
+    ip
+  });
+  return { leaseId: lease.id, status: lease.status, releasedAt: lease.releasedAt };
+}
+
+export function setUserStatus(store, { userId, status, adminUserId, reason, ip }) {
+  if (!["active", "frozen"].includes(status)) throw new Error("USER_STATUS_INVALID");
+  const user = findUser(store, userId);
+  const before = { status: user.status };
+  user.status = status;
+  user.updatedAt = isoNow(store);
+  const after = { status: user.status, reason: reason || "admin status update" };
+  appendAuditLog(store, {
+    adminUserId,
+    action: "user.status_update",
+    targetType: "user",
+    targetId: user.id,
+    before,
+    after,
+    ip
+  });
+  return { userId: user.id, username: user.username, status: user.status, updatedAt: user.updatedAt };
+}
+
 function workspaceLeaseForUser(store, userId, leaseId) {
   getUser(store, userId);
   const lease = store.workspaceLeases.get(leaseId);
@@ -672,6 +718,8 @@ export function createMemoryRuntime(options = {}) {
     issueWorkspaceLease: (body) => issueWorkspaceLease(store, body),
     renewWorkspaceLease: (body) => renewWorkspaceLease(store, body),
     releaseWorkspaceLease: (body) => releaseWorkspaceLease(store, body),
+    adminReleaseWorkspaceLease: (body) => adminReleaseWorkspaceLease(store, body),
+    setUserStatus: (body) => setUserStatus(store, body),
     listAuditLogs: () => listAuditLogs(store),
     getAdminConsoleSnapshot: () => getAdminConsoleSnapshot(store)
   };

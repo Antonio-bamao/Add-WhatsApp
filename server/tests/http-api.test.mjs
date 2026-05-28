@@ -144,6 +144,54 @@ describe("cloud API skeleton", () => {
     }, { runtime });
   });
 
+  it("lets admins freeze users and release abnormal workspace leases with audit logs", async () => {
+    await withServer(async (baseUrl) => {
+      const registered = await request(baseUrl, "/v1/auth/register", {
+        method: "POST",
+        body: { username: "ops-user", password: "StrongPass123", planId: "advanced" }
+      });
+      assert.equal(registered.response.status, 201);
+      const userAuth = { authorization: `Bearer ${registered.payload.accessToken}` };
+
+      const lease = await request(baseUrl, "/v1/workspaces/leases", {
+        method: "POST",
+        headers: userAuth,
+        body: { deviceId: "ops-device", workspaceKind: "secondary", processNonce: "ops-nonce" }
+      });
+      assert.equal(lease.response.status, 201);
+
+      const adminLogin = await request(baseUrl, "/v1/admin/auth/login", {
+        method: "POST",
+        body: { username: "admin-preview", password: "AdminPass123" }
+      });
+      const adminAuth = { authorization: `Bearer ${adminLogin.payload.adminAccessToken}` };
+
+      const releasedLease = await request(baseUrl, `/v1/admin/workspaces/leases/${lease.payload.leaseId}/release`, {
+        method: "POST",
+        headers: adminAuth,
+        body: { reason: "stale process cleanup" }
+      });
+      assert.equal(releasedLease.response.status, 200);
+      assert.equal(releasedLease.payload.status, "released");
+
+      const frozen = await request(baseUrl, `/v1/admin/users/${registered.payload.user.id}/status`, {
+        method: "POST",
+        headers: adminAuth,
+        body: { status: "frozen", reason: "risk review" }
+      });
+      assert.equal(frozen.response.status, 200);
+      assert.equal(frozen.payload.status, "frozen");
+
+      const rejectedEntitlements = await request(baseUrl, "/v1/me/entitlements", { headers: userAuth });
+      assert.equal(rejectedEntitlements.response.status, 401);
+
+      const audit = await request(baseUrl, "/v1/admin/audit-logs", { headers: adminAuth });
+      assert.equal(audit.response.status, 200);
+      assert.ok(audit.payload.items.some((entry) => entry.action === "workspace.release"));
+      assert.ok(audit.payload.items.some((entry) => entry.action === "user.status_update"));
+    });
+  });
+
   it("selects the PostgreSQL runtime when DATABASE_URL is configured", async () => {
     const runtime = createRuntimeFromEnv({ DATABASE_URL: "postgres://user:pass@127.0.0.1:5432/addwhatsapp" });
 

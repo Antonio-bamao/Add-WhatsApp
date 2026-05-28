@@ -90,6 +90,13 @@ async function requireActiveUser(client, userId) {
   return user;
 }
 
+async function requireUser(client, userId) {
+  const result = await client.query("SELECT * FROM users WHERE id = $1", [userId]);
+  const user = result.rows[0];
+  if (!user) throw new Error("USER_NOT_FOUND");
+  return user;
+}
+
 async function getSubscription(client, userId) {
   const result = await client.query(
     "SELECT * FROM subscriptions WHERE user_id = $1 AND status = 'active' ORDER BY started_at DESC LIMIT 1",
@@ -554,6 +561,68 @@ export function createPostgresRuntime({ databaseUrl, pool } = {}) {
           );
         }
         return { leaseId, status: "released", releasedAt };
+      } finally {
+        client.release();
+      }
+    },
+
+    async adminReleaseWorkspaceLease({ leaseId, adminUserId, reason, ip }) {
+      const client = await db.connect();
+      try {
+        await client.query("BEGIN");
+        const existing = await client.query("SELECT * FROM workspace_leases WHERE id = $1", [leaseId]);
+        const lease = existing.rows[0];
+        if (!lease) throw new Error("WORKSPACE_LEASE_NOT_FOUND");
+        const before = { status: lease.status, releasedAt: lease.released_at };
+        const releasedAt = lease.released_at || isoNow();
+        if (lease.status !== "released") {
+          await client.query(
+            "UPDATE workspace_leases SET status = 'released', released_at = $1 WHERE id = $2",
+            [releasedAt, leaseId]
+          );
+        }
+        await appendAuditLog(client, {
+          adminUserId,
+          action: "workspace.release",
+          targetType: "workspace_lease",
+          targetId: leaseId,
+          before,
+          after: { status: "released", releasedAt, reason: reason || "admin release" },
+          ip
+        });
+        await client.query("COMMIT");
+        return { leaseId, status: "released", releasedAt };
+      } catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+      } finally {
+        client.release();
+      }
+    },
+
+    async setUserStatus({ userId, status, adminUserId, reason, ip }) {
+      if (!["active", "frozen"].includes(status)) throw new Error("USER_STATUS_INVALID");
+      const client = await db.connect();
+      try {
+        await client.query("BEGIN");
+        const user = await requireUser(client, userId);
+        const before = { status: user.status };
+        const updatedAt = isoNow();
+        await client.query("UPDATE users SET status = $1, updated_at = $2 WHERE id = $3", [status, updatedAt, userId]);
+        await appendAuditLog(client, {
+          adminUserId,
+          action: "user.status_update",
+          targetType: "user",
+          targetId: userId,
+          before,
+          after: { status, reason: reason || "admin status update" },
+          ip
+        });
+        await client.query("COMMIT");
+        return { userId, username: user.username, status, updatedAt };
+      } catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
       } finally {
         client.release();
       }
