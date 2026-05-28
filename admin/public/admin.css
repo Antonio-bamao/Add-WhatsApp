@@ -46,6 +46,10 @@ button {
   min-height: 100vh;
 }
 
+.admin-shell > * {
+  min-width: 0;
+}
+
 .sidebar {
   position: sticky;
   top: 0;
@@ -159,6 +163,7 @@ button {
 }
 
 .main {
+  min-width: 0;
   padding: 28px;
 }
 
@@ -232,6 +237,7 @@ h3 {
 .summary-tile,
 .section-block,
 .module-panel {
+  min-width: 0;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--surface);
@@ -264,6 +270,13 @@ h3 {
   display: grid;
   grid-template-columns: minmax(0, 1.35fr) minmax(320px, 0.65fr);
   gap: 14px;
+}
+
+.page-layout > *,
+.detail-grid > *,
+.module-hero > *,
+.operation-panel > * {
+  min-width: 0;
 }
 
 .detail-grid {
@@ -364,6 +377,10 @@ h3 {
   align-items: end;
 }
 
+.operation-form--compact {
+  grid-template-columns: minmax(160px, 240px) auto;
+}
+
 .operation-form label {
   display: grid;
   gap: 5px;
@@ -407,6 +424,56 @@ h3 {
 
 .operation-status[data-tone="danger"] {
   color: var(--danger);
+}
+
+.event-toolbar {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: end;
+  margin-bottom: 14px;
+}
+
+.event-toolbar p {
+  margin-bottom: 0;
+  color: var(--muted);
+}
+
+.event-toolbar label {
+  display: grid;
+  gap: 5px;
+  min-width: 260px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.event-toolbar input {
+  min-height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #ffffff;
+  padding: 8px 10px;
+  color: var(--text);
+}
+
+.copy-button {
+  min-height: 28px;
+  margin-right: 6px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-muted);
+  color: var(--brand-dark);
+  padding: 4px 8px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.copy-button:hover,
+.copy-button:focus-visible {
+  border-color: var(--brand);
+  background: #ffffff;
+  outline: none;
 }
 
 .status-pill {
@@ -481,6 +548,7 @@ h3 {
 }
 
 .table-wrap {
+  max-width: 100%;
   overflow-x: auto;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -583,8 +651,17 @@ code {
   .detail-grid,
   .module-hero,
   .operation-panel,
-  .operation-form {
+  .operation-form,
+  .operation-form--compact {
     grid-template-columns: 1fr;
+  }
+
+  .event-toolbar {
+    display: grid;
+  }
+
+  .event-toolbar label {
+    min-width: 0;
   }
 
   .module-directory {
@@ -594,7 +671,7 @@ code {
 
 @media (max-width: 860px) {
   .admin-shell {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .sidebar {

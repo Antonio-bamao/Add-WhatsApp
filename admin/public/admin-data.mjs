@@ -164,6 +164,11 @@ const modulePageConfig = {
       ["ADWA-000001", "created", "2000 credits", "待确认收款"],
       ["ADWA-000002", "paid", "5000 credits", "已入账"],
       ["ADWA-000003", "paid_pending_credit", "2000 credits", "待补偿"]
+    ],
+    paymentEvents: [
+      ["mock_alipay", "payment_succeeded", "mock_alipay:notify-001:TRADE_SUCCESS", "order_preview_001", "processed"],
+      ["manual", "payment_succeeded", "evt-manual-001", "order_preview_002", "processed"],
+      ["mock_alipay", "payment_ignored", "mock_alipay:notify-002:WAIT_BUYER_PAY", "order_preview_003", "pending"]
     ]
   },
   referrals: {

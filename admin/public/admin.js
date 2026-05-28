@@ -32,9 +32,11 @@ function table(headers, rows) {
           <tr>${headers.map((header) => `<th scope="col">${header}</th>`).join("")}</tr>
         </thead>
         <tbody>
-          ${rows
-            .map((row) => `<tr>${row.map((cell) => `<td>${cell}</td>`).join("")}</tr>`)
-            .join("")}
+          ${
+            rows.length > 0
+              ? rows.map((row) => `<tr>${row.map((cell) => `<td>${cell}</td>`).join("")}</tr>`).join("")
+              : `<tr><td colspan="${headers.length}">暂无记录</td></tr>`
+          }
         </tbody>
       </table>
     </div>
@@ -91,6 +93,63 @@ function renderAuditTrail() {
   );
 }
 
+function renderCopyButton(value) {
+  return `<button class="copy-button" type="button" data-copy-value="${String(value).replaceAll('"', "&quot;")}">复制</button>`;
+}
+
+function renderPaymentEvents(module, filterText = "") {
+  const normalizedFilter = filterText.trim().toLowerCase();
+  const rows = (module.paymentEvents || []).filter((row) => row.join(" ").toLowerCase().includes(normalizedFilter));
+  return `
+    <section class="section-block payment-events-panel">
+      <div class="event-toolbar">
+        <div>
+          <h2>支付回调事件</h2>
+          <p>核对渠道、事件号、订单和入账处理状态。重复通知应显示同一事件号，不应重复入账。</p>
+        </div>
+        <label>
+          <span>筛选</span>
+          <input data-payment-event-filter value="${filterText}" placeholder="provider / event id / order id" />
+        </label>
+      </div>
+      ${table(
+        ["渠道", "事件", "事件 ID", "订单 ID", "处理", "复制"],
+        rows.map((row) => [
+          row[0],
+          row[1],
+          `<code>${row[2]}</code>`,
+          `<code>${row[3]}</code>`,
+          row[4],
+          `${renderCopyButton(row[2])}${renderCopyButton(row[3])}`
+        ])
+      )}
+    </section>
+  `;
+}
+
+function filterPaymentEvents(event) {
+  const input = event.target.closest("[data-payment-event-filter]");
+  if (!input) return;
+  const module = getRuntimeModuleByKey("orders");
+  const panel = pageOutlet.querySelector(".payment-events-panel");
+  if (!panel || !module) return;
+  panel.outerHTML = renderPaymentEvents(module, input.value);
+  const nextInput = pageOutlet.querySelector("[data-payment-event-filter]");
+  nextInput?.focus();
+}
+
+async function copyPaymentToken(event) {
+  const button = event.target.closest("[data-copy-value]");
+  if (!button) return;
+  const value = button.dataset.copyValue;
+  try {
+    await navigator.clipboard?.writeText(value);
+    button.textContent = "已复制";
+  } catch {
+    button.textContent = value;
+  }
+}
+
 function renderOperationPanel(moduleKey) {
   const panels = {
     users: `
@@ -140,6 +199,17 @@ function renderOperationPanel(moduleKey) {
           <label><span>收款流水号</span><input name="providerTradeNo" placeholder="bank-transfer-..." /></label>
           <button type="submit">标记订单已支付</button>
           <small class="operation-status" data-operation-status="order-mark-paid"></small>
+        </form>
+      </section>
+      <section class="operation-panel" aria-label="订单补偿队列">
+        <div>
+          <h2>重试待入账订单</h2>
+          <p>处理 paid_pending_credit 订单，仍使用同一个 purchase 幂等键，避免补偿重复入账。</p>
+        </div>
+        <form class="operation-form operation-form--compact" data-operation-form="order-compensate">
+          <label><span>批次上限</span><input name="limit" required type="number" min="1" max="100" value="20" /></label>
+          <button type="submit">运行补偿队列</button>
+          <small class="operation-status" data-operation-status="order-compensate"></small>
         </form>
       </section>
     `,
@@ -262,6 +332,8 @@ function renderModulePage(module) {
       </aside>
     </div>
 
+    ${module.key === "orders" ? renderPaymentEvents(module) : ""}
+
     ${
       module.key === "audit"
         ? `<section class="section-block"><h2>最近审计日志</h2>${renderAuditTrail()}</section>`
@@ -316,6 +388,13 @@ async function submitOrderMarkPaid(form) {
   });
 }
 
+async function submitOrderCompensation(form) {
+  const body = formPayload(form);
+  return postAdminOperation("/v1/admin/orders/compensate", {
+    limit: Number(body.limit || 20)
+  });
+}
+
 async function submitWorkspaceRelease(form) {
   const body = formPayload(form);
   return postAdminOperation(`/v1/admin/workspaces/leases/${encodeURIComponent(body.leaseId)}/release`, {
@@ -340,6 +419,7 @@ async function handleOperationSubmit(event) {
   const handlers = {
     "credits-adjust": submitCreditAdjustment,
     "order-mark-paid": submitOrderMarkPaid,
+    "order-compensate": submitOrderCompensation,
     "workspace-release": submitWorkspaceRelease,
     "user-status": submitUserStatusChange
   };
@@ -460,6 +540,8 @@ async function loginAdmin(event) {
 
 adminLoginForm.addEventListener("submit", loginAdmin);
 pageOutlet.addEventListener("submit", handleOperationSubmit);
+pageOutlet.addEventListener("input", filterPaymentEvents);
+pageOutlet.addEventListener("click", copyPaymentToken);
 
 Object.assign(window, {
   applyConsoleSnapshot,
@@ -470,8 +552,12 @@ Object.assign(window, {
   renderMappings,
   renderModulePage,
   renderOperationPanel,
+  renderPaymentEvents,
+  filterPaymentEvents,
+  copyPaymentToken,
   submitCreditAdjustment,
   submitOrderMarkPaid,
+  submitOrderCompensation,
   submitWorkspaceRelease,
   submitUserStatusChange,
   renderRoute

@@ -114,6 +114,16 @@ function tableRows(items, mapper) {
   return items.length > 0 ? items.map(mapper) : [["暂无记录", "empty", "等待 API 写入", "PostgreSQL"]];
 }
 
+function paymentEventRows(rows) {
+  return tableRows(rows, (event) => [
+    event.provider,
+    event.event_type,
+    event.provider_event_id,
+    event.order_id,
+    event.processed_at || "pending"
+  ]);
+}
+
 async function requireActiveUser(client, userId) {
   const result = await client.query("SELECT * FROM users WHERE id = $1", [userId]);
   const user = result.rows[0];
@@ -841,7 +851,8 @@ export function createPostgresRuntime({ databaseUrl, pool } = {}) {
             orders: {
               metric: String(orders.rows.filter((order) => order.status !== "paid").length),
               status: "PostgreSQL 已接",
-              records: tableRows(orders.rows, (order) => [order.order_no, order.status, `${order.credits} credits`, order.provider_trade_no || "manual"])
+              records: tableRows(orders.rows, (order) => [order.order_no, order.status, `${order.credits} credits`, order.provider_trade_no || "manual"]),
+              paymentEvents: paymentEventRows(paymentEvents.rows)
             },
             referrals: {
               metric: String(referralCodes.rows.length),

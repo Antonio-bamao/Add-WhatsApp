@@ -672,6 +672,16 @@ function auditPreviewRows(auditLogs) {
   }));
 }
 
+function paymentEventRows(paymentEvents) {
+  return tableRows(paymentEvents.slice(-20).reverse(), (event) => [
+    event.provider,
+    event.eventType,
+    event.providerEventId,
+    event.orderId,
+    event.processedAt || "pending"
+  ]);
+}
+
 export function getAdminConsoleSnapshot(store) {
   const users = [...store.users.values()];
   const plans = Object.values(PLAN_CATALOG);
@@ -729,7 +739,8 @@ export function getAdminConsoleSnapshot(store) {
         order.status,
         `${order.credits} credits`,
         order.providerTradeNo || "manual"
-      ])
+      ]),
+      paymentEvents: paymentEventRows(paymentEvents)
     },
     referrals: {
       metric: String(referralCodes.length),

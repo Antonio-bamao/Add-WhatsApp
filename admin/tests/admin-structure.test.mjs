@@ -128,8 +128,12 @@ describe("admin console structure", () => {
 
     for (const expectedFunction of [
       "renderOperationPanel",
+      "renderPaymentEvents",
+      "filterPaymentEvents",
+      "copyPaymentToken",
       "submitCreditAdjustment",
       "submitOrderMarkPaid",
+      "submitOrderCompensation",
       "submitWorkspaceRelease",
       "submitUserStatusChange"
     ]) {
@@ -138,11 +142,16 @@ describe("admin console structure", () => {
 
     assert.match(js, /data-operation-form="credits-adjust"/);
     assert.match(js, /data-operation-form="order-mark-paid"/);
+    assert.match(js, /data-operation-form="order-compensate"/);
     assert.match(js, /data-operation-form="workspace-release"/);
     assert.match(js, /data-operation-form="user-status"/);
+    assert.match(js, /data-payment-event-filter/);
+    assert.match(js, /data-copy-value/);
     assert.match(js, /loadConsoleSnapshot\(\)/);
     assert.match(css, /\.operation-panel/);
     assert.match(css, /\.operation-form/);
     assert.match(css, /\.operation-status/);
+    assert.match(css, /\.event-toolbar/);
+    assert.match(css, /\.copy-button/);
   });
 });

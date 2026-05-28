@@ -173,8 +173,10 @@ describe("cloud API skeleton", () => {
       assert.equal(consoleSnapshot.response.status, 200);
       assert.equal(consoleSnapshot.payload.source, "server-local-preview");
       assert.equal(consoleSnapshot.payload.summary.users, 1);
+      assert.equal(consoleSnapshot.payload.summary.paymentEvents, 1);
       assert.equal(consoleSnapshot.payload.modules.users.records.length, 1);
       assert.equal(consoleSnapshot.payload.modules.plans.records.length, 4);
+      assert.ok(consoleSnapshot.payload.modules.orders.paymentEvents.some((row) => row.includes("evt-api-paid-1")));
       assert.ok(consoleSnapshot.payload.auditTrail.some((entry) => entry.action === "credit.adjustment"));
     });
   });

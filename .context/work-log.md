@@ -231,3 +231,10 @@
 - 结果：支付事件入口边界更清晰：公开 webhook 必须验签，通用内部事件必须管理员鉴权，避免匿名请求绕过 provider 签名直接触发订单入账。
 - 验证：server npm test 17/17 通过；server npm run test:postgres 1/1 通过；根项目 npm test 92/92 通过。
 - 下一步：继续补后台支付事件运营视图和真实支付宝 RSA 验签适配。
+
+## 2026-05-29T00:00:00+08:00｜补后台订单页支付回调运营视图
+- 目标：补后台订单页支付回调运营视图
+- 动作：在 server admin console snapshot 的 orders 模块增加 paymentEvents 行数据；PostgreSQL runtime 同步输出 payment_events；admin 订单与入账页新增支付回调事件表、筛选输入、事件/订单 ID 复制按钮和 paid_pending_credit 补偿队列表单；修复移动端表格撑开页面的横向溢出。
+- 结果：后台订单页可以同时看订单记录和支付回调事件，运营可筛选 provider/event/order，复制事件号或订单号，并从同页触发待入账补偿；8 个后台模块结构保持不变。
+- 验证：admin npm test 6/6 通过；server npm test 17/17 通过；server npm run test:postgres 1/1 通过；根项目 npm test 92/92 通过；Playwright 打开 http://127.0.0.1:3220/#/orders 验证桌面/390px 移动宽度无 console error/warning 且无页面级横向溢出。
+- 下一步：继续补真实支付宝 RSA 验签适配点、支付事件生产配置清单，以及支付事件列表的分页/状态筛选 API。

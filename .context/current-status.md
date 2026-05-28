@@ -23,7 +23,8 @@
 - 已完成：`server/` 新增管理员释放工作台租约和用户状态变更接口；内存 runtime 与 PostgreSQL runtime 均支持对应操作，冻结用户后云端权益请求会被拒绝。
 - 已完成：支付/订单底座新增回调幂等与补偿队列；`/v1/payments/events` 会按 `provider_event_id` 去重并在支付成功时走订单入账，`/v1/admin/orders/compensate` 可重试 `paid_pending_credit` 订单，人工入账、支付回调和补偿队列共享 `purchase:{orderId}` 账本幂等键。
 - 已完成：支付渠道抽象层新增 `mock_alipay` webhook 签名校验框架；`/v1/payments/mock-alipay/notify` 使用 `MOCK_ALIPAY_WEBHOOK_SECRET` 做 HMAC 验签，验签通过后映射为统一支付事件再进入现有幂等入账，篡改或缺签名会被拒绝；通用 `/v1/payments/events` 已收紧为管理员鉴权入口，避免匿名绕过 provider 签名。
-- 进行中：下一步补后台订单/支付事件列表筛选、真实支付宝/微信支付接入前的生产配置清单，以及更严格的 PostgreSQL 测试数据清理策略。
+- 已完成：后台订单与入账页新增支付回调事件运营视图，显示渠道、事件、事件 ID、订单 ID 和处理状态，支持筛选与复制；同页新增 `paid_pending_credit` 补偿队列表单，触发 `/v1/admin/orders/compensate`。
+- 进行中：下一步补真实支付宝/微信支付接入前的生产配置清单、支付宝 RSA 验签适配点，以及更严格的 PostgreSQL 测试数据清理策略。
 - 验证：`website\npm test` 通过 6/6；`website\npm run build` 成功；根项目 `npm test` 通过 77/77；本地 `http://localhost:3100` 桌面/移动端 Chrome headless 截图已复查，样式不再退化为裸 HTML；浏览器插件调试确认首屏只剩 1 个 WebGL canvas、无旧 `.globe-static` SVG 叠加、无 Server Error，地球 HUD 文案已删除，路线扩展到 20 条；下载页返回 200，`/downloads/latest/Add-WhatsApp.exe` HEAD 长度为 `77060652`。
 - 验证：`admin\npm test` 通过 5/5；本地 `http://127.0.0.1:3220/` 返回 200；管理台 JS 已包含 `ADD_WHATSAPP_API_URL`、`/v1/admin/console`、API 回退逻辑和运行时快照合并逻辑。
 - 验证：后台拆页后，浏览器验证运营首页只显示 8 个模块入口且不渲染 8 个模块详情；`#/referrals` 只显示推荐审核模块详情，3 个详情区、3 条记录、无 console error/warning、无横向溢出。
@@ -34,5 +35,6 @@
 - 验证：后台真实操作表单后，根项目 `npm test` 通过 92/92；`server\npm test` 通过 12/12；真实 PostgreSQL `server\npm run test:postgres` 通过 1/1；`admin\npm test` 通过 6/6；`website\npm test` 通过 6/6；根项目 `npm run build` 成功；`.context` 校验通过。
 - 验证：支付幂等/补偿队列后，`server\npm test` 通过 14/14；真实 PostgreSQL `server\npm run test:postgres` 通过 1/1；根项目 `npm test` 通过 92/92。
 - 验证：`mock_alipay` 签名框架后，`server\npm test` 通过 17/17；真实 PostgreSQL `server\npm run test:postgres` 通过 1/1；根项目 `npm test` 通过 92/92。
-- 下一步：后台列表需要从快照表格升级为可筛选、可定位、可复制 ID 的运营视图；真实支付渠道接入前需要补支付宝 RSA 验签适配点、密钥环境变量清单和支付事件运营视图。
+- 验证：后台支付事件运营视图后，`admin\npm test` 通过 6/6；`server\npm test` 通过 17/17；真实 PostgreSQL `server\npm run test:postgres` 通过 1/1；根项目 `npm test` 通过 92/92；Playwright 验证 `http://127.0.0.1:3220/#/orders` 桌面和 390px 移动宽度无 console error/warning 且无页面级横向溢出。
+- 下一步：真实支付渠道接入前需要补支付宝 RSA 验签适配点、密钥环境变量清单、支付事件生产配置清单，以及支付事件列表分页/状态筛选 API。
 - 阻塞项：管理员登录方式、支付渠道/人工收款流程、生产域名和部署平台还未最终确定。
