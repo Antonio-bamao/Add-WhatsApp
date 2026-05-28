@@ -440,6 +440,15 @@ export function createOrder(store, { userId, planId, credits, amountCents }) {
   return { ...order };
 }
 
+export function getOrderForPayment(store, { userId, orderId }) {
+  getUser(store, userId);
+  const order = store.orders.get(orderId);
+  if (!order || order.userId !== userId) throw new Error("ORDER_NOT_FOUND");
+  if (order.status === "paid") throw new Error("ORDER_ALREADY_PAID");
+  if (order.closedAt || order.status === "closed") throw new Error("ORDER_CLOSED");
+  return { ...order };
+}
+
 function orderByIdOrNumber(store, { orderId, orderNo }) {
   if (orderId) return store.orders.get(orderId);
   if (orderNo) return [...store.orders.values()].find((order) => order.orderNo === orderNo);
@@ -682,6 +691,50 @@ function paymentEventRows(paymentEvents) {
   ]);
 }
 
+function normalizePaymentEvent(event) {
+  return {
+    id: event.id,
+    provider: event.provider,
+    providerEventId: event.providerEventId,
+    orderId: event.orderId,
+    eventType: event.eventType,
+    payloadJson: event.payloadJson,
+    processedAt: event.processedAt || null,
+    createdAt: event.createdAt
+  };
+}
+
+export function listPaymentEvents(store, { provider, eventType, processed, q, limit = 50, offset = 0 } = {}) {
+  const normalizedProvider = provider ? String(provider).toLowerCase() : "";
+  const normalizedEventType = eventType ? String(eventType) : "";
+  const normalizedProcessed = processed ? String(processed) : "";
+  const query = q ? String(q).toLowerCase() : "";
+  const numericLimit = Math.min(Math.max(Number(limit) || 50, 1), 100);
+  const numericOffset = Math.max(Number(offset) || 0, 0);
+
+  const filtered = [...store.paymentEvents.values()]
+    .map(normalizePaymentEvent)
+    .filter((event) => !normalizedProvider || event.provider === normalizedProvider)
+    .filter((event) => !normalizedEventType || event.eventType === normalizedEventType)
+    .filter((event) => {
+      if (normalizedProcessed === "processed") return Boolean(event.processedAt);
+      if (normalizedProcessed === "pending") return !event.processedAt;
+      return true;
+    })
+    .filter((event) => {
+      if (!query) return true;
+      return [event.provider, event.providerEventId, event.orderId, event.eventType].join(" ").toLowerCase().includes(query);
+    })
+    .sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt)));
+
+  return {
+    total: filtered.length,
+    limit: numericLimit,
+    offset: numericOffset,
+    items: filtered.slice(numericOffset, numericOffset + numericLimit)
+  };
+}
+
 export function getAdminConsoleSnapshot(store) {
   const users = [...store.users.values()];
   const plans = Object.values(PLAN_CATALOG);
@@ -819,9 +872,11 @@ export function createMemoryRuntime(options = {}) {
     getEntitlements: (userId) => getEntitlements(store, userId),
     consumeCredit: (body) => consumeCredit(store, body),
     createOrder: (body) => createOrder(store, body),
+    getOrderForPayment: (body) => getOrderForPayment(store, body),
     markOrderPaid: (body) => markOrderPaid(store, body),
     processPaymentEvent: (body) => processPaymentEvent(store, body),
     processPendingOrderCredits: (body) => processPendingOrderCredits(store, body),
+    listPaymentEvents: (query) => listPaymentEvents(store, query),
     adjustCredits: (body) => adjustCredits(store, body),
     issueWorkspaceLease: (body) => issueWorkspaceLease(store, body),
     renewWorkspaceLease: (body) => renewWorkspaceLease(store, body),

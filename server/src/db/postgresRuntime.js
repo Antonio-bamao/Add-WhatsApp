@@ -110,6 +110,19 @@ function toPaymentEvent(row) {
   };
 }
 
+function toPaymentEventItem(row) {
+  return {
+    id: row.id,
+    provider: row.provider,
+    providerEventId: row.provider_event_id,
+    orderId: row.order_id,
+    eventType: row.event_type,
+    payloadJson: row.payload_json,
+    processedAt: row.processed_at || null,
+    createdAt: row.created_at
+  };
+}
+
 function tableRows(items, mapper) {
   return items.length > 0 ? items.map(mapper) : [["暂无记录", "empty", "等待 API 写入", "PostgreSQL"]];
 }
@@ -545,6 +558,21 @@ export function createPostgresRuntime({ databaseUrl, pool } = {}) {
       }
     },
 
+    async getOrderForPayment({ userId, orderId }) {
+      const client = await db.connect();
+      try {
+        await requireActiveUser(client, userId);
+        const result = await client.query("SELECT * FROM orders WHERE id = $1 AND user_id = $2", [orderId, userId]);
+        const order = result.rows[0];
+        if (!order) throw new Error("ORDER_NOT_FOUND");
+        if (order.status === "paid") throw new Error("ORDER_ALREADY_PAID");
+        if (order.closed_at || order.status === "closed") throw new Error("ORDER_CLOSED");
+        return toOrder(order);
+      } finally {
+        client.release();
+      }
+    },
+
     async markOrderPaid({ orderId, adminUserId, providerTradeNo, ip }) {
       const client = await db.connect();
       try {
@@ -654,6 +682,40 @@ export function createPostgresRuntime({ databaseUrl, pool } = {}) {
       } finally {
         client.release();
       }
+    },
+
+    async listPaymentEvents({ provider, eventType, processed, q, limit = 50, offset = 0 } = {}) {
+      const numericLimit = Math.min(Math.max(Number(limit) || 50, 1), 100);
+      const numericOffset = Math.max(Number(offset) || 0, 0);
+      const conditions = [];
+      const values = [];
+      function addCondition(sql, value) {
+        values.push(value);
+        conditions.push(sql.replace("?", `$${values.length}`));
+      }
+
+      if (provider) addCondition("provider = ?", String(provider).toLowerCase());
+      if (eventType) addCondition("event_type = ?", String(eventType));
+      if (processed === "processed") conditions.push("processed_at IS NOT NULL");
+      if (processed === "pending") conditions.push("processed_at IS NULL");
+      if (q) {
+        values.push(`%${String(q).toLowerCase()}%`);
+        const index = `$${values.length}`;
+        conditions.push(`LOWER(provider || ' ' || provider_event_id || ' ' || order_id || ' ' || event_type) LIKE ${index}`);
+      }
+
+      const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+      const count = await db.query(`SELECT COUNT(*)::int AS total FROM payment_events ${where}`, values);
+      const rows = await db.query(
+        `SELECT * FROM payment_events ${where} ORDER BY created_at DESC LIMIT $${values.length + 1} OFFSET $${values.length + 2}`,
+        [...values, numericLimit, numericOffset]
+      );
+      return {
+        total: Number(count.rows[0]?.total || 0),
+        limit: numericLimit,
+        offset: numericOffset,
+        items: rows.rows.map(toPaymentEventItem)
+      };
     },
 
     async issueWorkspaceLease({ userId, deviceId, workspaceKind, processNonce }) {

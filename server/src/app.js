@@ -1,7 +1,7 @@
 import http from "node:http";
 import { createPostgresRuntime } from "./db/postgresRuntime.js";
 import { createMemoryRuntime } from "./services/billingService.js";
-import { parseMockAlipayNotification } from "./services/paymentProviders.js";
+import { buildAlipayPagePayRequest, parseAlipayNotification, parseMockAlipayNotification } from "./services/paymentProviders.js";
 
 function jsonResponse(response, statusCode, payload) {
   response.writeHead(statusCode, {
@@ -13,12 +13,34 @@ function jsonResponse(response, statusCode, payload) {
   response.end(JSON.stringify(payload));
 }
 
-async function readJson(request) {
+function textResponse(response, statusCode, text) {
+  response.writeHead(statusCode, {
+    "content-type": "text/plain; charset=utf-8",
+    "access-control-allow-origin": "*",
+    "access-control-allow-headers": "content-type, authorization",
+    "access-control-allow-methods": "GET, POST, OPTIONS"
+  });
+  response.end(text);
+}
+
+async function readText(request) {
   const chunks = [];
   for await (const chunk of request) chunks.push(chunk);
-  if (chunks.length === 0) return {};
-  const text = Buffer.concat(chunks).toString("utf8");
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+async function readJson(request) {
+  const text = await readText(request);
   return text ? JSON.parse(text) : {};
+}
+
+async function readFormOrJson(request) {
+  const text = await readText(request);
+  if (!text) return {};
+  if (String(request.headers["content-type"] || "").includes("application/json")) {
+    return JSON.parse(text);
+  }
+  return Object.fromEntries(new URLSearchParams(text).entries());
 }
 
 async function authUserId(runtime, request) {
@@ -44,7 +66,7 @@ function errorStatus(error) {
   if (/SIGNATURE/.test(error.message)) return 401;
   if (/UNAUTHORIZED|AUTH_FAILED|NOT_ACTIVE/.test(error.message)) return 401;
   if (/NOT_FOUND/.test(error.message)) return 404;
-  if (/LIMIT|INSUFFICIENT|NO_AVAILABLE/.test(error.message)) return 409;
+  if (/LIMIT|INSUFFICIENT|NO_AVAILABLE|ALREADY_PAID|CLOSED/.test(error.message)) return 409;
   if (/INVALID|REQUIRED|WEAK|EXISTS/.test(error.message)) return 400;
   return 500;
 }
@@ -69,6 +91,12 @@ export function createAppServer(options = {}) {
 
       if (request.method === "GET" && url.pathname === "/v1/admin/console") {
         jsonResponse(response, 200, await runtime.getAdminConsoleSnapshot());
+        return;
+      }
+
+      if (request.method === "GET" && url.pathname === "/v1/admin/payment-events") {
+        await authAdminId(runtime, request);
+        jsonResponse(response, 200, await runtime.listPaymentEvents(Object.fromEntries(url.searchParams.entries())));
         return;
       }
 
@@ -112,6 +140,21 @@ export function createAppServer(options = {}) {
         return;
       }
 
+      if (request.method === "POST" && /^\/v1\/orders\/[^/]+\/payments\/alipay\/page-pay$/.test(url.pathname)) {
+        const userId = await authUserId(runtime, request);
+        const orderId = url.pathname.split("/")[3];
+        const order = await runtime.getOrderForPayment({ userId, orderId });
+        jsonResponse(response, 200, buildAlipayPagePayRequest(order, {
+          appId: env.ALIPAY_APP_ID,
+          appPrivateKey: env.ALIPAY_APP_PRIVATE_KEY,
+          notifyUrl: env.ALIPAY_NOTIFY_URL,
+          returnUrl: env.ALIPAY_RETURN_URL,
+          gatewayUrl: env.ALIPAY_GATEWAY_URL,
+          timestamp: env.ALIPAY_FIXED_TIMESTAMP
+        }));
+        return;
+      }
+
       if (request.method === "POST" && url.pathname === "/v1/payments/events") {
         await authAdminId(runtime, request);
         const body = await readJson(request);
@@ -123,6 +166,17 @@ export function createAppServer(options = {}) {
         const body = await readJson(request);
         const event = parseMockAlipayNotification(body, { secret: env.MOCK_ALIPAY_WEBHOOK_SECRET });
         jsonResponse(response, 200, await runtime.processPaymentEvent(event));
+        return;
+      }
+
+      if (request.method === "POST" && url.pathname === "/v1/payments/alipay/notify") {
+        const body = await readFormOrJson(request);
+        const event = parseAlipayNotification(body, {
+          alipayPublicKey: env.ALIPAY_PUBLIC_KEY,
+          expectedAppId: env.ALIPAY_APP_ID
+        });
+        await runtime.processPaymentEvent(event);
+        textResponse(response, 200, "success");
         return;
       }
 

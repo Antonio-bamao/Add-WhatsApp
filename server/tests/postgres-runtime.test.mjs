@@ -1,5 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 
 import { createAppServer } from "../src/app.js";
 import { signMockAlipayPayload } from "../src/services/paymentProviders.js";
@@ -35,6 +36,11 @@ async function request(baseUrl, path, options = {}) {
 describe("PostgreSQL billing runtime", { skip: !databaseUrl }, () => {
   it("persists users and credit ledger entries across runtime restarts", async () => {
     const { createPostgresRuntime } = await import("../src/db/postgresRuntime.js");
+    const { publicKey, privateKey } = crypto.generateKeyPairSync("rsa", {
+      modulusLength: 2048,
+      publicKeyEncoding: { type: "spki", format: "pem" },
+      privateKeyEncoding: { type: "pkcs8", format: "pem" }
+    });
     const username = `pg_user_${Date.now()}`;
     const password = "StrongPass123";
     let registeredUserId = "";
@@ -93,6 +99,23 @@ describe("PostgreSQL billing runtime", { skip: !databaseUrl }, () => {
       });
       assert.equal(order.response.status, 201);
 
+      const alipayPayment = await request(baseUrl, `/v1/orders/${order.payload.id}/payments/alipay/page-pay`, {
+        method: "POST",
+        headers: auth,
+        body: {}
+      });
+      assert.equal(alipayPayment.response.status, 200);
+      assert.equal(alipayPayment.payload.orderId, order.payload.id);
+      const signingText = Object.keys(alipayPayment.payload.params)
+        .filter((key) => key !== "sign" && key !== "sign_type")
+        .sort()
+        .map((key) => `${key}=${alipayPayment.payload.params[key]}`)
+        .join("&");
+      assert.equal(
+        crypto.verify("RSA-SHA256", Buffer.from(signingText), publicKey, Buffer.from(alipayPayment.payload.params.sign, "base64")),
+        true
+      );
+
       const mockAlipaySecret = "pg_mock_alipay_secret";
       const payload = {
         app_id: "mock-app",
@@ -133,6 +156,13 @@ describe("PostgreSQL billing runtime", { skip: !databaseUrl }, () => {
       });
       assert.equal(compensated.response.status, 200);
       assert.equal(compensated.payload.processedCount, 0);
+
+      const paymentEvents = await request(baseUrl, "/v1/admin/payment-events?provider=mock_alipay&processed=processed&limit=5", {
+        headers: adminAuth
+      });
+      assert.equal(paymentEvents.response.status, 200);
+      assert.ok(paymentEvents.payload.total >= 1);
+      assert.ok(paymentEvents.payload.items.some((event) => event.providerEventId === `mock_alipay:${payload.notify_id}:TRADE_SUCCESS`));
 
       const afterPaid = await request(baseUrl, "/v1/me/entitlements", { headers: auth });
       assert.equal(afterPaid.response.status, 200);
@@ -199,6 +229,15 @@ describe("PostgreSQL billing runtime", { skip: !databaseUrl }, () => {
       assert.equal(consoleSnapshot.payload.source, "postgres");
       assert.ok(consoleSnapshot.payload.summary.users >= 1);
       assert.ok(consoleSnapshot.payload.summary.creditEntries >= 1);
-    }, { env: { MOCK_ALIPAY_WEBHOOK_SECRET: "pg_mock_alipay_secret" } });
+    }, {
+      env: {
+        MOCK_ALIPAY_WEBHOOK_SECRET: "pg_mock_alipay_secret",
+        ALIPAY_APP_ID: "2026000000000000",
+        ALIPAY_APP_PRIVATE_KEY: privateKey,
+        ALIPAY_NOTIFY_URL: "https://api.addwhatsapp.com/v1/payments/alipay/notify",
+        ALIPAY_GATEWAY_URL: "https://openapi-sandbox.dl.alipaydev.com/gateway.do",
+        ALIPAY_FIXED_TIMESTAMP: "2026-05-29 10:20:30"
+      }
+    });
   });
 });

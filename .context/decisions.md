@@ -106,3 +106,17 @@
 - 背景：生产支付宝接入依赖商户应用、HTTPS 域名、真实密钥和支付产品选择，但当前资金账本底座已需要验证“回调必须验签后才能入账”的边界。
 - 理由：mock 适配层可以先固定密钥只在 `server/`、前端不碰密钥、回调验签、重复通知幂等和订单入账共用合同；后续换成支付宝 RSA 验签时只替换 provider adapter。
 - 约束：`mock_alipay` 仅用于本地/预览联调，不代表生产支付宝；生产接入必须改用支付宝官方签名验签、公网 HTTPS notify URL、密钥环境变量和支付事件运营监控；通用 `/v1/payments/events` 只能作为管理员鉴权的内部/人工入口，不能作为匿名公网 webhook。
+
+## 2026-05-29: 支付宝真实通知入口只返回纯文本 success
+
+- 决策：真实支付宝通知入口使用 `/v1/payments/alipay/notify`，只接受服务端环境变量中的 `ALIPAY_PUBLIC_KEY` 和 `ALIPAY_APP_ID`，RSA2 验签通过并进入统一幂等支付事件流程后返回纯文本 `success`。
+- 背景：支付宝异步通知是服务器到服务器的 POST 通知；重复通知使用稳定 `notify_id`，验签需要排除 `sign` 和 `sign_type`，且处理成功后支付宝只识别纯 `success` 字符串。
+- 理由：把支付宝验签和统一入账拆开，可以让真实渠道、mock 渠道和人工后台事件共享账本幂等，同时不让支付密钥进入桌面端、官网或后台前端。
+- 约束：生产 `notify_url` 必须是公网 HTTPS 且不带 query 的 path；在拿到真实商户 `app_id`、应用私钥和支付宝公钥前，只能做本地 RSA2 适配测试，不能声明已接入生产支付宝。
+
+## 2026-05-29: 支付宝下单签名只在 server 生成
+
+- 决策：真实支付宝 page-pay 下单参数由 `server/` 的 `/v1/orders/:id/payments/alipay/page-pay` 生成，接口先用用户 token 校验订单归属，再从订单行派生 `out_trade_no`、`total_amount`、`subject` 和 `biz_content`，最后用 `ALIPAY_APP_PRIVATE_KEY` 做 RSA2 签名。
+- 背景：支付宝下单签名需要商户应用私钥，且订单金额和订单号属于资金边界，不能让 Electron、官网或后台前端自行拼接。
+- 理由：服务端派生签名参数可以避免客户端篡改金额/订单号，也让沙箱/生产网关、notify URL 和 return URL 都通过环境变量管理；支付成功后仍由 webhook 幂等入账，不依赖前端跳转结果。
+- 约束：接口只返回签名后的公开请求参数和 `paymentUrl`，绝不返回私钥；已支付或关闭订单不能重新生成支付请求；真实上线前仍需要商户沙箱/生产凭据和公网 HTTPS 域名联调。

@@ -1,5 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 
 import { createAppServer, createRuntimeFromEnv } from "../src/app.js";
 import { signMockAlipayPayload } from "../src/services/paymentProviders.js";
@@ -27,6 +28,17 @@ async function request(baseUrl, path, options = {}) {
   });
   const payload = await response.json();
   return { response, payload };
+}
+
+async function requestText(baseUrl, path, options = {}) {
+  const response = await fetch(`${baseUrl}${path}`, {
+    ...options,
+    headers: {
+      ...(options.headers || {})
+    },
+    body: options.body
+  });
+  return { response, text: await response.text() };
 }
 
 describe("cloud API skeleton", () => {
@@ -229,6 +241,194 @@ describe("cloud API skeleton", () => {
       });
       assert.equal(tampered.response.status, 401);
     }, { env: { MOCK_ALIPAY_WEBHOOK_SECRET: secret } });
+  });
+
+  it("accepts signed Alipay form notifications and responds with plain success", async () => {
+    const { publicKey, privateKey } = crypto.generateKeyPairSync("rsa", {
+      modulusLength: 2048,
+      publicKeyEncoding: { type: "spki", format: "pem" },
+      privateKeyEncoding: { type: "pkcs8", format: "pem" }
+    });
+    await withServer(async (baseUrl) => {
+      const registered = await request(baseUrl, "/v1/auth/register", {
+        method: "POST",
+        body: { username: "alipay-user", password: "StrongPass123", planId: "advanced" }
+      });
+      const auth = { authorization: `Bearer ${registered.payload.accessToken}` };
+      const order = await request(baseUrl, "/v1/orders", {
+        method: "POST",
+        headers: auth,
+        body: { planId: "advanced", credits: 2000, amountCents: 60000 }
+      });
+      const payload = {
+        app_id: "2026000000000000",
+        notify_id: "notify-http-alipay-001",
+        notify_type: "trade_status_sync",
+        out_trade_no: order.payload.orderNo,
+        trade_no: "2026052922000000000003",
+        trade_status: "TRADE_SUCCESS",
+        total_amount: "600.00",
+        sign_type: "RSA2"
+      };
+      const signingText = Object.keys(payload)
+        .filter((key) => key !== "sign" && key !== "sign_type")
+        .sort()
+        .map((key) => `${key}=${payload[key]}`)
+        .join("&");
+      const form = new URLSearchParams({
+        ...payload,
+        sign: crypto.sign("RSA-SHA256", Buffer.from(signingText), privateKey).toString("base64")
+      });
+
+      const paid = await requestText(baseUrl, "/v1/payments/alipay/notify", {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: form.toString()
+      });
+      assert.equal(paid.response.status, 200);
+      assert.equal(paid.text, "success");
+
+      const duplicate = await requestText(baseUrl, "/v1/payments/alipay/notify", {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: form.toString()
+      });
+      assert.equal(duplicate.response.status, 200);
+      assert.equal(duplicate.text, "success");
+
+      const balance = await request(baseUrl, "/v1/me/entitlements", { headers: auth });
+      assert.equal(balance.payload.balanceCredits, 2000);
+    }, { env: { ALIPAY_PUBLIC_KEY: publicKey, ALIPAY_APP_ID: "2026000000000000" } });
+  });
+
+  it("creates a signed Alipay page-pay request for the authenticated user's order", async () => {
+    const { publicKey, privateKey } = crypto.generateKeyPairSync("rsa", {
+      modulusLength: 2048,
+      publicKeyEncoding: { type: "spki", format: "pem" },
+      privateKeyEncoding: { type: "pkcs8", format: "pem" }
+    });
+
+    await withServer(async (baseUrl) => {
+      const registered = await request(baseUrl, "/v1/auth/register", {
+        method: "POST",
+        body: { username: "alipay-link-user", password: "StrongPass123", planId: "advanced" }
+      });
+      const auth = { authorization: `Bearer ${registered.payload.accessToken}` };
+      const order = await request(baseUrl, "/v1/orders", {
+        method: "POST",
+        headers: auth,
+        body: { planId: "advanced", credits: 2000, amountCents: 60000 }
+      });
+
+      const payment = await request(baseUrl, `/v1/orders/${order.payload.id}/payments/alipay/page-pay`, {
+        method: "POST",
+        headers: auth,
+        body: {}
+      });
+      assert.equal(payment.response.status, 200);
+      assert.equal(payment.payload.provider, "alipay");
+      assert.equal(payment.payload.orderId, order.payload.id);
+      assert.equal(payment.payload.orderNo, order.payload.orderNo);
+      assert.ok(payment.payload.paymentUrl.startsWith("https://openapi-sandbox.dl.alipaydev.com/gateway.do?"));
+      assert.equal(payment.payload.params.biz_content.includes(privateKey), false);
+
+      const signingText = Object.keys(payment.payload.params)
+        .filter((key) => key !== "sign" && key !== "sign_type")
+        .sort()
+        .map((key) => `${key}=${payment.payload.params[key]}`)
+        .join("&");
+      assert.equal(
+        crypto.verify("RSA-SHA256", Buffer.from(signingText), publicKey, Buffer.from(payment.payload.params.sign, "base64")),
+        true
+      );
+
+      const otherUser = await request(baseUrl, "/v1/auth/register", {
+        method: "POST",
+        body: { username: "alipay-link-other", password: "StrongPass123", planId: "advanced" }
+      });
+      const rejected = await request(baseUrl, `/v1/orders/${order.payload.id}/payments/alipay/page-pay`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${otherUser.payload.accessToken}` },
+        body: {}
+      });
+      assert.equal(rejected.response.status, 404);
+    }, {
+      env: {
+        ALIPAY_APP_ID: "2026000000000000",
+        ALIPAY_APP_PRIVATE_KEY: privateKey,
+        ALIPAY_NOTIFY_URL: "https://api.addwhatsapp.com/v1/payments/alipay/notify",
+        ALIPAY_RETURN_URL: "https://addwhatsapp.com/billing/success",
+        ALIPAY_GATEWAY_URL: "https://openapi-sandbox.dl.alipaydev.com/gateway.do",
+        ALIPAY_FIXED_TIMESTAMP: "2026-05-29 10:20:30"
+      }
+    });
+  });
+
+  it("lists payment events for admins with filters and pagination", async () => {
+    await withServer(async (baseUrl) => {
+      const registered = await request(baseUrl, "/v1/auth/register", {
+        method: "POST",
+        body: { username: "payment-events-user", password: "StrongPass123", planId: "advanced" }
+      });
+      const auth = { authorization: `Bearer ${registered.payload.accessToken}` };
+      const adminLogin = await request(baseUrl, "/v1/admin/auth/login", {
+        method: "POST",
+        body: { username: "admin-preview", password: "AdminPass123" }
+      });
+      const adminAuth = { authorization: `Bearer ${adminLogin.payload.adminAccessToken}` };
+      const firstOrder = await request(baseUrl, "/v1/orders", {
+        method: "POST",
+        headers: auth,
+        body: { planId: "advanced", credits: 2000, amountCents: 60000 }
+      });
+      const secondOrder = await request(baseUrl, "/v1/orders", {
+        method: "POST",
+        headers: auth,
+        body: { planId: "advanced", credits: 2000, amountCents: 60000 }
+      });
+
+      await request(baseUrl, "/v1/payments/events", {
+        method: "POST",
+        headers: adminAuth,
+        body: {
+          provider: "manual",
+          providerEventId: "manual-paid-list-1",
+          orderId: firstOrder.payload.id,
+          eventType: "payment_succeeded",
+          providerTradeNo: "manual-list-1"
+        }
+      });
+      await request(baseUrl, "/v1/payments/events", {
+        method: "POST",
+        headers: adminAuth,
+        body: {
+          provider: "mock_alipay",
+          providerEventId: "mock-pending-list-1",
+          orderId: secondOrder.payload.id,
+          eventType: "payment_ignored",
+          providerTradeNo: "mock-list-1"
+        }
+      });
+
+      const rejected = await request(baseUrl, "/v1/admin/payment-events");
+      assert.equal(rejected.response.status, 401);
+
+      const pending = await request(baseUrl, "/v1/admin/payment-events?processed=pending&provider=mock_alipay&limit=1&offset=0", {
+        headers: adminAuth
+      });
+      assert.equal(pending.response.status, 200);
+      assert.equal(pending.payload.total, 1);
+      assert.equal(pending.payload.items.length, 1);
+      assert.equal(pending.payload.items[0].provider, "mock_alipay");
+      assert.equal(pending.payload.items[0].processedAt, null);
+
+      const searched = await request(baseUrl, "/v1/admin/payment-events?q=manual-paid&eventType=payment_succeeded", {
+        headers: adminAuth
+      });
+      assert.equal(searched.response.status, 200);
+      assert.equal(searched.payload.total, 1);
+      assert.equal(searched.payload.items[0].providerEventId, "manual-paid-list-1");
+    });
   });
 
   it("routes through an async billing runtime instead of a hard-coded memory store", async () => {

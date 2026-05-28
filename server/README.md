@@ -39,6 +39,22 @@ Admin console snapshot:
 http://127.0.0.1:4110/v1/admin/console
 ```
 
+Admin payment event query:
+
+```text
+GET http://127.0.0.1:4110/v1/admin/payment-events?provider=alipay&processed=processed&limit=50&offset=0
+```
+
+Supported filters are `provider`, `eventType`, `processed=processed|pending`, `q`, `limit`, and `offset`. This endpoint requires an admin bearer token.
+
+Alipay page-pay request creation:
+
+```text
+POST http://127.0.0.1:4110/v1/orders/:id/payments/alipay/page-pay
+```
+
+This endpoint requires the order owner's bearer token. It reads the existing order, verifies ownership and payable status, then returns server-signed Alipay `alipay.trade.page.pay` request parameters plus a `paymentUrl`. The server never returns or stores the app private key.
+
 Local admin login endpoint:
 
 ```text
@@ -46,6 +62,32 @@ POST http://127.0.0.1:4110/v1/admin/auth/login
 ```
 
 The local development seed admin is `admin-preview`. Its password is stored only as a scrypt hash in the local schema/runtime seed; use `AdminPass123` for local preview login.
+
+Payment callback endpoints:
+
+```text
+POST http://127.0.0.1:4110/v1/payments/mock-alipay/notify
+POST http://127.0.0.1:4110/v1/payments/alipay/notify
+```
+
+`mock_alipay` is only for local preview and uses `MOCK_ALIPAY_WEBHOOK_SECRET`.
+
+Real Alipay callback verification expects:
+
+```text
+ALIPAY_APP_ID=your_alipay_app_id
+ALIPAY_PUBLIC_KEY=-----BEGIN PUBLIC KEY-----...
+ALIPAY_APP_PRIVATE_KEY=-----BEGIN PRIVATE KEY-----...
+ALIPAY_NOTIFY_URL=https://api.addwhatsapp.com/v1/payments/alipay/notify
+ALIPAY_RETURN_URL=https://addwhatsapp.com/billing/success
+ALIPAY_GATEWAY_URL=https://openapi.alipay.com/gateway.do
+```
+
+`ALIPAY_APP_PRIVATE_KEY`, `ALIPAY_NOTIFY_URL`, `ALIPAY_RETURN_URL`, and `ALIPAY_GATEWAY_URL` are used only when creating a signed page-pay request. Use the sandbox gateway only for sandbox app credentials.
+
+The real Alipay notify endpoint accepts form POST payloads, verifies RSA2 signatures, maps successful `TRADE_SUCCESS` / `TRADE_FINISHED` notifications into the common payment event contract, and returns plain text `success` only after the notification has been accepted by the idempotent payment-event flow.
+
+See `docs/payment-production-checklist.md` before using a production payment channel.
 
 Run the API against PostgreSQL instead of the in-memory preview store:
 

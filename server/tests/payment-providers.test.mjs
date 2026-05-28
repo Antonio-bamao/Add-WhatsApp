@@ -1,10 +1,31 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 
 import {
+  buildAlipayPagePayRequest,
+  parseAlipayNotification,
   parseMockAlipayNotification,
   signMockAlipayPayload
 } from "../src/services/paymentProviders.js";
+
+function signAlipayPayload(payload, privateKey) {
+  const signingText = Object.keys(payload)
+    .filter((key) => key !== "sign" && key !== "sign_type")
+    .sort()
+    .map((key) => `${key}=${payload[key]}`)
+    .join("&");
+  return crypto.sign("RSA-SHA256", Buffer.from(signingText), privateKey).toString("base64");
+}
+
+function verifyAlipayRequestSignature(params, publicKey) {
+  const signingText = Object.keys(params)
+    .filter((key) => key !== "sign" && key !== "sign_type")
+    .sort()
+    .map((key) => `${key}=${params[key]}`)
+    .join("&");
+  return crypto.verify("RSA-SHA256", Buffer.from(signingText), publicKey, Buffer.from(params.sign, "base64"));
+}
 
 describe("payment provider adapters", () => {
   it("maps a signed mock_alipay success notification into the common payment event contract", () => {
@@ -54,5 +75,112 @@ describe("payment provider adapters", () => {
       () => parseMockAlipayNotification({ ...signedPayload, total_amount: "1.00" }, { secret }),
       /PAYMENT_SIGNATURE_INVALID/
     );
+  });
+
+  it("verifies RSA2 signed Alipay notifications and maps them into the common payment event contract", () => {
+    const { publicKey, privateKey } = crypto.generateKeyPairSync("rsa", {
+      modulusLength: 2048,
+      publicKeyEncoding: { type: "spki", format: "pem" },
+      privateKeyEncoding: { type: "pkcs8", format: "pem" }
+    });
+    const payload = {
+      app_id: "2026000000000000",
+      notify_id: "alipay-notify-001",
+      notify_type: "trade_status_sync",
+      out_trade_no: "ADWA-000003",
+      trade_no: "2026052922000000000001",
+      trade_status: "TRADE_SUCCESS",
+      total_amount: "600.00",
+      sign_type: "RSA2"
+    };
+    const signed = {
+      ...payload,
+      sign: signAlipayPayload(payload, privateKey)
+    };
+
+    const event = parseAlipayNotification(signed, {
+      alipayPublicKey: publicKey,
+      expectedAppId: "2026000000000000"
+    });
+
+    assert.equal(event.provider, "alipay");
+    assert.equal(event.providerEventId, "alipay:alipay-notify-001:TRADE_SUCCESS");
+    assert.equal(event.orderNo, "ADWA-000003");
+    assert.equal(event.eventType, "payment_succeeded");
+    assert.equal(event.providerTradeNo, "2026052922000000000001");
+    assert.equal(event.payload.sign_type, undefined);
+    assert.equal(event.payload.sign, undefined);
+  });
+
+  it("rejects Alipay notifications with invalid RSA2 signatures or mismatched app ids", () => {
+    const { publicKey, privateKey } = crypto.generateKeyPairSync("rsa", {
+      modulusLength: 2048,
+      publicKeyEncoding: { type: "spki", format: "pem" },
+      privateKeyEncoding: { type: "pkcs8", format: "pem" }
+    });
+    const payload = {
+      app_id: "2026000000000000",
+      notify_id: "alipay-notify-002",
+      out_trade_no: "ADWA-000004",
+      trade_no: "2026052922000000000002",
+      trade_status: "TRADE_SUCCESS",
+      total_amount: "600.00",
+      sign_type: "RSA2"
+    };
+    const signed = {
+      ...payload,
+      sign: signAlipayPayload(payload, privateKey)
+    };
+
+    assert.throws(
+      () => parseAlipayNotification({ ...signed, total_amount: "1.00" }, { alipayPublicKey: publicKey, expectedAppId: payload.app_id }),
+      /PAYMENT_SIGNATURE_INVALID/
+    );
+    assert.throws(
+      () => parseAlipayNotification(signed, { alipayPublicKey: publicKey, expectedAppId: "wrong-app" }),
+      /PAYMENT_APP_ID_MISMATCH/
+    );
+  });
+
+  it("builds a server-signed Alipay page-pay request for an existing order", () => {
+    const { publicKey, privateKey } = crypto.generateKeyPairSync("rsa", {
+      modulusLength: 2048,
+      publicKeyEncoding: { type: "spki", format: "pem" },
+      privateKeyEncoding: { type: "pkcs8", format: "pem" }
+    });
+    const order = {
+      id: "order_001",
+      orderNo: "ADWA-000010",
+      planId: "advanced",
+      credits: 2000,
+      amountCents: 60000
+    };
+
+    const request = buildAlipayPagePayRequest(order, {
+      appId: "2026000000000000",
+      appPrivateKey: privateKey,
+      notifyUrl: "https://api.addwhatsapp.com/v1/payments/alipay/notify",
+      returnUrl: "https://addwhatsapp.com/billing/success",
+      gatewayUrl: "https://openapi-sandbox.dl.alipaydev.com/gateway.do",
+      timestamp: "2026-05-29 10:20:30"
+    });
+
+    assert.equal(request.provider, "alipay");
+    assert.equal(request.orderId, "order_001");
+    assert.equal(request.orderNo, "ADWA-000010");
+    assert.equal(request.amountCents, 60000);
+    assert.equal(request.params.app_id, "2026000000000000");
+    assert.equal(request.params.method, "alipay.trade.page.pay");
+    assert.equal(request.params.sign_type, "RSA2");
+    assert.equal(request.params.notify_url, "https://api.addwhatsapp.com/v1/payments/alipay/notify");
+    assert.equal(request.params.return_url, "https://addwhatsapp.com/billing/success");
+    assert.ok(request.paymentUrl.startsWith("https://openapi-sandbox.dl.alipaydev.com/gateway.do?"));
+    assert.equal(verifyAlipayRequestSignature(request.params, publicKey), true);
+
+    const bizContent = JSON.parse(request.params.biz_content);
+    assert.equal(bizContent.out_trade_no, "ADWA-000010");
+    assert.equal(bizContent.total_amount, "600.00");
+    assert.equal(bizContent.subject, "Add WhatsApp advanced 2000 credits");
+    assert.equal(bizContent.product_code, "FAST_INSTANT_TRADE_PAY");
   });
 });

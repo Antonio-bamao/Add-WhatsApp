@@ -238,3 +238,24 @@
 - 结果：后台订单页可以同时看订单记录和支付回调事件，运营可筛选 provider/event/order，复制事件号或订单号，并从同页触发待入账补偿；8 个后台模块结构保持不变。
 - 验证：admin npm test 6/6 通过；server npm test 17/17 通过；server npm run test:postgres 1/1 通过；根项目 npm test 92/92 通过；Playwright 打开 http://127.0.0.1:3220/#/orders 验证桌面/390px 移动宽度无 console error/warning 且无页面级横向溢出。
 - 下一步：继续补真实支付宝 RSA 验签适配点、支付事件生产配置清单，以及支付事件列表的分页/状态筛选 API。
+
+## 2026-05-29T00:00:00+08:00｜补真实支付宝 RSA2 webhook 适配点和生产配置清单
+- 目标：补真实支付宝 RSA2 webhook 适配点和生产配置清单
+- 动作：参考支付宝异步通知规则，新增 parseAlipayNotification RSA2 验签；新增 /v1/payments/alipay/notify，支持 application/x-www-form-urlencoded POST，验签后映射统一支付事件并返回纯文本 success；新增 docs/payment-production-checklist.md 并补 server README 的支付回调环境变量说明。
+- 结果：真实支付宝接入前的服务端适配点已具备：ALIPAY_PUBLIC_KEY/ALIPAY_APP_ID 环境变量、RSA2 验签、app_id 校验、表单通知解析、幂等入账和 success 响应；仍未放入任何真实商户密钥。
+- 验证：server npm test 20/20 通过；admin npm test 6/6 通过；server npm run test:postgres 1/1 通过；根项目 npm test 92/92 通过。
+- 下一步：继续补支付事件列表分页/状态筛选 API，或在拿到真实商户信息后接订单创建签名和支付宝沙箱联调。
+
+## 2026-05-29T00:00:00+08:00｜补支付事件列表分页和状态筛选 API
+- 目标：补支付事件列表分页和状态筛选 API
+- 动作：新增 runtime.listPaymentEvents；内存 runtime 和 PostgreSQL runtime 均支持 provider、eventType、processed、q、limit、offset 过滤；新增 GET /v1/admin/payment-events 管理员鉴权路由；补 README 查询示例并扩展 HTTP 与 PostgreSQL 集成测试。
+- 结果：后台运营现在可以通过独立 API 查询支付事件，不再只能依赖 admin console 快照；接口支持分页、渠道筛选、事件类型筛选、processed/pending 状态筛选和文本搜索。
+- 验证：server npm test 21/21 通过；admin npm test 6/6 通过；server npm run test:postgres 1/1 通过；根项目 npm test 92/92 通过。
+- 下一步：继续补真实支付宝订单创建签名和沙箱联调所需的 order create/precreate 适配层，或把 admin 订单页切到分页 API。
+
+## 2026-05-29T00:00:00+08:00｜补支付宝 page-pay 下单签名适配层
+- 目标：补真实支付宝订单创建签名和沙箱联调所需的服务端适配层。
+- 动作：新增 `buildAlipayPagePayRequest`，从现有订单派生 `alipay.trade.page.pay` 请求参数、`FAST_INSTANT_TRADE_PAY` biz_content 和 RSA2 签名；新增 `/v1/orders/:id/payments/alipay/page-pay`，用户 token 只能为自己的未支付订单生成签名支付 URL；内存 runtime 与 PostgreSQL runtime 均新增订单归属读取接口。
+- 结果：支付宝下单侧已具备服务端签名能力，私钥只通过 `ALIPAY_APP_PRIVATE_KEY` 留在 server 环境变量中，Electron、官网和后台前端只拿到签名后的公开参数和 paymentUrl；实际入账仍以 webhook RSA2 验签结果为准。
+- 验证：先写 provider/HTTP/PostgreSQL 失败测试；实现后 `server npm test` 23/23 通过，真实 PostgreSQL `server npm run test:postgres` 1/1 通过。
+- 下一步：拿到商户沙箱 app_id、应用私钥、支付宝公钥、公网 HTTPS notify_url 后做真实沙箱联调；或先把后台订单页切到 `/v1/admin/payment-events` 分页 API。
