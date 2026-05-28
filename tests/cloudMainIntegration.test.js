@@ -111,6 +111,65 @@ test('cloud controller consumes one credit per successful desktop send only', as
   assert.equal(result.subscription.usedToday, 2);
 });
 
+test('cloud controller issues workspace leases when a cloud session exists', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'add-whatsapp-cloud-lease-'));
+  const sessionStore = new CloudSessionStore(path.join(dir, 'cloud-session.json'));
+  sessionStore.save({
+    user: { id: 'user-1', username: 'cloud-user' },
+    accessToken: 'access-1',
+    refreshToken: 'refresh-1',
+    entitlements: { userId: 'user-1', planId: 'professional', balanceCredits: 2000 }
+  });
+  const client = new CloudApiClient({
+    baseUrl: 'http://api.test',
+    fetchImpl: async (url, options = {}) => {
+      assert.equal(url, 'http://api.test/v1/workspaces/leases');
+      assert.equal(options.headers.authorization, 'Bearer access-1');
+      assert.deepEqual(JSON.parse(options.body), {
+        deviceId: 'desktop-1',
+        workspaceKind: 'secondary',
+        processNonce: 'workspace-20260528-a1b2c3d4'
+      });
+      return response(200, {
+        leaseId: 'lease-1',
+        expiresAt: '2026-05-28T12:01:00.000Z',
+        activeCount: 2,
+        workspaceLimit: 3
+      });
+    }
+  });
+  const { createCloudDesktopController } = require('../src/main/cloudDesktopController');
+  const controller = createCloudDesktopController({ client, sessionStore, deviceId: 'desktop-1' });
+
+  const result = await controller.issueWorkspaceLease({
+    workspaceKind: 'secondary',
+    processNonce: 'workspace-20260528-a1b2c3d4'
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.lease.leaseId, 'lease-1');
+  assert.equal(result.lease.workspaceLimit, 3);
+});
+
+test('cloud controller skips workspace leases without a cloud session', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'add-whatsapp-cloud-lease-empty-'));
+  const sessionStore = new CloudSessionStore(path.join(dir, 'cloud-session.json'));
+  const { createCloudDesktopController } = require('../src/main/cloudDesktopController');
+  const controller = createCloudDesktopController({
+    sessionStore,
+    client: new CloudApiClient({ baseUrl: 'http://api.test', fetchImpl: async () => response(500, {}) })
+  });
+
+  const result = await controller.issueWorkspaceLease({
+    workspaceKind: 'secondary',
+    processNonce: 'workspace-1'
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.skipped, true);
+  assert.equal(result.authRequired, true);
+});
+
 function response(status, payload) {
   return {
     ok: status >= 200 && status < 300,

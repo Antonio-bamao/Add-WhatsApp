@@ -190,3 +190,9 @@
 - 结果：发送任务结束后用 `selectNewlySentRows` 只选本轮新增成功发送行，再通过 `cloudController.consumeSuccessfulAdds` 逐条调用 `/v1/credits/consume`；历史进度里的旧成功行不会再次扣费，云端同步失败只写任务日志，不打断本地任务记录。
 - 验证：先写云端 client/session/controller/renderer/taskBilling 测试并确认失败；实现后根项目 `npm test` 通过 87/87，`server\npm test` 通过 10/10，`admin\npm test` 通过 5/5，`website\npm test` 通过 6/6，根项目 `npm run build` 成功生成 `dist\Add WhatsApp 0.1.2.exe`。
 - 下一步：把工作台云端租约接到主/第二工作台启动流程，然后补后台真实操作表单和支付/人工入账流程。
+
+- 步骤：接第二工作台启动前的云端租约申请。
+- 结果：`CloudApiClient` 新增租约请求测试覆盖，`cloudDesktopController.issueWorkspaceLease` 会在存在云端 session 时调用 `/v1/workspaces/leases`，并带上 `deviceId`、`workspaceKind` 和作为 `processNonce` 的新工作台 ID；无云端 session 时返回 skipped，保留本地预览模式。
+- 结果：`workspace:open-another-account` 在真正启动第二工作台进程前先申请云端租约；后台返回 `WORKSPACE_LIMIT_REACHED` 时会阻止新窗口启动，并显示云端工作台上限提示。
+- 验证：先写 controller lease 测试并确认缺少方法失败；实现后根项目 `npm test` 通过 90/90，`server\npm test` 通过 10/10，`admin\npm test` 通过 5/5，`website\npm test` 通过 6/6，根项目 `npm run build` 成功生成 `dist\Add WhatsApp 0.1.2.exe`。
+- 下一步：补云端工作台 lease 续租/释放 API 和后台真实操作表单，避免 60 秒一次性租约在长期工作台中失真。

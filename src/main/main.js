@@ -468,6 +468,10 @@ ipcMain.handle('workspace:open-another-account', async (_event, payload = {}) =>
       return { ok: false, error: entitlement.error };
     }
     const nextWorkspaceId = createWorkspaceId();
+    const cloudLease = await issueCloudWorkspaceLease(nextWorkspaceId);
+    if (!cloudLease.ok) {
+      return { ok: false, error: cloudLease.error };
+    }
     const args = workspaceLaunchArgs({
       isPackaged: app.isPackaged,
       appPath: app.getAppPath(),
@@ -488,12 +492,30 @@ ipcMain.handle('workspace:open-another-account', async (_event, payload = {}) =>
     return {
       ok: true,
       workspaceId: nextWorkspaceId,
-      remaining: entitlement.remaining - 1
+      remaining: entitlement.remaining - 1,
+      cloudLease: cloudLease.lease || null
     };
   } catch (error) {
     return { ok: false, error: error.message };
   }
 });
+
+async function issueCloudWorkspaceLease(nextWorkspaceId) {
+  if (!cloudController) return { ok: true, skipped: true };
+  try {
+    return await cloudController.issueWorkspaceLease({
+      workspaceKind: 'secondary',
+      processNonce: nextWorkspaceId
+    });
+  } catch (error) {
+    return {
+      ok: false,
+      error: error.message === 'WORKSPACE_LIMIT_REACHED'
+        ? '云端工作台数量已达到当前套餐上限。'
+        : `云端工作台租约申请失败：${error.message}`
+    };
+  }
+}
 
 function requireSecondaryWorkspace() {
   if (!workspaceId) throw new Error('主工作台默认使用当前电脑/VPN 网络，不提供 IP 代理设置。');

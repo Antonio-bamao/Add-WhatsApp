@@ -62,6 +62,37 @@ test('maps cloud entitlements into desktop subscription state shape', () => {
   assert.match(mapped.resetPolicy, /服务器 Asia\/Shanghai/);
 });
 
+test('issues workspace leases with bearer auth', async () => {
+  const client = new CloudApiClient({
+    baseUrl: 'http://127.0.0.1:4110',
+    fetchImpl: async (url, options = {}) => {
+      assert.equal(url, 'http://127.0.0.1:4110/v1/workspaces/leases');
+      assert.equal(options.method, 'POST');
+      assert.equal(options.headers.authorization, 'Bearer access-1');
+      assert.deepEqual(JSON.parse(options.body), {
+        deviceId: 'desktop-1',
+        workspaceKind: 'secondary',
+        processNonce: 'workspace-1'
+      });
+      return response(200, {
+        leaseId: 'lease-1',
+        expiresAt: '2026-05-28T12:01:00.000Z',
+        activeCount: 2,
+        workspaceLimit: 3
+      });
+    }
+  });
+
+  const lease = await client.issueWorkspaceLease('access-1', {
+    deviceId: 'desktop-1',
+    workspaceKind: 'secondary',
+    processNonce: 'workspace-1'
+  });
+
+  assert.equal(lease.leaseId, 'lease-1');
+  assert.equal(lease.activeCount, 2);
+});
+
 function response(status, payload) {
   return {
     ok: status >= 200 && status < 300,
