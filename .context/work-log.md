@@ -259,3 +259,17 @@
 - 结果：支付宝下单侧已具备服务端签名能力，私钥只通过 `ALIPAY_APP_PRIVATE_KEY` 留在 server 环境变量中，Electron、官网和后台前端只拿到签名后的公开参数和 paymentUrl；实际入账仍以 webhook RSA2 验签结果为准。
 - 验证：先写 provider/HTTP/PostgreSQL 失败测试；实现后 `server npm test` 23/23 通过，真实 PostgreSQL `server npm run test:postgres` 1/1 通过。
 - 下一步：拿到商户沙箱 app_id、应用私钥、支付宝公钥、公网 HTTPS notify_url 后做真实沙箱联调；或先把后台订单页切到 `/v1/admin/payment-events` 分页 API。
+
+## 2026-05-29T00:00:00+08:00｜后台订单页切到支付事件分页 API
+- 目标：把后台订单页支付回调事件从 admin console 快照升级为独立分页 API 查询。
+- 动作：`admin/public/admin.js` 新增 `loadPaymentEvents`、`paymentEventsQuery`、`paginatePaymentEvents` 和 `handlePaymentEventControlChange`；订单页管理员登录后调用 `GET /v1/admin/payment-events`，支持 provider、processed、q、limit、offset；未登录或接口失败时继续渲染快照支付事件表。
+- 结果：后台订单页现在可以直接按渠道、处理状态和搜索词查询真实支付事件分页数据，仍保留复制事件 ID/订单 ID 和补偿队列操作；移动端筛选控件保持单列，不再撑开页面。
+- 验证：先写 admin 结构失败测试；实现后 `admin npm test` 7/7 通过；Playwright 打开 `http://127.0.0.1:3220/#/orders`，登录管理员后确认请求 `/v1/admin/payment-events?limit=20&offset=0` 返回 200，桌面和 390px 移动宽度无 console error/warning、无页面级横向溢出。
+- 下一步：继续补真实支付宝沙箱联调，或先收紧 PostgreSQL 测试数据清理策略。
+
+## 2026-05-29T00:00:00+08:00｜补 PostgreSQL 集成测试数据清理策略
+- 目标：避免真实 PostgreSQL 集成测试在本地数据库中长期留下测试用户、订单、账本、支付事件和工作台租约。
+- 动作：新增 `server/tests/helpers/postgresTestCleanup.mjs`，只接受 `pg_test_*_` 安全用户名作用域；清理时先按用户名查用户，再按用户/订单/租约删除 admin_audit_logs、payment_events、referral_records、referral_codes、workspace_leases、usage_daily、usage_monthly、credit_ledger、orders、sessions、devices、subscriptions 和 users；新增 `postgres-cleanup.test.mjs` 验证清理不会删除 plans 和 admin-preview 种子；`postgres-runtime.test.mjs` 改用同一清理 helper 做前置/后置清理；`test:postgres` 改为单并发。
+- 结果：PostgreSQL 测试现在有明确的测试数据作用域和清理顺序，不再依赖 Date.now 用户长期堆在共享本地库里。
+- 验证：先写缺失 helper 的失败测试；实现后 `server npm test` 23/23 通过，根项目 `npm test` 92/92 通过；启动 `add-whatsapp-postgres` 后，真实 `server npm run test:postgres` 通过 2/2。
+- 下一步：继续真实支付宝沙箱联调准备。

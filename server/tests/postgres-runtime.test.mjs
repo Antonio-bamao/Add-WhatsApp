@@ -4,6 +4,7 @@ import crypto from "node:crypto";
 
 import { createAppServer } from "../src/app.js";
 import { signMockAlipayPayload } from "../src/services/paymentProviders.js";
+import { cleanupPostgresTestData } from "./helpers/postgresTestCleanup.mjs";
 
 const databaseUrl = process.env.ADD_WHATSAPP_TEST_DATABASE_URL || "";
 
@@ -41,11 +42,14 @@ describe("PostgreSQL billing runtime", { skip: !databaseUrl }, () => {
       publicKeyEncoding: { type: "spki", format: "pem" },
       privateKeyEncoding: { type: "pkcs8", format: "pem" }
     });
-    const username = `pg_user_${Date.now()}`;
+    const scope = `pg_test_runtime_${Date.now()}_`;
+    const username = `${scope}user`;
     const password = "StrongPass123";
     let registeredUserId = "";
 
-    await withServer(createPostgresRuntime({ databaseUrl }), async (baseUrl) => {
+    await cleanupPostgresTestData({ databaseUrl, usernamePrefix: scope });
+    try {
+      await withServer(createPostgresRuntime({ databaseUrl }), async (baseUrl) => {
       const registered = await request(baseUrl, "/v1/auth/register", {
         method: "POST",
         body: { username, password, planId: "advanced" }
@@ -239,5 +243,8 @@ describe("PostgreSQL billing runtime", { skip: !databaseUrl }, () => {
         ALIPAY_FIXED_TIMESTAMP: "2026-05-29 10:20:30"
       }
     });
+    } finally {
+      await cleanupPostgresTestData({ databaseUrl, usernamePrefix: scope });
+    }
   });
 });

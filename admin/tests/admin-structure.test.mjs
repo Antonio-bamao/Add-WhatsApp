@@ -154,4 +154,20 @@ describe("admin console structure", () => {
     assert.match(css, /\.event-toolbar/);
     assert.match(css, /\.copy-button/);
   });
+
+  it("uses the admin payment-events API for the orders event table", () => {
+    const js = readText("public/admin.js");
+    const css = readText("public/admin.css");
+
+    assert.match(js, /\/v1\/admin\/payment-events/);
+    assert.match(js, /loadPaymentEvents/);
+    assert.match(js, /paymentEventsQuery/);
+    assert.match(js, /data-payment-event-provider/);
+    assert.match(js, /data-payment-event-processed/);
+    assert.match(js, /data-payment-events-page/);
+    assert.match(js, /paginatePaymentEvents/);
+    assert.match(js, /handlePaymentEventControlChange/);
+    assert.match(css, /\.event-pagination/);
+    assert.match(css, /\.event-summary/);
+  });
 });

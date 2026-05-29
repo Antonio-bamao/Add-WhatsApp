@@ -18,6 +18,23 @@ let runtimeState = {
   environmentStatus: "API 未连接"
 };
 
+let paymentEventsQuery = {
+  provider: "",
+  processed: "",
+  q: "",
+  limit: 20,
+  offset: 0
+};
+
+let paymentEventsState = {
+  source: "snapshot",
+  loaded: false,
+  loading: false,
+  error: "",
+  total: 0,
+  items: []
+};
+
 function statusTone(status) {
   if (/待接|后置/.test(status)) return "neutral";
   if (/人工/.test(status)) return "warn";
@@ -97,9 +114,47 @@ function renderCopyButton(value) {
   return `<button class="copy-button" type="button" data-copy-value="${String(value).replaceAll('"', "&quot;")}">复制</button>`;
 }
 
-function renderPaymentEvents(module, filterText = "") {
-  const normalizedFilter = filterText.trim().toLowerCase();
-  const rows = (module.paymentEvents || []).filter((row) => row.join(" ").toLowerCase().includes(normalizedFilter));
+function resetPaymentEventsState() {
+  paymentEventsState = {
+    source: "snapshot",
+    loaded: false,
+    loading: false,
+    error: "",
+    total: 0,
+    items: []
+  };
+}
+
+function paymentEventRowsFromApi(items) {
+  return items.map((event) => [
+    event.provider,
+    event.eventType,
+    event.providerEventId,
+    event.orderId,
+    event.processedAt || "pending"
+  ]);
+}
+
+function paymentEventRows(module) {
+  if (paymentEventsState.loaded) return paymentEventRowsFromApi(paymentEventsState.items);
+  const normalizedFilter = paymentEventsQuery.q.trim().toLowerCase();
+  return (module.paymentEvents || []).filter((row) => row.join(" ").toLowerCase().includes(normalizedFilter));
+}
+
+function paymentEventSummary(module, rows) {
+  if (paymentEventsState.loading) return "正在读取支付事件分页 API...";
+  if (paymentEventsState.error) return `分页 API 读取失败，显示快照：${paymentEventsState.error}`;
+  if (!adminAccessToken) return "未登录管理员，显示当前快照。";
+  if (!paymentEventsState.loaded) return `等待分页 API，当前显示快照 ${rows.length} 条。`;
+  const pageIndex = Math.floor(paymentEventsQuery.offset / paymentEventsQuery.limit) + 1;
+  const pageCount = Math.max(1, Math.ceil(paymentEventsState.total / paymentEventsQuery.limit));
+  return `分页 API：第 ${pageIndex}/${pageCount} 页，共 ${paymentEventsState.total} 条。`;
+}
+
+function renderPaymentEvents(module) {
+  const rows = paymentEventRows(module);
+  const canPageBack = paymentEventsState.loaded && paymentEventsQuery.offset > 0;
+  const canPageNext = paymentEventsState.loaded && paymentEventsQuery.offset + paymentEventsQuery.limit < paymentEventsState.total;
   return `
     <section class="section-block payment-events-panel">
       <div class="event-toolbar">
@@ -107,10 +162,36 @@ function renderPaymentEvents(module, filterText = "") {
           <h2>支付回调事件</h2>
           <p>核对渠道、事件号、订单和入账处理状态。重复通知应显示同一事件号，不应重复入账。</p>
         </div>
-        <label>
-          <span>筛选</span>
-          <input data-payment-event-filter value="${filterText}" placeholder="provider / event id / order id" />
-        </label>
+        <div class="event-filters">
+          <label>
+            <span>渠道</span>
+            <select data-payment-event-provider>
+              <option value="" ${paymentEventsQuery.provider === "" ? "selected" : ""}>全部</option>
+              <option value="alipay" ${paymentEventsQuery.provider === "alipay" ? "selected" : ""}>alipay</option>
+              <option value="mock_alipay" ${paymentEventsQuery.provider === "mock_alipay" ? "selected" : ""}>mock_alipay</option>
+              <option value="manual" ${paymentEventsQuery.provider === "manual" ? "selected" : ""}>manual</option>
+            </select>
+          </label>
+          <label>
+            <span>状态</span>
+            <select data-payment-event-processed>
+              <option value="" ${paymentEventsQuery.processed === "" ? "selected" : ""}>全部</option>
+              <option value="processed" ${paymentEventsQuery.processed === "processed" ? "selected" : ""}>已处理</option>
+              <option value="pending" ${paymentEventsQuery.processed === "pending" ? "selected" : ""}>待处理</option>
+            </select>
+          </label>
+          <label>
+            <span>搜索</span>
+            <input data-payment-event-filter value="${paymentEventsQuery.q}" placeholder="provider / event id / order id" />
+          </label>
+        </div>
+      </div>
+      <div class="event-summary">
+        <span>${paymentEventSummary(module, rows)}</span>
+        <div class="event-pagination">
+          <button type="button" data-payment-events-page="prev" ${canPageBack ? "" : "disabled"}>上一页</button>
+          <button type="button" data-payment-events-page="next" ${canPageNext ? "" : "disabled"}>下一页</button>
+        </div>
       </div>
       ${table(
         ["渠道", "事件", "事件 ID", "订单 ID", "处理", "复制"],
@@ -127,15 +208,95 @@ function renderPaymentEvents(module, filterText = "") {
   `;
 }
 
+async function loadPaymentEvents(nextQuery = {}) {
+  if (!adminAccessToken) {
+    resetPaymentEventsState();
+    renderRoute();
+    return;
+  }
+  paymentEventsQuery = {
+    ...paymentEventsQuery,
+    ...nextQuery
+  };
+  paymentEventsState = {
+    ...paymentEventsState,
+    loading: true,
+    error: ""
+  };
+  renderRoute();
+  try {
+    const params = new URLSearchParams({
+      limit: String(paymentEventsQuery.limit),
+      offset: String(paymentEventsQuery.offset)
+    });
+    if (paymentEventsQuery.provider) params.set("provider", paymentEventsQuery.provider);
+    if (paymentEventsQuery.processed) params.set("processed", paymentEventsQuery.processed);
+    if (paymentEventsQuery.q) params.set("q", paymentEventsQuery.q);
+    const response = await fetch(`${API_BASE_URL}/v1/admin/payment-events?${params.toString()}`, {
+      headers: adminHeaders()
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || `PAYMENT_EVENTS_${response.status}`);
+    paymentEventsState = {
+      source: "api",
+      loaded: true,
+      loading: false,
+      error: "",
+      total: payload.total,
+      items: payload.items || []
+    };
+  } catch (error) {
+    paymentEventsState = {
+      source: "snapshot",
+      loaded: false,
+      loading: false,
+      error: error.message,
+      total: 0,
+      items: []
+    };
+  }
+  renderRoute();
+}
+
 function filterPaymentEvents(event) {
   const input = event.target.closest("[data-payment-event-filter]");
   if (!input) return;
+  paymentEventsQuery.q = input.value;
   const module = getRuntimeModuleByKey("orders");
   const panel = pageOutlet.querySelector(".payment-events-panel");
   if (!panel || !module) return;
-  panel.outerHTML = renderPaymentEvents(module, input.value);
+  if (adminAccessToken) {
+    loadPaymentEvents({ q: input.value, offset: 0 });
+    return;
+  }
+  panel.outerHTML = renderPaymentEvents(module);
   const nextInput = pageOutlet.querySelector("[data-payment-event-filter]");
   nextInput?.focus();
+}
+
+function handlePaymentEventControlChange(event) {
+  const panel = event.target.closest(".payment-events-panel");
+  if (!panel) return;
+  const provider = event.target.closest("[data-payment-event-provider]");
+  const processed = event.target.closest("[data-payment-event-processed]");
+  if (!provider && !processed) return;
+  paymentEventsQuery.provider = panel.querySelector("[data-payment-event-provider]")?.value || "";
+  paymentEventsQuery.processed = panel.querySelector("[data-payment-event-processed]")?.value || "";
+  if (adminAccessToken) {
+    loadPaymentEvents({ offset: 0 });
+    return;
+  }
+  const module = getRuntimeModuleByKey("orders");
+  panel.outerHTML = renderPaymentEvents(module);
+}
+
+function paginatePaymentEvents(event) {
+  const button = event.target.closest("[data-payment-events-page]");
+  if (!button) return;
+  const direction = button.dataset.paymentEventsPage;
+  const delta = direction === "next" ? paymentEventsQuery.limit : -paymentEventsQuery.limit;
+  const offset = Math.max(0, paymentEventsQuery.offset + delta);
+  loadPaymentEvents({ offset });
 }
 
 async function copyPaymentToken(event) {
@@ -467,6 +628,14 @@ function renderRoute() {
   }
 
   window.scrollTo({ top: 0, left: 0 });
+  maybeLoadPaymentEvents(activeKey);
+}
+
+function maybeLoadPaymentEvents(activeKey) {
+  if (activeKey !== "orders") return;
+  if (!adminAccessToken) return;
+  if (paymentEventsState.loaded || paymentEventsState.loading) return;
+  loadPaymentEvents();
 }
 
 routeButtons.forEach((button) => {
@@ -485,6 +654,7 @@ window.addEventListener("hashchange", renderRoute);
 renderRoute();
 
 function applyConsoleSnapshot(snapshot) {
+  resetPaymentEventsState();
   runtimeState = {
     adminModules: adminModules.map((module) => ({
       ...module,
@@ -541,19 +711,24 @@ async function loginAdmin(event) {
 adminLoginForm.addEventListener("submit", loginAdmin);
 pageOutlet.addEventListener("submit", handleOperationSubmit);
 pageOutlet.addEventListener("input", filterPaymentEvents);
+pageOutlet.addEventListener("change", handlePaymentEventControlChange);
+pageOutlet.addEventListener("click", paginatePaymentEvents);
 pageOutlet.addEventListener("click", copyPaymentToken);
 
 Object.assign(window, {
   applyConsoleSnapshot,
+  handlePaymentEventControlChange,
   handleOperationSubmit,
   loginAdmin,
   loadConsoleSnapshot,
+  loadPaymentEvents,
   renderDashboard,
   renderMappings,
   renderModulePage,
   renderOperationPanel,
   renderPaymentEvents,
   filterPaymentEvents,
+  paginatePaymentEvents,
   copyPaymentToken,
   submitCreditAdjustment,
   submitOrderMarkPaid,

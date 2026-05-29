@@ -15,3 +15,10 @@
 - 根因：后台管理台 v0 只是静态文件；上一步验证时通过临时 `python -m http.server` 提供预览，验证结束后停止了临时服务器，但交付时没有提供固定启动脚本，也没有保持预览服务运行。
 - 处理：给 `admin/package.json` 增加 `npm run dev`，命令为 `python -m http.server 3220 -d public`；README 写明启动和访问方式；重新启动预览服务并确认 HTTP 200。
 - 预防：以后交付需要浏览器打开的静态预览时，要留下固定启动命令，并在最终状态说明服务是否仍在运行。
+
+## 2026-05-29: Docker Desktop daemon 未就绪导致真实 PostgreSQL 测试阻塞
+
+- 症状：运行 `server\npm run test:postgres` 并设置 `ADD_WHATSAPP_TEST_DATABASE_URL=postgres://addwhatsapp:addwhatsapp_dev_password@127.0.0.1:55433/addwhatsapp` 时，测试连接 PostgreSQL 失败；`docker ps` 报无法连接 `dockerDesktopLinuxEngine`，测试报 `ECONNREFUSED 127.0.0.1:55433`。
+- 根因：Docker Desktop 进程已启动，但 Linux engine/Docker API 没有对当前 shell 就绪，项目容器 `add-whatsapp-postgres` 无法启动或访问。
+- 处理：尝试启动 Docker Desktop 并轮询 Docker API；Docker API 恢复后发现 `add-whatsapp-postgres` 容器处于 exited 状态，用 `docker start add-whatsapp-postgres` 启动容器；随后真实 `server npm run test:postgres` 通过 2/2。
+- 预防：以后运行真实 PostgreSQL 集成测试前，先执行 `docker ps` 和 `docker compose up -d`，确认 `add-whatsapp-postgres` 监听 `127.0.0.1:55433` 后再跑 `server\npm run test:postgres`。

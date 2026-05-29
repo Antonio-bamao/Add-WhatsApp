@@ -448,13 +448,51 @@ h3 {
   font-weight: 800;
 }
 
-.event-toolbar input {
+.event-filters {
+  display: grid;
+  grid-template-columns: minmax(110px, 0.7fr) minmax(110px, 0.7fr) minmax(220px, 1.4fr);
+  gap: 10px;
+  align-items: end;
+}
+
+.event-toolbar input,
+.event-toolbar select {
   min-height: 38px;
   border: 1px solid var(--line);
   border-radius: 6px;
   background: #ffffff;
   padding: 8px 10px;
   color: var(--text);
+}
+
+.event-summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 12px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.event-pagination {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.event-pagination button {
+  min-height: 32px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-muted);
+  color: var(--brand-dark);
+  padding: 5px 10px;
+  font-weight: 800;
+}
+
+.event-pagination button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 .copy-button {
@@ -660,8 +698,18 @@ code {
     display: grid;
   }
 
-  .event-toolbar label {
+  .event-toolbar label,
+  .event-filters {
     min-width: 0;
+  }
+
+  .event-filters {
+    grid-template-columns: 1fr;
+  }
+
+  .event-summary {
+    align-items: stretch;
+    display: grid;
   }
 
   .module-directory {
