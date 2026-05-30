@@ -33,6 +33,7 @@
 - 已完成：后台订单页支付事件表已切到 `GET /v1/admin/payment-events` 分页 API；管理员登录后读取分页数据，支持渠道筛选、processed/pending 状态筛选、搜索和上一页/下一页；未登录或 API 失败时继续显示 console 快照兜底。
 - 已完成：PostgreSQL 集成测试新增作用域清理 helper；`server/tests/helpers/postgresTestCleanup.mjs` 只允许 `pg_test_*_` 安全前缀，按测试用户名查找用户并删除 sessions、subscriptions、usage、orders、payment_events、credit_ledger、workspace_leases、referral、admin_audit_logs 等关联行；`server npm run test:postgres` 改为单并发，避免多个文件共享数据库时互相踩状态。
 - 已完成：支付宝沙箱维护期间，桌面端先补齐套餐能力边界；`src/core/billingPlans.js` 新增套餐能力矩阵、线上支付维护状态、任务启动余额/每日上限守卫和模板自定义上限规则；主进程导出预检、任务启动、代理设置和模板保存都会按当前套餐硬锁；渲染层同步展示当前套餐可用/不可用能力，额度页和账单页改为“支付维护中/联系开通”。
+- 已完成：当前套餐单价已调整为进阶版 0.40 元/成功添加、专业版 0.30 元/成功添加、商业版 0.20 元/成功添加；桌面端套餐源、服务端套餐源、PostgreSQL plans 种子、套餐文档和 website 下载清单已同步；最新 `dist\Add WhatsApp 0.1.2.exe` SHA256 为 `837d84b7272723a8541de6cc3d4175dcaff27354d77cd35a8a48ad67448cce9f`。
 - 进行中：真实支付宝代码接入已停在官方 SDK + 最小参数 + trade.query 排查接口状态；继续付款联调需等待支付宝沙箱环境恢复，或换新沙箱应用/生产环境再测。
 - 验证：`website\npm test` 通过 6/6；`website\npm run build` 成功；根项目 `npm test` 通过 77/77；本地 `http://localhost:3100` 桌面/移动端 Chrome headless 截图已复查，样式不再退化为裸 HTML；浏览器插件调试确认首屏只剩 1 个 WebGL canvas、无旧 `.globe-static` SVG 叠加、无 Server Error，地球 HUD 文案已删除，路线扩展到 20 条；下载页返回 200，`/downloads/latest/Add-WhatsApp.exe` HEAD 长度为 `77060652`。
 - 验证：`admin\npm test` 通过 5/5；本地 `http://127.0.0.1:3220/` 返回 200；管理台 JS 已包含 `ADD_WHATSAPP_API_URL`、`/v1/admin/console`、API 回退逻辑和运行时快照合并逻辑。
@@ -51,6 +52,7 @@
 - 验证：后台订单页切到支付事件分页 API 后，`admin\npm test` 通过 7/7；浏览器验证 `http://127.0.0.1:3220/#/orders` 登录管理员后请求 `/v1/admin/payment-events?limit=20&offset=0` 成功，桌面与 390px 移动宽度无 console error/warning 且无页面级横向溢出。
 - 验证：PostgreSQL 测试清理策略后，`server\npm test` 通过 23/23，根项目 `npm test` 通过 92/92；启动 `add-whatsapp-postgres` 后，带真实 `ADD_WHATSAPP_TEST_DATABASE_URL` 的 `server\npm run test:postgres` 通过 2/2。
 - 验证：套餐能力边界补齐后，先写失败测试再实现；`node --test tests\billingPlans.test.js tests\templateStore.test.js` 通过 13/13，根项目 `npm test` 通过 97/97，根项目 `npm run build` 成功生成 `dist\Add WhatsApp 0.1.2.exe`。
+- 验证：套餐单价调整后，`node --test tests\billingPlans.test.js server\tests\billing-service.test.mjs` 通过 19/19；根项目 `npm test` 通过 99/99；`server\npm test` 通过 23/23；`website\npm test` 通过 6/6；根项目 `npm run build` 成功，asar 抽查新价格 40/30/20 已进入打包产物。
 - 下一步：真实支付宝完整接入还需要商户 `app_id`、应用私钥、支付宝公钥、公网 HTTPS 域名和沙箱/生产订单创建联调。
 - 阻塞项：支付宝官方客服已确认沙箱环境当前有异常，开发侧正在处理且没有明确修复时间；当前沙箱 `alipay.trade.page.pay` 收银台出现 `SYSTEM_ERROR` / `504 Gateway Time-out`，随后 `alipay.trade.query` 返回 `ACQ.TRADE_NOT_EXIST`，说明交易未在支付宝侧创建成功。
 - 阻塞项：管理员登录方式、支付渠道/人工收款流程、生产域名和部署平台还未最终确定。

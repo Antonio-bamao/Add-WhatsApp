@@ -189,9 +189,9 @@ INSERT INTO plans (
   status
 ) VALUES
   ('free', '免费版', 'FREE', 0, 10, 1, 0, 1, 'active'),
-  ('advanced', '进阶版', 'PLUS', 30, 200, 2, 2000, 2, 'active'),
-  ('professional', '专业版', 'PRO', 20, 500, 3, 5000, 4, 'active'),
-  ('business', '商业版', 'ULTRA', 10, 1000, 5, 20000, 8, 'active')
+  ('advanced', '进阶版', 'PLUS', 40, 200, 2, 2000, 2, 'active'),
+  ('professional', '专业版', 'PRO', 30, 500, 3, 5000, 4, 'active'),
+  ('business', '商业版', 'ULTRA', 20, 1000, 5, 20000, 8, 'active')
 ON CONFLICT (id) DO UPDATE SET
   display_name = EXCLUDED.display_name,
   card_tier = EXCLUDED.card_tier,

@@ -319,3 +319,10 @@
 - 结果：dist\\Add WhatsApp 0.1.2.exe 已重新生成并同步到 website latest/release，包内已确认包含 44 秒下限、套餐 dailyLimit 默认值、模板池上限和按钮锁定逻辑。
 - 验证：根项目 npm test 通过 99/99；website npm test 通过 6/6；npm run build 成功；三个 EXE SHA256 均为 aa61e5953dc43efd6a8a47452ffc1e8f75360d33cfda6e1cdf780f9591df60c6；asar 抽查四项新逻辑均为 true。
 - 下一步：用户重新打开 dist\\Add WhatsApp 0.1.2.exe 验证模板页 Plus 只能保留/添加每语言 2 条，发送任务最小间隔不能低于 44 秒。
+
+## 2026-05-30T17:56:00+08:00｜调整付费套餐成功添加单价并重新打包
+- 目标：按用户要求将付费套餐单价改为 0.40、0.30、0.20。
+- 动作：更新桌面端套餐源、服务端套餐源、PostgreSQL plans 种子和套餐文档；补充桌面端与服务端测试断言；结束旧 Add WhatsApp 进程后重新 build；同步新 EXE 到 website latest/release 并更新 update.json。
+- 结果：进阶版显示 ¥0.40，专业版显示 ¥0.30，商业版显示 ¥0.20；dist\\Add WhatsApp 0.1.2.exe 已重新生成，网站下载包与 dist 包哈希一致。
+- 验证：node --test tests\\billingPlans.test.js server\\tests\\billing-service.test.mjs 通过 19/19；根项目 npm test 通过 99/99；server npm test 通过 23/23；website npm test 通过 6/6；npm run build 成功；asar 抽查 unitPriceCents 40/30/20 均为 true；三个 EXE SHA256 均为 837d84b7272723a8541de6cc3d4175dcaff27354d77cd35a8a48ad67448cce9f。
+- 下一步：打开 dist\\Add WhatsApp 0.1.2.exe 验证套餐页价格依次为 0.40、0.30、0.20。

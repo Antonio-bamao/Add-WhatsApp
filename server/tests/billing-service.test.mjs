@@ -10,6 +10,7 @@ import {
   createCloudStore,
   createOrder,
   getEntitlements,
+  PLAN_CATALOG,
   issueWorkspaceLease,
   markOrderPaid,
   processPaymentEvent,
@@ -51,6 +52,12 @@ describe("cloud billing service", () => {
     assert.match(schema, /advanced/);
     assert.match(schema, /professional/);
     assert.match(schema, /business/);
+    assert.equal(PLAN_CATALOG.advanced.unitPriceCents, 40);
+    assert.equal(PLAN_CATALOG.professional.unitPriceCents, 30);
+    assert.equal(PLAN_CATALOG.business.unitPriceCents, 20);
+    assert.match(schema, /\('advanced', '进阶版', 'PLUS', 40, 200, 2, 2000, 2, 'active'\)/);
+    assert.match(schema, /\('professional', '专业版', 'PRO', 30, 500, 3, 5000, 4, 'active'\)/);
+    assert.match(schema, /\('business', '商业版', 'ULTRA', 20, 1000, 5, 20000, 8, 'active'\)/);
     assert.match(schema, /INSERT INTO admin_users/i);
     assert.doesNotMatch(schema, /AdminPass123/);
   });
