@@ -111,7 +111,7 @@ describe("PostgreSQL billing runtime", { skip: !databaseUrl }, () => {
       assert.equal(alipayPayment.response.status, 200);
       assert.equal(alipayPayment.payload.orderId, order.payload.id);
       const signingText = Object.keys(alipayPayment.payload.params)
-        .filter((key) => key !== "sign" && key !== "sign_type")
+        .filter((key) => key !== "sign")
         .sort()
         .map((key) => `${key}=${alipayPayment.payload.params[key]}`)
         .join("&");

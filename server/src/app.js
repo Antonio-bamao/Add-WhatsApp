@@ -1,7 +1,7 @@
 import http from "node:http";
 import { createPostgresRuntime } from "./db/postgresRuntime.js";
 import { createMemoryRuntime } from "./services/billingService.js";
-import { buildAlipayPagePayRequest, parseAlipayNotification, parseMockAlipayNotification } from "./services/paymentProviders.js";
+import { buildAlipayPagePayRequest, parseAlipayNotification, parseMockAlipayNotification, queryAlipayTrade } from "./services/paymentProviders.js";
 
 function jsonResponse(response, statusCode, payload) {
   response.writeHead(statusCode, {
@@ -100,6 +100,17 @@ export function createAppServer(options = {}) {
         return;
       }
 
+      if (request.method === "GET" && /^\/v1\/admin\/alipay\/trades\/[^/]+\/query$/.test(url.pathname)) {
+        await authAdminId(runtime, request);
+        const orderNo = decodeURIComponent(url.pathname.split("/")[5]);
+        jsonResponse(response, 200, await queryAlipayTrade(orderNo, {
+          appId: env.ALIPAY_APP_ID,
+          appPrivateKey: env.ALIPAY_APP_PRIVATE_KEY,
+          gatewayUrl: env.ALIPAY_GATEWAY_URL
+        }));
+        return;
+      }
+
       if (request.method === "POST" && url.pathname === "/v1/auth/register") {
         const body = await readJson(request);
         const user = await runtime.registerUser(body);
@@ -150,6 +161,8 @@ export function createAppServer(options = {}) {
           notifyUrl: env.ALIPAY_NOTIFY_URL,
           returnUrl: env.ALIPAY_RETURN_URL,
           gatewayUrl: env.ALIPAY_GATEWAY_URL,
+          qrPayMode: env.ALIPAY_QR_PAY_MODE,
+          qrcodeWidth: env.ALIPAY_QRCODE_WIDTH,
           timestamp: env.ALIPAY_FIXED_TIMESTAMP
         }));
         return;

@@ -20,7 +20,7 @@ function signAlipayPayload(payload, privateKey) {
 
 function verifyAlipayRequestSignature(params, publicKey) {
   const signingText = Object.keys(params)
-    .filter((key) => key !== "sign" && key !== "sign_type")
+    .filter((key) => key !== "sign")
     .sort()
     .map((key) => `${key}=${params[key]}`)
     .join("&");
@@ -175,12 +175,16 @@ describe("payment provider adapters", () => {
     assert.equal(request.params.notify_url, "https://api.addwhatsapp.com/v1/payments/alipay/notify");
     assert.equal(request.params.return_url, "https://addwhatsapp.com/billing/success");
     assert.ok(request.paymentUrl.startsWith("https://openapi-sandbox.dl.alipaydev.com/gateway.do?"));
+    assert.match(request.paymentHtml, /<form action="https:\/\/openapi-sandbox\.dl\.alipaydev\.com\/gateway\.do\?method=alipay\.trade\.page\.pay/);
+    assert.match(request.paymentHtml, /document\.forms\["alipaySDKSubmit/);
     assert.equal(verifyAlipayRequestSignature(request.params, publicKey), true);
 
     const bizContent = JSON.parse(request.params.biz_content);
     assert.equal(bizContent.out_trade_no, "ADWA-000010");
     assert.equal(bizContent.total_amount, "600.00");
-    assert.equal(bizContent.subject, "Add WhatsApp advanced 2000 credits");
+    assert.equal(bizContent.subject, "test");
     assert.equal(bizContent.product_code, "FAST_INSTANT_TRADE_PAY");
+    assert.equal(bizContent.qr_pay_mode, "4");
+    assert.equal(bizContent.qrcode_width, 120);
   });
 });

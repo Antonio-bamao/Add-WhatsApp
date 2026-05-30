@@ -27,9 +27,13 @@
 - 已完成：真实支付宝 webhook 适配点已落地；`/v1/payments/alipay/notify` 支持表单 POST、`ALIPAY_PUBLIC_KEY` RSA2 验签、`ALIPAY_APP_ID` 校验，验签通过后映射统一支付事件并返回纯文本 `success`；新增 `docs/payment-production-checklist.md` 记录生产域名、notify_url、密钥和资金边界。
 - 已完成：新增 `GET /v1/admin/payment-events` 管理员接口，内存 runtime 和 PostgreSQL runtime 均支持 `provider`、`eventType`、`processed=processed|pending`、`q`、`limit`、`offset`，用于支付事件分页、状态筛选和运营排查。
 - 已完成：真实支付宝 page-pay 下单签名适配层已落地；`/v1/orders/:id/payments/alipay/page-pay` 会用用户 token 校验订单归属，从服务端订单行派生 `out_trade_no`、`total_amount`、`subject` 和 `biz_content`，再用 `ALIPAY_APP_PRIVATE_KEY` 做 RSA2 签名并返回 `paymentUrl`；内存 runtime 和 PostgreSQL runtime 均支持订单归属读取。
+- 已完成：支付宝 page-pay 下单侧已切换为官方 `alipay-sdk` 的 `AlipaySdk.pageExecute("alipay.trade.page.pay", ...)`；服务端会返回官方 SDK 生成的 `paymentUrl` 和 `paymentHtml`，并按私钥 PEM 头自动选择 `PKCS1/PKCS8` keyType，避免继续维护手写网关签名细节。
+- 已完成：支付宝沙箱联调增加最小参数模式和沙箱排查接口；沙箱测试订单号改为纯数字，`subject` 收紧为 `test`，保留 `FAST_INSTANT_TRADE_PAY`；新增管理员鉴权的 `GET /v1/admin/alipay/trades/:orderNo/query`，可通过官方 SDK 调 `alipay.trade.query` 查询支付宝侧真实交易状态。
+- 已完成：本机已搭建 cpolar 临时 HTTPS 穿透，`https://6597bbe8.r36.cpolar.top/v1/health` 可访问 PostgreSQL 模式 API，支付宝沙箱应用的“应用网关地址”已设置为 `https://6597bbe8.r36.cpolar.top/v1/payments/alipay/notify`。
 - 已完成：后台订单页支付事件表已切到 `GET /v1/admin/payment-events` 分页 API；管理员登录后读取分页数据，支持渠道筛选、processed/pending 状态筛选、搜索和上一页/下一页；未登录或 API 失败时继续显示 console 快照兜底。
 - 已完成：PostgreSQL 集成测试新增作用域清理 helper；`server/tests/helpers/postgresTestCleanup.mjs` 只允许 `pg_test_*_` 安全前缀，按测试用户名查找用户并删除 sessions、subscriptions、usage、orders、payment_events、credit_ledger、workspace_leases、referral、admin_audit_logs 等关联行；`server npm run test:postgres` 改为单并发，避免多个文件共享数据库时互相踩状态。
-- 进行中：下一步需要用真实支付宝沙箱应用、HTTPS notify_url 和支付宝公钥做外部联调。
+- 已完成：支付宝沙箱维护期间，桌面端先补齐套餐能力边界；`src/core/billingPlans.js` 新增套餐能力矩阵、线上支付维护状态、任务启动余额/每日上限守卫和模板自定义上限规则；主进程导出预检、任务启动、代理设置和模板保存都会按当前套餐硬锁；渲染层同步展示当前套餐可用/不可用能力，额度页和账单页改为“支付维护中/联系开通”。
+- 进行中：真实支付宝代码接入已停在官方 SDK + 最小参数 + trade.query 排查接口状态；继续付款联调需等待支付宝沙箱环境恢复，或换新沙箱应用/生产环境再测。
 - 验证：`website\npm test` 通过 6/6；`website\npm run build` 成功；根项目 `npm test` 通过 77/77；本地 `http://localhost:3100` 桌面/移动端 Chrome headless 截图已复查，样式不再退化为裸 HTML；浏览器插件调试确认首屏只剩 1 个 WebGL canvas、无旧 `.globe-static` SVG 叠加、无 Server Error，地球 HUD 文案已删除，路线扩展到 20 条；下载页返回 200，`/downloads/latest/Add-WhatsApp.exe` HEAD 长度为 `77060652`。
 - 验证：`admin\npm test` 通过 5/5；本地 `http://127.0.0.1:3220/` 返回 200；管理台 JS 已包含 `ADD_WHATSAPP_API_URL`、`/v1/admin/console`、API 回退逻辑和运行时快照合并逻辑。
 - 验证：后台拆页后，浏览器验证运营首页只显示 8 个模块入口且不渲染 8 个模块详情；`#/referrals` 只显示推荐审核模块详情，3 个详情区、3 条记录、无 console error/warning、无横向溢出。
@@ -46,5 +50,7 @@
 - 验证：支付宝 page-pay 下单签名适配层后，`server\npm test` 通过 23/23；真实 PostgreSQL `server\npm run test:postgres` 通过 1/1。
 - 验证：后台订单页切到支付事件分页 API 后，`admin\npm test` 通过 7/7；浏览器验证 `http://127.0.0.1:3220/#/orders` 登录管理员后请求 `/v1/admin/payment-events?limit=20&offset=0` 成功，桌面与 390px 移动宽度无 console error/warning 且无页面级横向溢出。
 - 验证：PostgreSQL 测试清理策略后，`server\npm test` 通过 23/23，根项目 `npm test` 通过 92/92；启动 `add-whatsapp-postgres` 后，带真实 `ADD_WHATSAPP_TEST_DATABASE_URL` 的 `server\npm run test:postgres` 通过 2/2。
+- 验证：套餐能力边界补齐后，先写失败测试再实现；`node --test tests\billingPlans.test.js tests\templateStore.test.js` 通过 13/13，根项目 `npm test` 通过 97/97，根项目 `npm run build` 成功生成 `dist\Add WhatsApp 0.1.2.exe`。
 - 下一步：真实支付宝完整接入还需要商户 `app_id`、应用私钥、支付宝公钥、公网 HTTPS 域名和沙箱/生产订单创建联调。
+- 阻塞项：支付宝官方客服已确认沙箱环境当前有异常，开发侧正在处理且没有明确修复时间；当前沙箱 `alipay.trade.page.pay` 收银台出现 `SYSTEM_ERROR` / `504 Gateway Time-out`，随后 `alipay.trade.query` 返回 `ACQ.TRADE_NOT_EXIST`，说明交易未在支付宝侧创建成功。
 - 阻塞项：管理员登录方式、支付渠道/人工收款流程、生产域名和部署平台还未最终确定。

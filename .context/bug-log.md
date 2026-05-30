@@ -22,3 +22,10 @@
 - 根因：Docker Desktop 进程已启动，但 Linux engine/Docker API 没有对当前 shell 就绪，项目容器 `add-whatsapp-postgres` 无法启动或访问。
 - 处理：尝试启动 Docker Desktop 并轮询 Docker API；Docker API 恢复后发现 `add-whatsapp-postgres` 容器处于 exited 状态，用 `docker start add-whatsapp-postgres` 启动容器；随后真实 `server npm run test:postgres` 通过 2/2。
 - 预防：以后运行真实 PostgreSQL 集成测试前，先执行 `docker ps` 和 `docker compose up -d`，确认 `add-whatsapp-postgres` 监听 `127.0.0.1:55433` 后再跑 `server\npm run test:postgres`。
+
+## 2026-05-29: 支付宝沙箱 page-pay 收银台 504 且交易未创建
+
+- 症状：支付宝沙箱 `alipay.trade.page.pay` 使用官方 SDK 生成 POST 表单后，打开沙箱收银台出现 `SYSTEM_ERROR` 或 `504 Gateway Time-out`；二维码模式能显示二维码，但沙箱 App 扫码提示系统繁忙；随后调用 `alipay.trade.query` 查询同一 `out_trade_no` 返回 `ACQ.TRADE_NOT_EXIST`。
+- 根因：本地接入侧已使用沙箱 APPID、沙箱网关、官方 `alipay-sdk`、POST `pageExecute`、最小必填参数和公网 `notify_url`；支付宝人工客服确认当前沙箱环境系统异常，开发侧正在处理，暂无明确恢复时间。因此当前阻塞属于支付宝沙箱环境/网关侧未成功创建交易，而不是本地回调或入账代码失败。
+- 处理：将下单签名从手写实现切到官方 SDK；补 `paymentHtml` POST 表单；把测试参数收紧为纯数字订单号、`subject=test`、`total_amount=0.01`；配置沙箱应用“应用网关地址”；新增管理员鉴权的 `alipay.trade.query` 排查接口；确认公网 API 可访问，且 query 返回的是支付宝业务响应而非本地网络错误。
+- 预防：以后遇到沙箱收银台泛化错误时，不再继续猜参数；优先用官方 SDK + 最小参数 + `trade.query` 判断支付宝侧是否创建交易，并记录 traceId 后交给支付宝客服。真实上线前必须在生产环境另行验收，因为沙箱文档明确沙箱并非 100% 等同生产环境。

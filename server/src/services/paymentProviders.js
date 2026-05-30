@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { AlipaySdk } from "alipay-sdk";
 
 function canonicalizePayload(payload) {
   return Object.keys(payload)
@@ -10,7 +11,7 @@ function canonicalizePayload(payload) {
 
 function canonicalizeAlipayPayload(payload) {
   return Object.keys(payload)
-    .filter((key) => key !== "sign" && key !== "sign_type")
+    .filter((key) => key !== "sign" && key !== "signature" && key !== "sign_type")
     .sort()
     .map((key) => `${key}=${String(payload[key] ?? "")}`)
     .join("&");
@@ -23,6 +24,12 @@ function formatAlipayTimestamp(date = new Date()) {
 
 function normalizePem(value) {
   return String(value || "").replaceAll("\\n", "\n");
+}
+
+function alipayKeyType(privateKey) {
+  return privateKey.includes("BEGIN PRIVATE KEY") && !privateKey.includes("BEGIN RSA PRIVATE KEY")
+    ? "PKCS8"
+    : "PKCS1";
 }
 
 function timingSafeEqualText(left, right) {
@@ -115,30 +122,59 @@ export function buildAlipayPagePayRequest(order, options = {}) {
   const bizContent = {
     out_trade_no: order.orderNo,
     total_amount: (amountCents / 100).toFixed(2),
-    subject: `Add WhatsApp ${order.planId} ${credits} credits`,
+    subject: options.subject || "test",
     product_code: "FAST_INSTANT_TRADE_PAY"
   };
-  const params = {
-    app_id: appId,
-    method: "alipay.trade.page.pay",
-    format: "JSON",
-    charset: "utf-8",
-    sign_type: "RSA2",
-    timestamp: options.timestamp || formatAlipayTimestamp(options.now ? new Date(options.now) : new Date()),
-    version: "1.0",
-    notify_url: notifyUrl,
-    biz_content: JSON.stringify(bizContent)
-  };
-  if (options.returnUrl) params.return_url = String(options.returnUrl);
+  if (options.qrPayMode !== "off" && (options.qrPayMode || gatewayUrl.includes("sandbox"))) {
+    bizContent.qr_pay_mode = String(options.qrPayMode || "4");
+    bizContent.qrcode_width = Number(options.qrcodeWidth || 120);
+  }
 
-  params.sign = crypto.sign("RSA-SHA256", Buffer.from(canonicalizeAlipayPayload(params)), appPrivateKey).toString("base64");
-  const query = new URLSearchParams(params);
+  const sdk = new AlipaySdk({
+    appId,
+    privateKey: appPrivateKey,
+    signType: "RSA2",
+    keyType: options.keyType || alipayKeyType(appPrivateKey),
+    gateway: gatewayUrl,
+    timeout: Number(options.timeout || 20000)
+  });
+  const pageParams = {
+    bizContent,
+    notifyUrl,
+    timestamp: options.timestamp || formatAlipayTimestamp(options.now ? new Date(options.now) : new Date())
+  };
+  if (options.returnUrl) pageParams.returnUrl = String(options.returnUrl);
+  const paymentUrl = sdk.pageExecute("alipay.trade.page.pay", "GET", pageParams);
+  const paymentHtml = sdk.pageExecute("alipay.trade.page.pay", "POST", pageParams);
+  const params = Object.fromEntries(new URL(paymentUrl).searchParams.entries());
+
   return {
     provider: "alipay",
     orderId: order.id,
     orderNo: order.orderNo,
     amountCents,
     params,
-    paymentUrl: `${gatewayUrl}?${query.toString()}`
+    paymentUrl,
+    paymentHtml
   };
+}
+
+export async function queryAlipayTrade(orderNo, options = {}) {
+  const appId = String(options.appId || "").trim();
+  const appPrivateKey = normalizePem(options.appPrivateKey);
+  const gatewayUrl = String(options.gatewayUrl || "https://openapi.alipay.com/gateway.do").trim();
+  if (!appId) throw new Error("ALIPAY_APP_ID_REQUIRED");
+  if (!appPrivateKey) throw new Error("ALIPAY_APP_PRIVATE_KEY_REQUIRED");
+  const sdk = new AlipaySdk({
+    appId,
+    privateKey: appPrivateKey,
+    signType: "RSA2",
+    keyType: options.keyType || alipayKeyType(appPrivateKey),
+    gateway: gatewayUrl
+  });
+  return sdk.exec("alipay.trade.query", {
+    bizContent: {
+      out_trade_no: String(orderNo)
+    }
+  });
 }

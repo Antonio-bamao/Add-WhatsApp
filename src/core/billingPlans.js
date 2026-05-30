@@ -1,4 +1,5 @@
 const DAY_MS = 24 * 60 * 60 * 1000;
+const PAYMENT_MAINTENANCE_MESSAGE = '支付宝沙盒官方异常修复中，线上支付暂不可用。请先走人工开通或联系运营处理。';
 
 const PLANS = [
   {
@@ -12,6 +13,18 @@ const PLANS = [
     dailyLimit: 10,
     workspaceLimit: 1,
     templateLimit: 3,
+    capabilities: {
+      importPreview: true,
+      exportPreview: false,
+      sendTask: true,
+      historyReports: true,
+      crossDeviceSync: true,
+      secondaryWorkspace: false,
+      proxySettings: false,
+      customTemplates: true,
+      onlinePayment: false,
+      workspaceExpansionReview: false
+    },
     features: ['表格预检详情', '默认文案模板', '历史报表实时监控添加进度', '跨设备同步']
   },
   {
@@ -25,6 +38,18 @@ const PLANS = [
     dailyLimit: 200,
     workspaceLimit: 2,
     templateLimit: 2,
+    capabilities: {
+      importPreview: true,
+      exportPreview: true,
+      sendTask: true,
+      historyReports: true,
+      crossDeviceSync: true,
+      secondaryWorkspace: true,
+      proxySettings: true,
+      customTemplates: true,
+      onlinePayment: false,
+      workspaceExpansionReview: false
+    },
     features: ['包含免费版的全部功能', '导出预检', '新建工作台多账号添加 X2', '代理 IP 设置', '自定义文案模板 X2']
   },
   {
@@ -39,6 +64,18 @@ const PLANS = [
     workspaceLimit: 3,
     templateLimit: 4,
     recommended: true,
+    capabilities: {
+      importPreview: true,
+      exportPreview: true,
+      sendTask: true,
+      historyReports: true,
+      crossDeviceSync: true,
+      secondaryWorkspace: true,
+      proxySettings: true,
+      customTemplates: true,
+      onlinePayment: false,
+      workspaceExpansionReview: false
+    },
     features: ['包含进阶版的全部功能', '新建工作台多账号添加 X3', '自定义文案模板 X4']
   },
   {
@@ -52,19 +89,39 @@ const PLANS = [
     dailyLimit: 1000,
     workspaceLimit: 5,
     templateLimit: null,
+    capabilities: {
+      importPreview: true,
+      exportPreview: true,
+      sendTask: true,
+      historyReports: true,
+      crossDeviceSync: true,
+      secondaryWorkspace: true,
+      proxySettings: true,
+      customTemplates: true,
+      onlinePayment: false,
+      workspaceExpansionReview: true
+    },
     features: ['包含专业版的全部功能', '默认支持 5 个工作台，可申请扩容', '自定义文案模板不限']
   }
 ];
 
 const DEFAULT_PLAN_ID = 'advanced';
 
+function clonePlan(plan) {
+  return {
+    ...plan,
+    capabilities: { ...(plan.capabilities || {}) },
+    features: [...plan.features]
+  };
+}
+
 function planCatalog() {
-  return PLANS.map(plan => ({ ...plan, features: [...plan.features] }));
+  return PLANS.map(clonePlan);
 }
 
 function getPlan(planId = DEFAULT_PLAN_ID) {
   const plan = PLANS.find(item => item.id === planId) || PLANS.find(item => item.id === DEFAULT_PLAN_ID);
-  return { ...plan, features: [...plan.features] };
+  return clonePlan(plan);
 }
 
 function nextLocalMidnight(now = new Date()) {
@@ -83,6 +140,7 @@ function createEntitlementState(planId = DEFAULT_PLAN_ID, usage = {}) {
   const monthlyLimit = Math.max(plan.dailyLimit, Number(usage.monthlyLimit || plan.dailyLimit * 30));
   return {
     plan,
+    capabilities: { ...plan.capabilities },
     balanceCredits,
     usedToday,
     usedThisMonth,
@@ -91,6 +149,73 @@ function createEntitlementState(planId = DEFAULT_PLAN_ID, usage = {}) {
     availableNow,
     nextResetAt: usage.nextResetAt || nextLocalMidnight(usage.now || new Date()),
     resetPolicy: '每日上限按本机账号时区 00:00 重置，未使用账户余额长期保留。'
+  };
+}
+
+function planFrom(value) {
+  if (value && value.plan) return value.plan;
+  if (value && value.id) return value;
+  return getPlan();
+}
+
+function resolveFeatureAccess(entitlementOrPlan, feature) {
+  const plan = planFrom(entitlementOrPlan);
+  if (feature === 'onlinePayment') {
+    return {
+      ok: false,
+      reason: 'PAYMENT_MAINTENANCE',
+      message: PAYMENT_MAINTENANCE_MESSAGE
+    };
+  }
+  if (plan.capabilities && plan.capabilities[feature]) return { ok: true };
+  const labels = {
+    exportPreview: '导出预检属于进阶版及以上功能',
+    secondaryWorkspace: '新建工作台属于进阶版及以上功能',
+    proxySettings: '代理 IP 设置属于进阶版及以上功能',
+    customTemplates: '自定义文案模板属于当前套餐可用功能'
+  };
+  return {
+    ok: false,
+    reason: 'PLAN_LOCKED',
+    message: `${labels[feature] || '该功能'}，当前${plan.name}不可用。`
+  };
+}
+
+function resolveTaskStartAccess(entitlement) {
+  const state = entitlement && entitlement.plan ? entitlement : createEntitlementState();
+  const plan = state.plan;
+  const dailyRemaining = Math.max(0, Number(state.dailyRemaining || 0));
+  const availableNow = Math.max(0, Number(state.availableNow || 0));
+  const balanceCredits = Math.max(0, Number(state.balanceCredits || 0));
+  if (plan.unitPriceCents > 0 && balanceCredits <= 0) {
+    return {
+      ok: false,
+      reason: 'NO_BALANCE',
+      message: `当前${plan.name}账户余额为 0，不能开始新的成功添加任务。请联系开通或等待人工充值。`
+    };
+  }
+  if (dailyRemaining <= 0 || availableNow <= 0) {
+    return {
+      ok: false,
+      reason: 'DAILY_LIMIT_REACHED',
+      message: `当前${plan.name}今日可用上限已用完，请等服务器 00:00 重置后继续。`
+    };
+  }
+  return { ok: true };
+}
+
+function resolveTemplateAccess(entitlementOrPlan, { customCount = 0 } = {}) {
+  const plan = planFrom(entitlementOrPlan);
+  const limit = plan.templateLimit;
+  if (limit === null || limit === undefined) return { ok: true, remaining: null };
+  const count = Math.max(0, Number(customCount) || 0);
+  const remaining = Math.max(0, limit - count);
+  if (count <= limit) return { ok: true, remaining };
+  return {
+    ok: false,
+    remaining: 0,
+    reason: 'TEMPLATE_LIMIT_REACHED',
+    message: `当前${plan.name}最多保存 ${limit} 条自定义文案模板，请删除多余文案或升级套餐。`
   };
 }
 
@@ -103,6 +228,8 @@ function resolveTaskDailyLimit(entitlement, requestedLimit) {
 
 function canOpenSecondaryWorkspace(entitlement, openSecondaryCount = 0) {
   const plan = entitlement && entitlement.plan ? entitlement.plan : getPlan();
+  const access = resolveFeatureAccess(plan, 'secondaryWorkspace');
+  if (!access.ok) return { ok: false, remaining: 0, error: access.message };
   const allowedSecondary = Math.max(0, plan.workspaceLimit - 1);
   const remaining = Math.max(0, allowedSecondary - openSecondaryCount);
   if (remaining <= 0) {
@@ -144,10 +271,14 @@ function usageSummary(entitlement) {
 module.exports = {
   DEFAULT_PLAN_ID,
   DAY_MS,
+  PAYMENT_MAINTENANCE_MESSAGE,
   canOpenSecondaryWorkspace,
   createEntitlementState,
   getPlan,
   planCatalog,
+  resolveFeatureAccess,
   resolveTaskDailyLimit,
+  resolveTaskStartAccess,
+  resolveTemplateAccess,
   usageSummary
 };

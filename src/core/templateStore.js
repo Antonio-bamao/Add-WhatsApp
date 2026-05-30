@@ -36,6 +36,19 @@ function cleanTemplates(value) {
   return result;
 }
 
+function countCustomTemplates(value) {
+  let count = 0;
+  for (const language of ['en', 'es', 'fr']) {
+    const defaults = new Set(DEFAULT_TEMPLATES[language]);
+    const pool = Array.isArray(value && value[language]) ? value[language] : [];
+    for (const item of pool) {
+      const template = String(item).trim();
+      if (template && !defaults.has(template)) count += 1;
+    }
+  }
+  return count;
+}
+
 class JsonTemplateStore {
   constructor(filePath) {
     this.filePath = filePath;
@@ -61,5 +74,6 @@ class JsonTemplateStore {
 module.exports = {
   DEFAULT_TEMPLATES,
   JsonTemplateStore,
+  countCustomTemplates,
   cleanTemplates
 };

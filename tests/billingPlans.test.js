@@ -6,7 +6,10 @@ const {
   createEntitlementState,
   getPlan,
   planCatalog,
+  resolveFeatureAccess,
+  resolveTaskStartAccess,
   resolveTaskDailyLimit,
+  resolveTemplateAccess,
   usageSummary
 } = require('../src/core/billingPlans');
 
@@ -35,6 +38,22 @@ test('defines the public pricing catalog from the approved package design', () =
   assert.equal(getPlan('business').minimumTopUpCredits, 20000);
   assert.equal(getPlan('business').dailyLimit, 1000);
   assert.equal(getPlan('business').workspaceLimit, 5);
+  assert.equal(getPlan('business').templateLimit, null);
+});
+
+test('exposes package capability boundaries for lockable desktop features', () => {
+  const free = getPlan('free');
+  const advanced = getPlan('advanced');
+  const business = getPlan('business');
+
+  assert.equal(free.capabilities.exportPreview, false);
+  assert.equal(free.capabilities.secondaryWorkspace, false);
+  assert.equal(free.capabilities.proxySettings, false);
+  assert.equal(free.capabilities.onlinePayment, false);
+  assert.equal(advanced.capabilities.exportPreview, true);
+  assert.equal(advanced.capabilities.secondaryWorkspace, true);
+  assert.equal(advanced.capabilities.proxySettings, true);
+  assert.equal(business.capabilities.workspaceExpansionReview, true);
 });
 
 test('keeps account balance separate from daily throttling limits', () => {
@@ -55,6 +74,64 @@ test('caps requested task limits by the active package daily limit', () => {
   assert.equal(resolveTaskDailyLimit(advanced, 80), 80);
   assert.equal(resolveTaskDailyLimit(advanced, 500), 200);
   assert.equal(resolveTaskDailyLimit(advanced, 0), 200);
+});
+
+test('blocks paid tasks when there is no balance or daily allowance', () => {
+  const noBalance = createEntitlementState('advanced', {
+    balanceCredits: 0,
+    usedToday: 0
+  });
+  const dailyUsed = createEntitlementState('professional', {
+    balanceCredits: 100,
+    usedToday: 500
+  });
+  const free = createEntitlementState('free', {
+    balanceCredits: 0,
+    usedToday: 9
+  });
+
+  assert.deepEqual(resolveTaskStartAccess(noBalance), {
+    ok: false,
+    reason: 'NO_BALANCE',
+    message: '当前进阶版账户余额为 0，不能开始新的成功添加任务。请联系开通或等待人工充值。'
+  });
+  assert.deepEqual(resolveTaskStartAccess(dailyUsed), {
+    ok: false,
+    reason: 'DAILY_LIMIT_REACHED',
+    message: '当前专业版今日可用上限已用完，请等服务器 00:00 重置后继续。'
+  });
+  assert.deepEqual(resolveTaskStartAccess(free), { ok: true });
+});
+
+test('returns clear locked messages for features outside the active package', () => {
+  const free = createEntitlementState('free');
+  const advanced = createEntitlementState('advanced');
+
+  assert.deepEqual(resolveFeatureAccess(free, 'exportPreview'), {
+    ok: false,
+    reason: 'PLAN_LOCKED',
+    message: '导出预检属于进阶版及以上功能，当前免费版不可用。'
+  });
+  assert.deepEqual(resolveFeatureAccess(advanced, 'exportPreview'), { ok: true });
+  assert.deepEqual(resolveFeatureAccess(advanced, 'onlinePayment'), {
+    ok: false,
+    reason: 'PAYMENT_MAINTENANCE',
+    message: '支付宝沙盒官方异常修复中，线上支付暂不可用。请先走人工开通或联系运营处理。'
+  });
+});
+
+test('limits custom templates by package while preserving default templates', () => {
+  const advanced = createEntitlementState('advanced');
+  const business = createEntitlementState('business');
+
+  assert.deepEqual(resolveTemplateAccess(advanced, { customCount: 2 }), { ok: true, remaining: 0 });
+  assert.deepEqual(resolveTemplateAccess(advanced, { customCount: 3 }), {
+    ok: false,
+    remaining: 0,
+    reason: 'TEMPLATE_LIMIT_REACHED',
+    message: '当前进阶版最多保存 2 条自定义文案模板，请删除多余文案或升级套餐。'
+  });
+  assert.deepEqual(resolveTemplateAccess(business, { customCount: 100 }), { ok: true, remaining: null });
 });
 
 test('limits secondary workspace launches by the active package', () => {

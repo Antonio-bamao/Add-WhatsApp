@@ -273,3 +273,21 @@
 - 结果：PostgreSQL 测试现在有明确的测试数据作用域和清理顺序，不再依赖 Date.now 用户长期堆在共享本地库里。
 - 验证：先写缺失 helper 的失败测试；实现后 `server npm test` 23/23 通过，根项目 `npm test` 92/92 通过；启动 `add-whatsapp-postgres` 后，真实 `server npm run test:postgres` 通过 2/2。
 - 下一步：继续真实支付宝沙箱联调准备。
+
+## 2026-05-29T20:55:00+08:00｜支付宝沙箱电脑网站支付联调排查
+- 目标：用支付宝沙箱应用验证 `alipay.trade.page.pay` 电脑网站支付从下单、收银台、异步通知到幂等入账的真实闭环。
+- 动作：配置沙箱 APPID `9021000164625333`、沙箱网关 `https://openapi-sandbox.dl.alipaydev.com/gateway.do`、支付宝公钥和应用私钥；用 cpolar 暴露本地 API 到 `https://6597bbe8.r36.cpolar.top`；设置 `ALIPAY_NOTIFY_URL` 和沙箱应用“应用网关地址”为 `/v1/payments/alipay/notify`；确认本地和公网 `/v1/health` 均返回 `mode: postgres`。
+- 动作：将 page-pay 下单侧从手写签名切到官方 `alipay-sdk` 的 `AlipaySdk.pageExecute("alipay.trade.page.pay", ...)`；新增返回 `paymentHtml` 的 POST 自动提交表单；按私钥 PEM 头自动选择 `PKCS1/PKCS8` keyType；把沙箱测试参数收紧为纯数字 `out_trade_no`、`total_amount=0.01`、`subject=test`、`product_code=FAST_INSTANT_TRADE_PAY`。
+- 动作：补管理员鉴权的 `GET /v1/admin/alipay/trades/:orderNo/query`，通过官方 SDK 调 `alipay.trade.query` 查询支付宝侧订单状态；修正查询路由一度把订单号取成 `trades` 的路径索引 bug，并把 SDK 请求超时从默认 5 秒调到 20 秒。
+- 结果：本地服务端代码侧已形成官方 SDK + 最小参数 + POST form + trade.query 排查能力；公网回调地址可访问，支付宝沙箱收银台能进入二维码页，但扫码后沙箱 App 提示系统繁忙；PC 登录支付和最小参数 POST 表单仍出现 `SYSTEM_ERROR` 或 `504 Gateway Time-out`。
+- 结果：`alipay.trade.query` 查询订单 `1780057649205` 和 `1780058889665` 均返回 `ACQ.TRADE_NOT_EXIST`，traceId 分别为 `06020e08178005840987424779963` 和 `060108ce178005897721617306789`；说明支付宝侧没有成功创建交易，回调和本地入账尚未被触发。
+- 外部反馈：支付宝人工客服确认“沙箱环境系统有点异常，开发侧也在处理，目前没有具体时间，处理完成后会在工单内同步”。
+- 验证：多轮修改后均执行 `server npm test`，当前通过 23/23；公网 `https://6597bbe8.r36.cpolar.top/v1/health` 返回 200 且 `mode: postgres`；trade.query 能正常拿到支付宝沙箱业务响应。
+- 下一步：暂不继续改支付参数；等待支付宝沙箱恢复或更换沙箱应用后，用现有 POST 表单重新生成新订单验证；若恢复后仍失败，再带 traceId 和最小参数继续向支付宝客服追踪。
+
+## 2026-05-29T22:15:00+08:00｜支付宝沙箱维护期间补桌面端套餐功能边界
+- 目标：支付宝沙箱维护期间补桌面端套餐功能边界
+- 动作：新增套餐能力矩阵、任务启动余额/每日上限守卫、导出/工作台/代理/模板保存锁定和支付维护提示；渲染层同步展示当前套餐可用与不可用能力。
+- 结果：桌面端在支付暂不可用时仍能按套餐限制功能：免费版锁导出/新工作台/代理，付费套餐按余额与今日剩余控制任务，自定义模板按套餐上限保存，线上支付统一显示维护中。
+- 验证：先写失败测试后实现；node --test tests\\billingPlans.test.js tests\\templateStore.test.js 通过 13/13；npm test 通过 97/97；npm run build 成功生成 dist\\Add WhatsApp 0.1.2.exe。
+- 下一步：如果支付宝沙箱恢复，再继续用现有 page-pay POST 表单和 trade.query 做真实支付闭环；否则先走人工开通/调账流程。

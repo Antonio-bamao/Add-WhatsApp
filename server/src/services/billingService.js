@@ -422,7 +422,7 @@ export function createOrder(store, { userId, planId, credits, amountCents }) {
   const plan = getPlan(planId);
   const order = {
     id: createId("order"),
-    orderNo: `ADWA-${String(store.orders.size + 1).padStart(6, "0")}`,
+    orderNo: `${String(store.orders.size + 1).padStart(12, "0")}`,
     userId,
     planId: plan.id,
     credits: Number(credits),

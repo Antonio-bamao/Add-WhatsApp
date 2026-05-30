@@ -536,7 +536,7 @@ export function createPostgresRuntime({ databaseUrl, pool } = {}) {
         const plan = await getPlan(client, planId);
         const order = {
           id: createId("order"),
-          orderNo: `ADWA-${Date.now()}`,
+          orderNo: `${Date.now()}`,
           userId,
           planId: plan.id,
           credits: Number(credits),

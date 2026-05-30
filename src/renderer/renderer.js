@@ -145,6 +145,7 @@ const elements = {
 
 const PAGE_ACTIONS = new Set(['importPage']);
 const IMPORT_OPTIONS_STORAGE_KEY = 'addWhatsapp.importOptions';
+const PAYMENT_MAINTENANCE_MESSAGE = '支付宝沙盒官方异常修复中，线上支付暂不可用。请先走人工开通或联系运营处理。';
 const TEMPLATE_META = {
   en: { title: '英语模板', description: '英语区号码随机选择这些文案。', badge: 'EN' },
   es: { title: '西班牙语模板', description: '西班牙、墨西哥和拉美号码随机选择这些文案。', badge: 'ES' },
@@ -288,6 +289,7 @@ function renderSubscriptionState(subscription) {
     }
   }
   updateWorkspaceButtonState();
+  updateActionLocks();
 }
 
 function renderMembershipCard(plan) {
@@ -346,33 +348,100 @@ function renderUsageLedger(subscription) {
 
 function renderBillingFeatureLists(plan) {
   if (!elements.billingIncludedList || !elements.billingExcludedList) return;
-  const included = [
-    `${formatCredits(plan.dailyLimit)} 每日可用额度`,
+  const included = planIncludedFeatures(plan);
+  const excluded = planExcludedFeatures(plan);
+  elements.billingIncludedList.innerHTML = included.map(item => `<span class="feature-ok">${escapeHtml(item)}</span>`).join('');
+  elements.billingExcludedList.innerHTML = excluded.map(item => `<span class="feature-no">${escapeHtml(item)}</span>`).join('');
+}
+
+function planIncludedFeatures(plan = {}) {
+  const capabilities = plan.capabilities || {};
+  const features = [
+    `${formatCredits(plan.dailyLimit)} 每日可用上限`,
     `${formatCredits(plan.workspaceLimit)} 个工作台`,
     plan.templateLimit ? `自定义文案模板 X${plan.templateLimit}` : '自定义文案模板不限',
     '导入预检和历史报表'
   ];
-  const excluded = [
-    '线上自动支付',
-    '自动发票',
-    '云端同步账号',
-    '企业人工扩容'
-  ];
-  elements.billingIncludedList.innerHTML = included.map(item => `<span class="feature-ok">${escapeHtml(item)}</span>`).join('');
-  elements.billingExcludedList.innerHTML = excluded.map(item => `<span class="feature-no">${escapeHtml(item)}</span>`).join('');
+  if (capabilities.exportPreview) features.push('导出预检报表');
+  if (capabilities.secondaryWorkspace) features.push('新建独立工作台');
+  if (capabilities.proxySettings) features.push('第二工作台代理 IP 设置');
+  if (capabilities.workspaceExpansionReview) features.push('工作台扩容可人工审核');
+  return features;
+}
+
+function planExcludedFeatures(plan = {}) {
+  const capabilities = plan.capabilities || {};
+  const excluded = [];
+  if (!capabilities.exportPreview) excluded.push('导出预检报表');
+  if (!capabilities.secondaryWorkspace) excluded.push('新建独立工作台');
+  if (!capabilities.proxySettings) excluded.push('代理 IP 设置');
+  if (plan.templateLimit) excluded.push(`超过 ${formatCredits(plan.templateLimit)} 条自定义文案模板`);
+  if (plan.id === 'business') excluded.push('第 6 个及以上工作台需人工审核扩容');
+  excluded.push('线上自动支付（支付宝沙盒维护中）');
+  excluded.push('自动发票');
+  return excluded;
+}
+
+function featureAccess(feature) {
+  const plan = state.subscription && state.subscription.plan ? state.subscription.plan : {};
+  if (feature === 'onlinePayment') {
+    return { ok: false, message: PAYMENT_MAINTENANCE_MESSAGE };
+  }
+  if (plan.capabilities && plan.capabilities[feature]) return { ok: true };
+  const labels = {
+    exportPreview: '导出预检属于进阶版及以上功能',
+    secondaryWorkspace: '新建工作台属于进阶版及以上功能',
+    proxySettings: '代理 IP 设置属于进阶版及以上功能'
+  };
+  return {
+    ok: false,
+    message: `${labels[feature] || '该功能'}，当前${plan.name || '套餐'}不可用。`
+  };
+}
+
+function taskStartAccess() {
+  const subscription = state.subscription || {};
+  const plan = subscription.plan || {};
+  if (plan.unitPriceCents > 0 && Number(subscription.balanceCredits || 0) <= 0) {
+    return { ok: false, message: `当前${plan.name}账户余额为 0，不能开始新的成功添加任务。请联系开通或等待人工充值。` };
+  }
+  if (Number(subscription.availableNow || 0) <= 0 || Number(subscription.dailyRemaining || 0) <= 0) {
+    return { ok: false, message: `当前${plan.name}今日可用上限已用完，请等服务器 00:00 重置后继续。` };
+  }
+  return { ok: true };
+}
+
+function updateActionLocks() {
+  if (elements.exportButton) {
+    const exportAccess = featureAccess('exportPreview');
+    elements.exportButton.disabled = !state.imported || !exportAccess.ok;
+    elements.exportButton.title = exportAccess.ok ? '' : exportAccess.message;
+  }
+  if (elements.runButton) {
+    const validCount = state.imported && state.imported.stats ? Number(state.imported.stats.valid || 0) : 0;
+    const taskAccess = taskStartAccess();
+    elements.runButton.disabled = !state.imported || validCount <= 0 || !taskAccess.ok;
+    elements.runButton.title = taskAccess.ok ? '' : taskAccess.message;
+  }
 }
 
 function updateWorkspaceButtonState() {
   if (!elements.openWorkspaceButton || !state.subscription) return;
   const plan = state.subscription.plan || {};
+  const workspaceAccess = featureAccess('secondaryWorkspace');
   const isSecondaryWorkspace = Boolean(state.auth.workspace && state.auth.workspace.isSecondary);
   const totalOpen = 1 + Number(state.subscription.openSecondaryCount || 0);
-  const blocked = !isSecondaryWorkspace && plan.workspaceLimit && totalOpen >= plan.workspaceLimit;
+  const blocked = !isSecondaryWorkspace && (!workspaceAccess.ok || (plan.workspaceLimit && totalOpen >= plan.workspaceLimit));
   elements.openWorkspaceButton.disabled = Boolean(blocked);
-  if (blocked) {
+  if (!workspaceAccess.ok) {
+    elements.openWorkspaceButton.textContent = '进阶版解锁新工作台';
+    elements.openWorkspaceButton.title = workspaceAccess.message;
+  } else if (blocked) {
     elements.openWorkspaceButton.textContent = `已达到${plan.name}工作台上限`;
+    elements.openWorkspaceButton.title = `当前${plan.name}最多同时使用 ${plan.workspaceLimit} 个工作台。`;
   } else {
     elements.openWorkspaceButton.textContent = '新建工作台 / 打开另一个账号';
+    elements.openWorkspaceButton.title = '';
   }
 }
 
@@ -504,6 +573,11 @@ async function logoutCloudAccount() {
 }
 
 function showWorkspaceRiskModal() {
+  const access = featureAccess('secondaryWorkspace');
+  if (!access.ok) {
+    elements.syncState.textContent = access.message;
+    return;
+  }
   elements.workspaceRiskModal.hidden = false;
   elements.workspaceRiskConfirmButton.focus();
 }
@@ -571,6 +645,11 @@ function fillProxyForm(proxy) {
 }
 
 async function showProxySettings() {
+  const access = featureAccess('proxySettings');
+  if (!access.ok) {
+    elements.syncState.textContent = access.message;
+    return;
+  }
   const response = await window.addWhatsapp.getProxySettings();
   if (response.ok) {
     fillProxyForm(response.proxy);
@@ -837,10 +916,9 @@ function applyImportedData(data) {
   renderStats(data.stats);
   renderRows(data.rows);
   renderProgressSummary(data.progress);
-  elements.exportButton.disabled = false;
-  elements.runButton.disabled = (data.stats.valid || 0) === 0;
   elements.fileMeta.textContent = `当前文件：${data.fileName}；电话列：${data.columns.phoneColumn || '未识别'}；国家列：${data.columns.countryColumn || '未识别'}`;
   elements.tableState.textContent = `已解析 ${data.rows.length} 行`;
+  updateActionLocks();
 }
 
 async function refreshCurrentProgress() {
@@ -852,12 +930,19 @@ async function refreshCurrentProgress() {
 
 async function exportReport() {
   if (!state.imported) return;
+  const access = featureAccess('exportPreview');
+  if (!access.ok) {
+    elements.tableState.textContent = access.message;
+    return;
+  }
   elements.exportButton.disabled = true;
   const response = await window.addWhatsapp.exportReport(state.imported.rows);
-  elements.exportButton.disabled = false;
+  updateActionLocks();
 
   if (!response.canceled && response.filePath) {
     elements.tableState.textContent = '报表已导出';
+  } else if (response.error) {
+    elements.tableState.textContent = response.error;
   }
 }
 
@@ -944,7 +1029,7 @@ function handleTaskEvent(event) {
   if (event.type === 'task:finished' || event.type === 'task:error') {
     elements.taskState.textContent = event.type === 'task:error' ? '出错' : '已结束';
     elements.taskStateMetric.textContent = event.type === 'task:error' ? '出错' : '已结束';
-    elements.runButton.disabled = !state.imported;
+    updateActionLocks();
     elements.stopButton.disabled = true;
     refreshCurrentProgress();
   }
@@ -953,6 +1038,12 @@ function handleTaskEvent(event) {
 async function startTask() {
   if (!state.imported) {
     addLog('请先导入表格。', 'error');
+    return;
+  }
+  const access = taskStartAccess();
+  if (!access.ok) {
+    addLog(access.message, 'error');
+    updateActionLocks();
     return;
   }
   const minDelay = Number(elements.delayMinInput.value || 22);
@@ -970,7 +1061,7 @@ async function startTask() {
   if (!response.started) {
     elements.taskState.textContent = '未开始';
     elements.taskStateMetric.textContent = '待机';
-    elements.runButton.disabled = false;
+    updateActionLocks();
     addLog(response.error || '任务启动失败。', 'error');
     return;
   }
@@ -1084,12 +1175,17 @@ async function loadTemplates() {
 }
 
 async function saveTemplates() {
-  const saved = await window.addWhatsapp.saveTemplates({
+  const response = await window.addWhatsapp.saveTemplates({
     en: templateLines('en'),
     es: templateLines('es'),
     fr: templateLines('fr')
   });
-  renderTemplates(saved);
+  if (!response.ok) {
+    elements.templateSaveState.textContent = response.error || '模板保存失败';
+    addLog(response.error || '模板保存失败。', 'error');
+    return;
+  }
+  renderTemplates(response.templates);
   elements.templateSaveState.textContent = '已保存';
 }
 

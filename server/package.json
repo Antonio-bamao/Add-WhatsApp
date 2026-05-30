@@ -11,6 +11,7 @@
     "test:postgres": "node --test --test-concurrency=1 tests/postgres-*.test.mjs"
   },
   "dependencies": {
+    "alipay-sdk": "^4.14.0",
     "pg": "^8.21.0"
   }
 }

@@ -333,7 +333,7 @@ describe("cloud API skeleton", () => {
       assert.equal(payment.payload.params.biz_content.includes(privateKey), false);
 
       const signingText = Object.keys(payment.payload.params)
-        .filter((key) => key !== "sign" && key !== "sign_type")
+        .filter((key) => key !== "sign")
         .sort()
         .map((key) => `${key}=${payment.payload.params[key]}`)
         .join("&");

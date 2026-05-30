@@ -14,13 +14,16 @@ const { sourceIdentityFor } = require('../core/progressIdentity');
 const { migrateLegacyUserData } = require('../core/legacyMigration');
 const { runSendTask } = require('../core/taskRunner');
 const { selectNewlySentRows } = require('../core/taskBilling');
-const { JsonTemplateStore } = require('../core/templateStore');
+const { JsonTemplateStore, countCustomTemplates } = require('../core/templateStore');
 const { JsonHistoryStore } = require('../core/historyStore');
 const {
   canOpenSecondaryWorkspace,
   createEntitlementState,
   planCatalog,
+  resolveFeatureAccess,
   resolveTaskDailyLimit,
+  resolveTaskStartAccess,
+  resolveTemplateAccess,
   usageSummary
 } = require('../core/billingPlans');
 const { CloudApiClient, DEFAULT_API_BASE_URL, mapCloudEntitlements } = require('../core/cloudApiClient');
@@ -563,6 +566,12 @@ function requireSecondaryWorkspace() {
   if (!workspaceId) throw new Error('主工作台默认使用当前电脑/VPN 网络，不提供 IP 代理设置。');
 }
 
+function requirePlanFeature(feature) {
+  const access = resolveFeatureAccess(subscriptionState, feature);
+  if (!access.ok) throw new Error(access.message);
+  return access;
+}
+
 async function probeSocks5Proxy(settings) {
   const result = await testSocks5Proxy(settings);
   const exitIp = await lookupExitIpViaSocks5(settings);
@@ -635,6 +644,7 @@ function stopProxyMonitorForRunningTask() {
 ipcMain.handle('proxy:get', async () => {
   try {
     requireSecondaryWorkspace();
+    requirePlanFeature('proxySettings');
     return { ok: true, proxy: publicProxySettings(proxySettingsStore.load()) };
   } catch (error) {
     return { ok: false, error: error.message };
@@ -644,6 +654,7 @@ ipcMain.handle('proxy:get', async () => {
 ipcMain.handle('proxy:test', async (_event, payload = {}) => {
   try {
     requireSecondaryWorkspace();
+    requirePlanFeature('proxySettings');
     const settings = normalizeProxySettings(payload);
     const result = await probeSocks5Proxy(settings);
     return { ok: true, result };
@@ -655,6 +666,7 @@ ipcMain.handle('proxy:test', async (_event, payload = {}) => {
 ipcMain.handle('proxy:save', async (_event, payload = {}) => {
   try {
     requireSecondaryWorkspace();
+    requirePlanFeature('proxySettings');
     const settings = normalizeProxySettings(payload);
     const testResult = await probeSocks5Proxy(settings);
     const saved = proxySettingsStore.save({
@@ -769,6 +781,10 @@ ipcMain.handle('task:start', async (_event, config) => {
       return { started: false, error: `第二工作台代理检测失败：${error.message}` };
     }
   }
+  const taskAccess = resolveTaskStartAccess(subscriptionState);
+  if (!taskAccess.ok) {
+    return { started: false, error: taskAccess.message, reason: taskAccess.reason };
+  }
   if (currentTask) {
     return { started: false, error: '已有任务正在运行。' };
   }
@@ -799,8 +815,16 @@ ipcMain.handle('templates:get', async () => {
 });
 
 ipcMain.handle('templates:save', async (_event, templates) => {
-  requireAuthenticated();
-  return templateStore.save(templates);
+  try {
+    requireAuthenticated();
+    const access = resolveTemplateAccess(subscriptionState, {
+      customCount: countCustomTemplates(templates)
+    });
+    if (!access.ok) return { ok: false, error: access.message, reason: access.reason };
+    return { ok: true, templates: templateStore.save(templates) };
+  } catch (error) {
+    return protectedError(error);
+  }
 });
 
 ipcMain.handle('history:list', async () => {
@@ -1127,6 +1151,7 @@ ipcMain.handle('sync:import', async (_event, payload = {}) => {
 ipcMain.handle('report:export', async (_event, payload) => {
   try {
     requireAuthenticated();
+    requirePlanFeature('exportPreview');
   } catch (error) {
     return protectedError(error);
   }
