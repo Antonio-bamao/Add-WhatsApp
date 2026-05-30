@@ -43,6 +43,7 @@ describe("public website structure", () => {
       "lucide-react",
       "react-globe.gl",
       "topojson-client",
+      "d3-geo",
       "world-atlas"
     ]) {
       assert.ok(packageJson.dependencies[dependency], `missing dependency: ${dependency}`);
@@ -52,14 +53,16 @@ describe("public website structure", () => {
   it("defines the Chinese homepage, download page, and release metadata route", () => {
     const layout = readText("app/layout.js");
     const homePage = readText("app/page.js");
+    const landingExperience = readText("components/LandingExperience.js");
     const downloadPage = readText("app/download/page.js");
     const releasesPage = readText("app/releases/page.js");
 
     assert.match(layout, /href="\/site\.css"/);
-    assert.match(homePage, /Add WhatsApp/);
-    assert.match(homePage, /官方下载/);
-    assert.match(homePage, /全球/);
-    assert.doesNotMatch(homePage, /上线前最常见的问题|FAQ/);
+    assert.match(homePage, /LandingExperience/);
+    assert.match(landingExperience, /Add WhatsApp/);
+    assert.match(landingExperience, /官方下载/);
+    assert.match(landingExperience, /全球/);
+    assert.doesNotMatch(landingExperience, /上线前最常见的问题|FAQ/);
     assert.match(downloadPage, /Windows/);
     assert.match(downloadPage, /latestRelease\.downloadUrl/);
     assert.match(releasesPage, /releaseHistory/);
@@ -67,19 +70,27 @@ describe("public website structure", () => {
 
   it("uses an open-source React globe with local country topology", () => {
     const homePage = readText("app/page.js");
+    const landingExperience = readText("components/LandingExperience.js");
     const globe = readText("components/GlobeScene.js");
 
     assert.match(globe, /"use client"/);
     assert.match(globe, /react-globe\.gl/);
     assert.match(globe, /world-atlas\/countries-110m\.json/);
     assert.match(globe, /topojson-client/);
-    assert.match(globe, /from "three"/);
     assert.match(globe, /polygonsData/);
     assert.match(globe, /arcsData/);
     assert.match(globe, /pointsData/);
-    assert.doesNotMatch(globe, /className="globe-static"/);
+    assert.match(globe, /StaticGlobeFallback/);
+    assert.match(globe, /className="globe-static"/);
+    assert.match(globe, /drawStaticGlobe/);
+    assert.match(globe, /cameraForVisibleStory/);
+    assert.match(globe, /cameraForProgress/);
+    assert.match(globe, /Spain \/ 西班牙/);
+    assert.match(globe, /USA \/ 美国/);
+    assert.match(globe, /China \/ 中国/);
     assert.doesNotMatch(globe, /Live route intelligence|Country polygons/);
-    assert.match(homePage, /import GlobeScene/);
+    assert.match(homePage, /LandingExperience/);
+    assert.match(landingExperience, /import GlobeScene/);
     assert.doesNotMatch(globe, /unpkg\.com\/globe/i);
   });
 

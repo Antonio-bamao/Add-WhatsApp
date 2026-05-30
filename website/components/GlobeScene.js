@@ -2,14 +2,23 @@
 
 import dynamic from "next/dynamic";
 import { useEffect, useMemo, useRef, useState } from "react";
-import * as THREE from "three";
+import { geoGraticule10, geoOrthographic, geoPath } from "d3-geo";
 import { feature } from "topojson-client";
 import countriesTopology from "world-atlas/countries-110m.json";
 
-const Globe = dynamic(() => import("react-globe.gl"), {
-  ssr: false,
-  loading: () => <div className="globe-loading" aria-hidden="true" />
-});
+const Globe = dynamic(
+  () =>
+    import("react-globe.gl").then((module) => {
+      const GlobeComponent = module.default;
+      return function GlobeWithForwardedRef({ forwardedRef, ...props }) {
+        return <GlobeComponent ref={forwardedRef} {...props} />;
+      };
+    }),
+  {
+    ssr: false,
+    loading: () => <div className="globe-loading" aria-hidden="true" />
+  }
+);
 
 const ROUTES = [
   {
@@ -251,6 +260,120 @@ const MARKERS = [
   { name: "圣保罗", lat: -23.5558, lng: -46.6396, size: 0.075 }
 ];
 
+const CAMERA_PATH = [
+  { stop: 0, lat: 18, lng: 76, altitude: 1.72, scale: 315, marker: null },
+  { stop: 0.34, lat: 20, lng: 48, altitude: 1.42, scale: 332, marker: null },
+  {
+    stop: 0.52,
+    lat: 40.4168,
+    lng: -3.7038,
+    altitude: 1.08,
+    scale: 470,
+    marker: { label: "Spain / 西班牙", lat: 40.4168, lng: -3.7038 }
+  },
+  {
+    stop: 0.72,
+    lat: 39.5,
+    lng: -98.35,
+    altitude: 1.12,
+    scale: 430,
+    marker: { label: "USA / 美国", lat: 39.5, lng: -98.35 }
+  },
+  {
+    stop: 0.9,
+    lat: 35.8617,
+    lng: 104.1954,
+    altitude: 1.08,
+    scale: 450,
+    marker: { label: "China / 中国", lat: 35.8617, lng: 104.1954 }
+  }
+];
+
+const STORY_CAMERAS = [
+  CAMERA_PATH[1],
+  CAMERA_PATH[1],
+  CAMERA_PATH[2],
+  CAMERA_PATH[3],
+  CAMERA_PATH[4]
+];
+
+const CANVAS_WIDTH = 1040;
+const CANVAS_HEIGHT = 860;
+const CANVAS_CENTER_X = CANVAS_WIDTH / 2;
+const CANVAS_CENTER_Y = CANVAS_HEIGHT / 2;
+const CANVAS_SCALE_BOOST = 1.12;
+
+function clamp(value, min, max) {
+  return Math.min(Math.max(value, min), max);
+}
+
+function mix(start, end, amount) {
+  return start + (end - start) * amount;
+}
+
+function smoothstep(value) {
+  return value * value * (3 - 2 * value);
+}
+
+function mixLongitude(start, end, amount) {
+  const delta = ((end - start + 540) % 360) - 180;
+  return start + delta * amount;
+}
+
+function cameraForProgress(progress) {
+  const safeProgress = clamp(progress, 0, 1);
+  const matchIndex = CAMERA_PATH.findIndex((point, pointIndex) => {
+    const next = CAMERA_PATH[pointIndex + 1];
+    return next ? safeProgress >= point.stop && safeProgress <= next.stop : false;
+  });
+  const index = matchIndex === -1 ? CAMERA_PATH.length - 2 : Math.max(0, Math.min(matchIndex, CAMERA_PATH.length - 2));
+  const from = CAMERA_PATH[index] || CAMERA_PATH[0];
+  const to = CAMERA_PATH[index + 1] || CAMERA_PATH[CAMERA_PATH.length - 1];
+  const local = smoothstep(clamp((safeProgress - from.stop) / (to.stop - from.stop), 0, 1));
+
+  return {
+    lat: mix(from.lat, to.lat, local),
+    lng: mixLongitude(from.lng, to.lng, local),
+    altitude: mix(from.altitude, to.altitude, local),
+    scale: mix(from.scale, to.scale, local),
+    marker: local > 0.62 ? to.marker : from.marker
+  };
+}
+
+function cameraForVisibleStory() {
+  const panels = Array.from(document.querySelectorAll(".story-panel"));
+  if (!panels.length) return cameraForProgress(0);
+
+  let activeIndex = -1;
+  let activeOverlap = 0;
+
+  panels.forEach((panel) => {
+    const rect = panel.getBoundingClientRect();
+    const overlap = Math.max(0, Math.min(rect.bottom, window.innerHeight) - Math.max(rect.top, 0));
+    if (overlap > activeOverlap) {
+      activeOverlap = overlap;
+      activeIndex = Number(panel.dataset.storyIndex || 0);
+    }
+  });
+
+  if (activeOverlap < window.innerHeight * 0.18 || activeIndex < 0) {
+    return cameraForProgress(0);
+  }
+
+  return STORY_CAMERAS[Math.min(activeIndex + 1, STORY_CAMERAS.length - 1)] || STORY_CAMERAS[0];
+}
+
+function stepCamera(current, target) {
+  const amount = 0.095;
+  return {
+    lat: mix(current.lat, target.lat, amount),
+    lng: mixLongitude(current.lng, target.lng, amount),
+    altitude: mix(current.altitude, target.altitude, amount),
+    scale: mix(current.scale, target.scale, amount),
+    marker: target.marker
+  };
+}
+
 function markerLabel(marker) {
   return `
     <div class="globe-label">
@@ -260,88 +383,242 @@ function markerLabel(marker) {
   `;
 }
 
-export default function GlobeScene() {
+function drawLabel(context, text, x, y) {
+  context.save();
+  context.font = "900 24px Segoe UI, Microsoft YaHei, sans-serif";
+  context.lineJoin = "round";
+  context.strokeStyle = "rgba(0, 0, 0, 0.72)";
+  context.lineWidth = 7;
+  context.strokeText(text, x + 18, y - 16);
+  context.fillStyle = "#f6fff9";
+  context.fillText(text, x + 18, y - 16);
+  context.restore();
+}
+
+function drawStaticGlobe(context, countries, camera, time) {
+  const width = CANVAS_WIDTH;
+  const height = CANVAS_HEIGHT;
+  const projection = geoOrthographic()
+    .translate([CANVAS_CENTER_X, CANVAS_CENTER_Y])
+    .scale(camera.scale * CANVAS_SCALE_BOOST)
+    .rotate([-camera.lng, -camera.lat])
+    .clipAngle(90);
+  const path = geoPath(projection, context);
+  const glow = context.createRadialGradient(450, 292, 0, CANVAS_CENTER_X - 34, CANVAS_CENTER_Y - 24, 440);
+
+  context.clearRect(0, 0, width, height);
+  glow.addColorStop(0, "rgba(92, 244, 210, 0.46)");
+  glow.addColorStop(0.45, "rgba(25, 118, 101, 0.42)");
+  glow.addColorStop(0.78, "rgba(2, 18, 16, 0.92)");
+  glow.addColorStop(1, "rgba(0, 0, 0, 0.22)");
+
+  context.save();
+  context.beginPath();
+  path({ type: "Sphere" });
+  context.fillStyle = glow;
+  context.fill();
+  context.strokeStyle = "rgba(135, 255, 232, 0.42)";
+  context.lineWidth = 1.1;
+  context.stroke();
+  context.restore();
+
+  context.save();
+  context.beginPath();
+  path(geoGraticule10());
+  context.strokeStyle = "rgba(126, 255, 234, 0.18)";
+  context.lineWidth = 1;
+  context.stroke();
+  context.restore();
+
+  countries.forEach((country) => {
+    context.save();
+    context.beginPath();
+    path(country);
+    context.fillStyle = "rgba(63, 185, 158, 0.5)";
+    context.fill();
+    context.strokeStyle = "rgba(205, 255, 246, 0.72)";
+    context.lineWidth = 1.25;
+    context.stroke();
+    context.restore();
+  });
+
+  ROUTES.slice(0, 12).forEach((route, index) => {
+    const start = projection([route.startLng, route.startLat]);
+    const end = projection([route.endLng, route.endLat]);
+    if (!start || !end) return;
+    const midX = (start[0] + end[0]) / 2;
+    const midY = (start[1] + end[1]) / 2 - 90;
+
+    context.save();
+    context.beginPath();
+    context.moveTo(start[0], start[1]);
+    context.quadraticCurveTo(midX, midY, end[0], end[1]);
+    context.strokeStyle = route.color;
+    context.lineWidth = 2.2;
+    context.setLineDash([120, 18, 8, 18]);
+    context.lineDashOffset = -(time / 90 + index * 14);
+    context.shadowColor = "rgba(82, 255, 220, 0.46)";
+    context.shadowBlur = 10;
+    context.stroke();
+    context.restore();
+  });
+
+  if (camera.marker) {
+    const marker = projection([camera.marker.lng, camera.marker.lat]);
+    if (marker) {
+      const pulse = 0.86 + Math.sin(time / 260) * 0.18;
+      context.save();
+      context.fillStyle = "#f8fff9";
+      context.shadowColor = "rgba(84, 244, 191, 0.9)";
+      context.shadowBlur = 14;
+      context.beginPath();
+      context.arc(marker[0], marker[1], 10, 0, Math.PI * 2);
+      context.fill();
+      context.shadowBlur = 0;
+      context.strokeStyle = "rgba(84, 244, 191, 0.72)";
+      context.lineWidth = 2;
+      context.beginPath();
+      context.arc(marker[0], marker[1], 22 * pulse, 0, Math.PI * 2);
+      context.stroke();
+      drawLabel(context, camera.marker.label, marker[0], marker[1]);
+      context.restore();
+    }
+  }
+}
+
+function StaticGlobeFallback({ countries }) {
+  const canvasRef = useRef(null);
+  const cameraRef = useRef(cameraForProgress(0));
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return undefined;
+
+    const context = canvas.getContext("2d", { alpha: true });
+    let frame = 0;
+    let mounted = true;
+
+    const resize = () => {
+      const ratio = Math.min(Math.max(window.devicePixelRatio || 1, 2), 3);
+      canvas.width = Math.round(CANVAS_WIDTH * ratio);
+      canvas.height = Math.round(CANVAS_HEIGHT * ratio);
+      context.setTransform(ratio, 0, 0, ratio, 0, 0);
+    };
+
+    const draw = (time) => {
+      if (!mounted) return;
+
+      const target = cameraForVisibleStory();
+      cameraRef.current = stepCamera(cameraRef.current, target);
+      drawStaticGlobe(context, countries, cameraRef.current, time);
+      frame = window.requestAnimationFrame(draw);
+    };
+
+    resize();
+    window.addEventListener("resize", resize);
+    frame = window.requestAnimationFrame(draw);
+
+    return () => {
+      mounted = false;
+      window.removeEventListener("resize", resize);
+      if (frame) window.cancelAnimationFrame(frame);
+    };
+  }, [countries]);
+
+  return <canvas className="globe-static" ref={canvasRef} width={CANVAS_WIDTH} height={CANVAS_HEIGHT} aria-hidden="true" />;
+}
+
+export default function GlobeScene({ progress = 0, cinematic = false }) {
   const globeRef = useRef(null);
   const [ready, setReady] = useState(false);
+  const dimensions = cinematic ? { width: 920, height: 760 } : { width: 760, height: 640 };
 
   const countries = useMemo(() => {
     const collection = feature(countriesTopology, countriesTopology.objects.countries);
     return collection.features.filter((country) => country.id !== "010");
   }, []);
 
-  const globeMaterial = useMemo(
-    () =>
-      new THREE.MeshPhongMaterial({
-        color: new THREE.Color("#062d2a"),
-        emissive: new THREE.Color("#031716"),
-        emissiveIntensity: 0.55,
-        shininess: 20,
-        transparent: true,
-        opacity: 0.94
-      }),
-    []
-  );
+  const routes = useMemo(() => {
+    const pulse = cinematic ? 0.16 + progress * 0.34 : 0;
+    return ROUTES.map((route, index) => ({
+      ...route,
+      altitude: route.altitude + (cinematic ? Math.sin(progress * Math.PI + index) * 0.018 : 0),
+      stroke: route.stroke + pulse
+    }));
+  }, [cinematic, progress]);
+
+  const rings = useMemo(() => {
+    if (!cinematic) return MARKERS.slice(0, 6);
+    const count = 5 + Math.round(progress * 7);
+    return MARKERS.slice(0, count);
+  }, [cinematic, progress]);
 
   useEffect(() => {
     const globe = globeRef.current;
     if (!globe) return;
 
-    globe.pointOfView({ lat: 18, lng: 76, altitude: 1.72 }, 0);
+    globe.pointOfView(cameraForProgress(progress), cinematic ? 120 : 0);
     const controls = globe.controls();
     controls.autoRotate = true;
-    controls.autoRotateSpeed = 0.48;
+    controls.autoRotateSpeed = cinematic ? 0.28 + progress * 0.34 : 0.48;
     controls.enableZoom = false;
     controls.enablePan = false;
     controls.enableDamping = true;
     controls.dampingFactor = 0.08;
-  }, [ready]);
+  }, [cinematic, progress, ready]);
 
   return (
-    <div className="globe-shell globe-open-source" aria-label="Add WhatsApp 全球客户触达地球">
-      <Globe
-        ref={globeRef}
-        width={760}
-        height={640}
-        backgroundColor="rgba(0, 0, 0, 0)"
-        globeMaterial={globeMaterial}
-        showAtmosphere
-        atmosphereColor="#42f2cf"
-        atmosphereAltitude={0.18}
-        polygonsData={countries}
-        polygonAltitude={0.012}
-        polygonCapColor={() => "rgba(43, 151, 134, 0.58)"}
-        polygonSideColor={() => "rgba(12, 78, 69, 0.42)"}
-        polygonStrokeColor={() => "rgba(180, 255, 240, 0.28)"}
-        polygonsTransitionDuration={0}
-        arcsData={ROUTES}
-        arcStartLat="startLat"
-        arcStartLng="startLng"
-        arcEndLat="endLat"
-        arcEndLng="endLng"
-        arcColor={(route) => route.color}
-        arcAltitude="altitude"
-        arcStroke={(route) => Math.max(route.stroke, 0.48)}
-        arcDashLength={0.86}
-        arcDashGap={0.22}
-        arcDashInitialGap="gap"
-        arcDashAnimateTime={6500}
-        arcLabel="name"
-        pointsData={MARKERS}
-        pointLat="lat"
-        pointLng="lng"
-        pointAltitude={0.025}
-        pointRadius="size"
-        pointColor={() => "rgba(206, 255, 242, 0.95)"}
-        pointLabel={markerLabel}
-        ringsData={MARKERS.slice(0, 6)}
-        ringLat="lat"
-        ringLng="lng"
-        ringColor={() => "rgba(74, 255, 217, 0.36)"}
-        ringMaxRadius={2.8}
-        ringPropagationSpeed={0.7}
-        ringRepeatPeriod={2200}
-        onGlobeReady={() => setReady(true)}
-      />
+    <div
+      className={`globe-shell globe-open-source ${cinematic ? "globe-cinematic" : ""}`}
+      aria-label="Add WhatsApp 全球客户触达地球"
+    >
+      {cinematic ? <StaticGlobeFallback countries={countries} /> : null}
+      {!cinematic ? (
+        <Globe
+          forwardedRef={globeRef}
+          width={dimensions.width}
+          height={dimensions.height}
+          backgroundColor="rgba(0, 0, 0, 0)"
+          globeColor="#062d2a"
+          showAtmosphere
+          atmosphereColor="#42f2cf"
+          atmosphereAltitude={0.18}
+          polygonsData={countries}
+          polygonAltitude={0.012}
+          polygonCapColor={() => "rgba(43, 151, 134, 0.58)"}
+          polygonSideColor={() => "rgba(12, 78, 69, 0.42)"}
+          polygonStrokeColor={() => "rgba(180, 255, 240, 0.28)"}
+          polygonsTransitionDuration={0}
+          arcsData={routes}
+          arcStartLat="startLat"
+          arcStartLng="startLng"
+          arcEndLat="endLat"
+          arcEndLng="endLng"
+          arcColor={(route) => route.color}
+          arcAltitude="altitude"
+          arcStroke={(route) => Math.max(route.stroke, 0.48)}
+          arcDashLength={0.86}
+          arcDashGap={0.22}
+          arcDashInitialGap="gap"
+          arcDashAnimateTime={6500}
+          arcLabel="name"
+          pointsData={MARKERS}
+          pointLat="lat"
+          pointLng="lng"
+          pointAltitude={0.025}
+          pointRadius="size"
+          pointColor={() => "rgba(206, 255, 242, 0.95)"}
+          pointLabel={markerLabel}
+          ringsData={rings}
+          ringLat="lat"
+          ringLng="lng"
+          ringColor={() => (cinematic ? "rgba(245, 199, 107, 0.34)" : "rgba(74, 255, 217, 0.36)")}
+          ringMaxRadius={cinematic ? 3.8 + progress * 1.4 : 2.8}
+          ringPropagationSpeed={cinematic ? 0.85 + progress * 0.3 : 0.7}
+          ringRepeatPeriod={cinematic ? 1700 : 2200}
+          onGlobeReady={() => setReady(true)}
+        />
+      ) : null}
     </div>
   );
 }
