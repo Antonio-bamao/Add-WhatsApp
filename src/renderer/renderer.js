@@ -214,6 +214,8 @@ function renderPlanCards(subscription) {
       ? `${formatCredits(plan.minimumTopUpCredits)} 额度起充`
       : '无需充值';
     const templateLimit = plan.templateLimit ? `自定义文案模板 X${plan.templateLimit}` : '自定义文案模板不限';
+    const lockedItems = lockedFeatureList(plan);
+    const actionText = isActive ? '当前套餐' : '支付维护中 / 联系人工开通';
     card.innerHTML = `
       <div class="plan-card-head">
         <div>
@@ -236,10 +238,24 @@ function renderPlanCards(subscription) {
       <div class="plan-feature-list">
         ${(plan.features || []).map(feature => `<span>${escapeHtml(feature)}</span>`).join('')}
       </div>
-      <button class="button ${isActive ? 'secondary' : 'ghost'}" type="button" disabled>${isActive ? '当前套餐' : '联系开通'}</button>
+      <div class="plan-lock-list" aria-label="${escapeHtml(plan.name)}锁定功能">
+        ${lockedItems.map(item => `<span>${escapeHtml(item)}</span>`).join('')}
+      </div>
+      <button class="button ${isActive ? 'secondary' : 'ghost'}" type="button" disabled>${actionText}</button>
     `;
     elements.planCards.appendChild(card);
   }
+}
+
+function lockedFeatureList(plan = {}) {
+  const capabilities = plan.capabilities || {};
+  const locks = ['线上支付维护中'];
+  if (!capabilities.exportPreview) locks.push('导出预检锁定');
+  if (!capabilities.secondaryWorkspace) locks.push('新建工作台锁定');
+  if (!capabilities.proxySettings) locks.push('代理 IP 设置锁定');
+  if (plan.templateLimit) locks.push(`超过 ${formatCredits(plan.templateLimit)} 条自定义文案锁定`);
+  if (plan.id === 'business') locks.push('第 6 个工作台起需人工审核');
+  return locks;
 }
 
 function renderCloudState(cloud) {
@@ -284,10 +300,10 @@ function renderSubscriptionState(subscription) {
   renderBillingFeatureLists(plan);
   if (elements.dailyLimitInput && plan.dailyLimit) {
     elements.dailyLimitInput.max = String(plan.dailyLimit);
-    if (Number(elements.dailyLimitInput.value || 0) > plan.dailyLimit) {
-      elements.dailyLimitInput.value = String(plan.dailyLimit);
-    }
+    elements.dailyLimitInput.value = String(plan.dailyLimit);
   }
+  enforceDelayInputs();
+  if (state.templates) renderTemplates(state.templates);
   updateWorkspaceButtonState();
   updateActionLocks();
 }
@@ -1046,16 +1062,17 @@ async function startTask() {
     updateActionLocks();
     return;
   }
-  const minDelay = Number(elements.delayMinInput.value || 22);
-  const maxDelay = Number(elements.delayMaxInput.value || 26);
+  enforceDelayInputs();
+  const minDelay = Number(elements.delayMinInput.value || 44);
+  const maxDelay = Number(elements.delayMaxInput.value || minDelay);
   elements.taskState.textContent = '准备中';
   elements.taskStateMetric.textContent = '准备中';
   addLog('准备连接 WhatsApp。如果是第一次使用，请在弹出的浏览器里扫码。', 'strong');
 
   const response = await window.addWhatsapp.startTask({
-    maxPerDay: Number(elements.dailyLimitInput.value || 80),
-    delayMinSeconds: Math.max(5, minDelay),
-    delayMaxSeconds: Math.max(5, maxDelay)
+    maxPerDay: Number(elements.dailyLimitInput.value || (state.subscription && state.subscription.plan && state.subscription.plan.dailyLimit) || 80),
+    delayMinSeconds: Math.max(44, minDelay),
+    delayMaxSeconds: Math.max(Math.max(44, minDelay), maxDelay)
   });
 
   if (!response.started) {
@@ -1077,6 +1094,16 @@ async function stopTask() {
     addLog(response.error || '暂停失败。', 'error');
     elements.stopButton.disabled = false;
   }
+}
+
+function enforceDelayInputs() {
+  if (!elements.delayMinInput || !elements.delayMaxInput) return;
+  elements.delayMinInput.min = '44';
+  elements.delayMaxInput.min = '44';
+  const minDelay = Math.max(44, Number(elements.delayMinInput.value || 44));
+  const maxDelay = Math.max(minDelay, Number(elements.delayMaxInput.value || minDelay));
+  elements.delayMinInput.value = String(minDelay);
+  elements.delayMaxInput.value = String(maxDelay);
 }
 
 function templateListElement(language) {
@@ -1129,6 +1156,37 @@ function updateTemplateCounts() {
   elements.templateEnCount.textContent = templateInputs('en').length;
   elements.templateEsCount.textContent = templateInputs('es').length;
   elements.templateFrCount.textContent = templateInputs('fr').length;
+  updateTemplateAddButtons();
+}
+
+function currentTemplateLimit() {
+  const plan = state.subscription && state.subscription.plan ? state.subscription.plan : {};
+  return plan.templateLimit === null || plan.templateLimit === undefined ? null : Number(plan.templateLimit);
+}
+
+function limitTemplatesForCurrentPlan(templates) {
+  const limit = currentTemplateLimit();
+  if (limit === null) return templates;
+  const capped = {};
+  for (const language of ['en', 'es', 'fr']) {
+    capped[language] = (templates[language] || []).slice(0, limit);
+  }
+  return capped;
+}
+
+function updateTemplateAddButtons() {
+  const limit = currentTemplateLimit();
+  for (const button of elements.templateAddButtons) {
+    if (limit === null) {
+      button.disabled = false;
+      button.title = '';
+      continue;
+    }
+    const language = button.dataset.templateAdd;
+    const reached = templateInputs(language).length >= limit;
+    button.disabled = reached;
+    button.title = reached ? `当前套餐每种语言最多 ${limit} 条文案模板。` : '';
+  }
 }
 
 function switchTemplateLanguage(language) {
@@ -1155,11 +1213,12 @@ function markTemplatesDirty() {
 }
 
 function renderTemplates(templates) {
-  state.templates = templates;
-  renderTemplateList('en', templates.en);
-  renderTemplateList('es', templates.es);
-  renderTemplateList('fr', templates.fr);
-  elements.templatePoolSummary.textContent = `EN ${templates.en.length} / ES ${templates.es.length} / FR ${templates.fr.length}`;
+  const limited = limitTemplatesForCurrentPlan(templates);
+  state.templates = limited;
+  renderTemplateList('en', limited.en);
+  renderTemplateList('es', limited.es);
+  renderTemplateList('fr', limited.fr);
+  elements.templatePoolSummary.textContent = `EN ${limited.en.length} / ES ${limited.es.length} / FR ${limited.fr.length}`;
   elements.templateSaveState.textContent = '模板已加载';
   updateTemplateCounts();
   switchTemplateLanguage(state.activeTemplateLanguage);
@@ -1326,6 +1385,12 @@ for (const tab of elements.templateTabs) {
 for (const button of elements.templateAddButtons) {
   button.addEventListener('click', () => {
     const language = button.dataset.templateAdd;
+    const limit = currentTemplateLimit();
+    if (limit !== null && templateInputs(language).length >= limit) {
+      elements.templateSaveState.textContent = `当前套餐每种语言最多 ${limit} 条文案模板`;
+      updateTemplateAddButtons();
+      return;
+    }
     const list = templateListElement(language);
     list.appendChild(createTemplateItem(language, '', list.children.length));
     markTemplatesDirty();

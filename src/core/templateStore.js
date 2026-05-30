@@ -36,17 +36,27 @@ function cleanTemplates(value) {
   return result;
 }
 
-function countCustomTemplates(value) {
-  let count = 0;
+function templateLanguageCounts(value) {
+  const counts = {};
   for (const language of ['en', 'es', 'fr']) {
-    const defaults = new Set(DEFAULT_TEMPLATES[language]);
     const pool = Array.isArray(value && value[language]) ? value[language] : [];
-    for (const item of pool) {
-      const template = String(item).trim();
-      if (template && !defaults.has(template)) count += 1;
-    }
+    counts[language] = pool.map(item => String(item).trim()).filter(Boolean).length;
   }
-  return count;
+  return counts;
+}
+
+function applyTemplateLimit(value, limit) {
+  if (limit === null || limit === undefined) return {
+    en: [...(value && value.en || [])],
+    es: [...(value && value.es || [])],
+    fr: [...(value && value.fr || [])]
+  };
+  const capped = {};
+  for (const language of ['en', 'es', 'fr']) {
+    const pool = Array.isArray(value && value[language]) ? value[language] : [];
+    capped[language] = pool.slice(0, Math.max(1, Number(limit) || 1));
+  }
+  return capped;
 }
 
 class JsonTemplateStore {
@@ -74,6 +84,7 @@ class JsonTemplateStore {
 module.exports = {
   DEFAULT_TEMPLATES,
   JsonTemplateStore,
-  countCustomTemplates,
-  cleanTemplates
+  applyTemplateLimit,
+  cleanTemplates,
+  templateLanguageCounts
 };

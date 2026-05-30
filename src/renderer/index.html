@@ -300,16 +300,16 @@
 
               <label class="field">
                 <span>每日上限</span>
-                <input id="dailyLimitInput" type="number" min="1" max="500" value="80" />
+                <input id="dailyLimitInput" type="number" min="1" max="500" value="200" />
               </label>
               <div class="field-row">
                 <label class="field">
                   <span>最小间隔（秒）</span>
-                  <input id="delayMinInput" type="number" min="5" value="22" />
+                  <input id="delayMinInput" type="number" min="44" value="44" />
                 </label>
                 <label class="field">
                   <span>最大间隔（秒）</span>
-                  <input id="delayMaxInput" type="number" min="5" value="26" />
+                  <input id="delayMaxInput" type="number" min="44" value="60" />
                 </label>
               </div>
 
@@ -430,6 +430,10 @@
               <p>账户余额长期保留；每日可用上限每天 00:00 重置，只控制消耗速度。</p>
             </div>
             <span id="activePlanBadge" class="table-state">当前套餐</span>
+          </section>
+          <section id="planPaymentNotice" class="plan-notice" aria-label="支付维护提示">
+            <strong>支付宝沙盒官方异常修复中，线上支付暂不可用。</strong>
+            <span>当前只开放套餐边界和人工开通流程：能用的功能直接可用，套餐外功能会被锁定，充值和升级先联系人工处理。</span>
           </section>
           <section id="planCards" class="plan-grid" aria-label="套餐列表"></section>
           <section class="panel rule-panel">

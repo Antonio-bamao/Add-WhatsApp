@@ -14,7 +14,7 @@ const { sourceIdentityFor } = require('../core/progressIdentity');
 const { migrateLegacyUserData } = require('../core/legacyMigration');
 const { runSendTask } = require('../core/taskRunner');
 const { selectNewlySentRows } = require('../core/taskBilling');
-const { JsonTemplateStore, countCustomTemplates } = require('../core/templateStore');
+const { JsonTemplateStore, applyTemplateLimit, templateLanguageCounts } = require('../core/templateStore');
 const { JsonHistoryStore } = require('../core/historyStore');
 const {
   canOpenSecondaryWorkspace,
@@ -811,17 +811,18 @@ ipcMain.handle('task:stop', async () => {
 
 ipcMain.handle('templates:get', async () => {
   requireAuthenticated();
-  return templateStore.load();
+  return applyTemplateLimit(templateStore.load(), subscriptionState.plan.templateLimit);
 });
 
 ipcMain.handle('templates:save', async (_event, templates) => {
   try {
     requireAuthenticated();
     const access = resolveTemplateAccess(subscriptionState, {
-      customCount: countCustomTemplates(templates)
+      languageCounts: templateLanguageCounts(templates)
     });
     if (!access.ok) return { ok: false, error: access.message, reason: access.reason };
-    return { ok: true, templates: templateStore.save(templates) };
+    const saved = templateStore.save(applyTemplateLimit(templates, subscriptionState.plan.templateLimit));
+    return { ok: true, templates: applyTemplateLimit(saved, subscriptionState.plan.templateLimit) };
   } catch (error) {
     return protectedError(error);
   }
@@ -867,8 +868,8 @@ async function runTask(config) {
         sourceIdentity: sourceIdentityFor(importedSource),
         startedAt,
         maxPerDay: resolveTaskDailyLimit(subscriptionState, config.maxPerDay),
-        delayMinMs: Number(config.delayMinSeconds || 22) * 1000,
-        delayMaxMs: Number(config.delayMaxSeconds || 26) * 1000
+        delayMinMs: Math.max(44, Number(config.delayMinSeconds || 44)) * 1000,
+        delayMaxMs: Math.max(Math.max(44, Number(config.delayMinSeconds || 44)), Number(config.delayMaxSeconds || 44)) * 1000
       },
       shouldStop: () => stopRequested,
       onEvent: event => sendToRenderer('task:event', event)

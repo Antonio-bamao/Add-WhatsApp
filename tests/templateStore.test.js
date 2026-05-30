@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { JsonTemplateStore, DEFAULT_TEMPLATES, countCustomTemplates } = require('../src/core/templateStore');
+const { JsonTemplateStore, DEFAULT_TEMPLATES, applyTemplateLimit } = require('../src/core/templateStore');
 
 test('loads default language templates when file does not exist', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'add-whatsapp-templates-'));
@@ -48,12 +48,17 @@ test('falls back to default language when a saved pool is empty', () => {
   assert.deepEqual(new JsonTemplateStore(filePath).load().en, DEFAULT_TEMPLATES.en);
 });
 
-test('counts only non-default templates as custom package usage', () => {
+test('caps each language template pool to the active package limit', () => {
   const templates = {
-    en: [DEFAULT_TEMPLATES.en[0], 'Custom EN'],
-    es: [DEFAULT_TEMPLATES.es[0], DEFAULT_TEMPLATES.es[1]],
-    fr: ['Custom FR 1', 'Custom FR 2']
+    en: ['EN 1', 'EN 2', 'EN 3'],
+    es: ['ES 1', 'ES 2', 'ES 3'],
+    fr: ['FR 1', 'FR 2', 'FR 3']
   };
 
-  assert.equal(countCustomTemplates(templates), 3);
+  assert.deepEqual(applyTemplateLimit(templates, 2), {
+    en: ['EN 1', 'EN 2'],
+    es: ['ES 1', 'ES 2'],
+    fr: ['FR 1', 'FR 2']
+  });
+  assert.deepEqual(applyTemplateLimit(templates, null), templates);
 });

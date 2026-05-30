@@ -20,6 +20,7 @@ test('defines the public pricing catalog from the approved package design', () =
   assert.equal(getPlan('free').dailyLimit, 10);
   assert.equal(getPlan('free').cardTier, 'FREE');
   assert.equal(getPlan('free').cardTone, 'silver');
+  assert.equal(getPlan('free').templateLimit, 1);
   assert.equal(getPlan('advanced').unitPriceCents, 30);
   assert.equal(getPlan('advanced').cardTier, 'PLUS');
   assert.equal(getPlan('advanced').cardTone, 'gold');
@@ -120,18 +121,18 @@ test('returns clear locked messages for features outside the active package', ()
   });
 });
 
-test('limits custom templates by package while preserving default templates', () => {
+test('limits each language template pool by package', () => {
   const advanced = createEntitlementState('advanced');
   const business = createEntitlementState('business');
 
-  assert.deepEqual(resolveTemplateAccess(advanced, { customCount: 2 }), { ok: true, remaining: 0 });
-  assert.deepEqual(resolveTemplateAccess(advanced, { customCount: 3 }), {
+  assert.deepEqual(resolveTemplateAccess(advanced, { languageCounts: { en: 2, es: 1, fr: 2 } }), { ok: true, remaining: 0 });
+  assert.deepEqual(resolveTemplateAccess(advanced, { languageCounts: { en: 3, es: 1, fr: 2 } }), {
     ok: false,
     remaining: 0,
     reason: 'TEMPLATE_LIMIT_REACHED',
-    message: '当前进阶版最多保存 2 条自定义文案模板，请删除多余文案或升级套餐。'
+    message: '当前进阶版每种语言最多保存 2 条文案模板，请删除多余文案或升级套餐。'
   });
-  assert.deepEqual(resolveTemplateAccess(business, { customCount: 100 }), { ok: true, remaining: null });
+  assert.deepEqual(resolveTemplateAccess(business, { languageCounts: { en: 100, es: 100, fr: 100 } }), { ok: true, remaining: null });
 });
 
 test('limits secondary workspace launches by the active package', () => {

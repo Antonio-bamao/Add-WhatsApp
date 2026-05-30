@@ -291,3 +291,31 @@
 - 结果：桌面端在支付暂不可用时仍能按套餐限制功能：免费版锁导出/新工作台/代理，付费套餐按余额与今日剩余控制任务，自定义模板按套餐上限保存，线上支付统一显示维护中。
 - 验证：先写失败测试后实现；node --test tests\\billingPlans.test.js tests\\templateStore.test.js 通过 13/13；npm test 通过 97/97；npm run build 成功生成 dist\\Add WhatsApp 0.1.2.exe。
 - 下一步：如果支付宝沙箱恢复，再继续用现有 page-pay POST 表单和 trade.query 做真实支付闭环；否则先走人工开通/调账流程。
+
+## 2026-05-30T00:20:00+08:00｜同步已打包桌面端到官网下载交付物
+- 目标：同步已打包桌面端到官网下载交付物
+- 动作：确认 dist 新 EXE 与 website downloads 旧 EXE 哈希不同；将 dist\\Add WhatsApp 0.1.2.exe 复制到 latest 和 releases\\0.1.2；更新 latest\\update.json 的 releaseDate、sizeBytes 和 sha256；抽查 app.asar 内包含支付维护和套餐锁定文案。
+- 结果：官网下载目录和 dist 目录现在指向同一个新 EXE，用户从 website/public/downloads/latest/Add-WhatsApp.exe 打开时会看到套餐边界改动。
+- 验证：三个 EXE SHA256 均为 d2a497cfb0eff91b5ae77262c5c246221a11917c56a7ff8f12af3dd3ab6cf09f；update.json sizeBytes=77064717；asar 抽查返回新文案存在。
+- 下一步：如需发给别人，直接使用 website\\public\\downloads\\latest\\Add-WhatsApp.exe 或 dist\\Add WhatsApp 0.1.2.exe；避免打开 5/21 的旧副本。
+
+## 2026-05-30T00:35:00+08:00｜让套餐页首屏明确显示支付维护和套餐锁定
+- 目标：让套餐页首屏明确显示支付维护和套餐锁定
+- 动作：定位 dist 包已有部分新文案但套餐页视觉变化不明显；新增 planPaymentNotice；套餐卡片增加锁定功能列表；非当前套餐按钮改为支付维护中/联系人工开通；补 renderer contract 测试。
+- 结果：套餐页打开后首屏可直接看到支付宝沙箱维护提示和每个套餐被锁定的功能，不需要切到额度/账单页才能发现变化。
+- 验证：node --test tests\\cloudRendererContract.test.js 通过 2/2；node --check src\\renderer\\renderer.js 通过。
+- 下一步：重新打 dist EXE，并同步 latest/release 下载包与 update.json。
+
+## 2026-05-30T17:25:00+08:00｜重新打包 dist 交付包并同步下载清单
+- 目标：重新打包 dist 交付包并同步下载清单
+- 动作：运行 npm test 和 npm run build；复制新 dist EXE 到 website latest/release；更新 latest update.json 的 sizeBytes 和 sha256；抽查 dist app.asar 包含 planPaymentNotice、支付维护提示、支付维护中/联系人工开通和 lockedFeatureList。
+- 结果：用户截图中的 dist\\Add WhatsApp 0.1.2.exe 已重新生成，修改时间为 2026-05-30 17:21:30；套餐页首屏现在能直接看到支付维护和锁定功能。
+- 验证：根项目 npm test 通过 98/98；npm run build 成功；website npm test 通过 6/6；三个 EXE SHA256 均为 1453967f86a67a6ca71606ed5f2898838084f2efb8b207ae7cd0b5b94da44be5。
+- 下一步：打开新包前先完全退出托盘旧进程，再运行 dist\\Add WhatsApp 0.1.2.exe 验证套餐页。
+
+## 2026-05-30T17:48:00+08:00｜修正套餐模板/任务间隔真实锁定并重新打包
+- 目标：修正套餐模板/任务间隔真实锁定并重新打包
+- 动作：按用户反馈将模板限制改为每种语言模板池限制：免费 1、Plus 2、Pro 4、Business 不限；添加按钮达到套餐上限即禁用；模板保存按语言数量硬锁；每日上限输入默认设为套餐最高；最小间隔 UI 和主进程统一不低于 44 秒；结束旧 Add WhatsApp 进程后重新 build。
+- 结果：dist\\Add WhatsApp 0.1.2.exe 已重新生成并同步到 website latest/release，包内已确认包含 44 秒下限、套餐 dailyLimit 默认值、模板池上限和按钮锁定逻辑。
+- 验证：根项目 npm test 通过 99/99；website npm test 通过 6/6；npm run build 成功；三个 EXE SHA256 均为 aa61e5953dc43efd6a8a47452ffc1e8f75360d33cfda6e1cdf780f9591df60c6；asar 抽查四项新逻辑均为 true。
+- 下一步：用户重新打开 dist\\Add WhatsApp 0.1.2.exe 验证模板页 Plus 只能保留/添加每语言 2 条，发送任务最小间隔不能低于 44 秒。

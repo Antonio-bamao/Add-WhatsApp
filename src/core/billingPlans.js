@@ -12,7 +12,7 @@ const PLANS = [
     minimumTopUpCredits: 0,
     dailyLimit: 10,
     workspaceLimit: 1,
-    templateLimit: 3,
+    templateLimit: 1,
     capabilities: {
       importPreview: true,
       exportPreview: false,
@@ -204,18 +204,21 @@ function resolveTaskStartAccess(entitlement) {
   return { ok: true };
 }
 
-function resolveTemplateAccess(entitlementOrPlan, { customCount = 0 } = {}) {
+function resolveTemplateAccess(entitlementOrPlan, { languageCounts = null, customCount = 0 } = {}) {
   const plan = planFrom(entitlementOrPlan);
   const limit = plan.templateLimit;
   if (limit === null || limit === undefined) return { ok: true, remaining: null };
-  const count = Math.max(0, Number(customCount) || 0);
+  const counts = languageCounts && typeof languageCounts === 'object'
+    ? Object.values(languageCounts).map(value => Math.max(0, Number(value) || 0))
+    : [Math.max(0, Number(customCount) || 0)];
+  const count = Math.max(...counts);
   const remaining = Math.max(0, limit - count);
   if (count <= limit) return { ok: true, remaining };
   return {
     ok: false,
     remaining: 0,
     reason: 'TEMPLATE_LIMIT_REACHED',
-    message: `当前${plan.name}最多保存 ${limit} 条自定义文案模板，请删除多余文案或升级套餐。`
+    message: `当前${plan.name}每种语言最多保存 ${limit} 条文案模板，请删除多余文案或升级套餐。`
   };
 }
 
