@@ -1352,8 +1352,8 @@ dd {
 }
 
 .story-panel-right .story-copy h2 {
-  max-width: 7em;
-  font-size: clamp(32px, 3vw, 46px);
+  max-width: 10em;
+  font-size: clamp(38px, 4.2vw, 66px);
 }
 
 .story-copy p:not(.eyebrow) {
@@ -1366,7 +1366,7 @@ dd {
 
 .story-panel-right .story-copy p:not(.eyebrow) {
   max-width: 370px;
-  font-size: clamp(15px, 1vw, 17px);
+  font-size: clamp(16px, 1.12vw, 19px);
 }
 
 .story-stat {
