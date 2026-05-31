@@ -101,6 +101,7 @@ describe("admin console structure", () => {
     const js = readText("public/admin.js");
 
     assert.match(js, /ADD_WHATSAPP_API_URL/);
+    assert.match(js, /api\.addwhatsapp\.com/);
     assert.match(js, /adminAccessToken/);
     assert.match(js, /\/v1\/admin\/auth\/login/);
     assert.match(js, /\/v1\/admin\/console/);

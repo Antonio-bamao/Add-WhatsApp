@@ -7,7 +7,7 @@ const adminLoginForm = document.querySelector("[data-admin-login]");
 const adminUsernameInput = document.querySelector("[data-admin-username]");
 const adminPasswordInput = document.querySelector("[data-admin-password]");
 const adminLoginStatus = document.querySelector("[data-admin-login-status]");
-const API_BASE_URL = window.ADD_WHATSAPP_API_URL || "http://127.0.0.1:4110";
+const API_BASE_URL = resolveApiBaseUrl();
 const ADMIN_TOKEN_STORAGE_KEY = "addWhatsappAdminAccessToken";
 let adminAccessToken = window.sessionStorage.getItem(ADMIN_TOKEN_STORAGE_KEY) || "";
 
@@ -34,6 +34,16 @@ let paymentEventsState = {
   total: 0,
   items: []
 };
+
+function resolveApiBaseUrl() {
+  if (window.ADD_WHATSAPP_API_URL) return window.ADD_WHATSAPP_API_URL;
+  if (window.location.hostname === "admin.addwhatsapp.com") return "https://api.addwhatsapp.com";
+  return "http://127.0.0.1:4110";
+}
+
+function connectedEnvironmentStatus() {
+  return API_BASE_URL.includes("127.0.0.1") ? "本地 API 预览" : "API 已连接";
+}
 
 function statusTone(status) {
   if (/待接|后置/.test(status)) return "neutral";
@@ -662,7 +672,7 @@ function applyConsoleSnapshot(snapshot) {
     })),
     actionQueue: snapshot.actionQueue || actionQueue,
     auditTrail: snapshot.auditTrail || auditTrail,
-    environmentStatus: "本地 API 预览"
+    environmentStatus: connectedEnvironmentStatus()
   };
   renderRoute();
 }
