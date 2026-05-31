@@ -24,7 +24,7 @@ describe("admin console structure", () => {
   });
 
   it("maps admin navigation one-to-one to the documented cloud modules", async () => {
-    const { adminModules } = await import(pathToFileURL(path.join(adminRoot, "public/admin-data.mjs")));
+    const { adminModules } = await import(pathToFileURL(path.join(adminRoot, "public/admin-data.js")));
     const moduleKeys = adminModules.map((module) => module.key);
 
     assert.deepEqual(moduleKeys, [
@@ -52,7 +52,7 @@ describe("admin console structure", () => {
   });
 
   it("maps the desktop commercial pages to matching admin review surfaces", async () => {
-    const { desktopAdminMappings } = await import(pathToFileURL(path.join(adminRoot, "public/admin-data.mjs")));
+    const { desktopAdminMappings } = await import(pathToFileURL(path.join(adminRoot, "public/admin-data.js")));
 
     assert.deepEqual(
       desktopAdminMappings.map((mapping) => mapping.desktopPage),

@@ -2,6 +2,7 @@
   "name": "add-whatsapp-admin",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "description": "Admin console preview for Add WhatsApp cloud operations.",
   "scripts": {
     "dev": "python -m http.server 3220 -d public",

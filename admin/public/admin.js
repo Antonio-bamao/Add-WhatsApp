@@ -1,4 +1,4 @@
-import { actionQueue, adminModules, auditTrail, desktopAdminMappings } from "./admin-data.mjs";
+import { actionQueue, adminModules, auditTrail, desktopAdminMappings } from "./admin-data.js";
 
 const pageOutlet = document.querySelector("[data-page-outlet]");
 const moduleButtons = document.querySelectorAll("[data-module-link]");
