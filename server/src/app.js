@@ -1,4 +1,5 @@
 import http from "node:http";
+import { pathToFileURL } from "node:url";
 import { createPostgresRuntime } from "./db/postgresRuntime.js";
 import { createMemoryRuntime } from "./services/billingService.js";
 import { buildAlipayPagePayRequest, parseAlipayNotification, parseMockAlipayNotification, queryAlipayTrade } from "./services/paymentProviders.js";
@@ -272,7 +273,18 @@ export function createRuntimeFromEnv(env = process.env) {
   return createMemoryRuntime();
 }
 
-if (import.meta.url === `file:///${process.argv[1]?.replaceAll("\\", "/")}`) {
+function argvPathToFileUrl(argvPath) {
+  const normalized = String(argvPath || "").replaceAll("\\", "/");
+  if (/^[A-Za-z]:\//.test(normalized)) return `file:///${normalized}`;
+  if (normalized.startsWith("/")) return `file://${normalized}`;
+  return pathToFileURL(argvPath).href;
+}
+
+export function isDirectRun(moduleUrl = import.meta.url, argvPath = process.argv[1]) {
+  return Boolean(argvPath) && moduleUrl === argvPathToFileUrl(argvPath);
+}
+
+if (isDirectRun()) {
   const port = Number(process.env.PORT || 4110);
   const runtime = createRuntimeFromEnv();
   createAppServer({ runtime }).listen(port, "127.0.0.1", () => {
