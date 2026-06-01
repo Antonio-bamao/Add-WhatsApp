@@ -2,13 +2,12 @@ const path = require('path');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const { spawn } = require('node:child_process');
-const { app, BrowserWindow, Tray, Menu, dialog, ipcMain } = require('electron');
+const { app, BrowserWindow, Tray, Menu, dialog, ipcMain, shell } = require('electron');
 const XLSX = require('xlsx');
 const { importContacts } = require('../core/tableImporter');
 const { JsonProgressStore } = require('../core/progressStore');
 const { resolveProgressPathForSource } = require('../core/progressResolver');
 const { AccountContext } = require('../core/accountContext');
-const { AuthStore } = require('../core/authStore');
 const { SyncPackageStore } = require('../core/syncPackageStore');
 const { sourceIdentityFor } = require('../core/progressIdentity');
 const { migrateLegacyUserData } = require('../core/legacyMigration');
@@ -67,7 +66,6 @@ let importedSource = null;
 let currentImportOptions = { skipChinaNumbers: true };
 let currentTask = null;
 let stopRequested = false;
-let authStore = null;
 let accountContext = null;
 let syncPackageStore = null;
 let proxySettingsStore = null;
@@ -130,10 +128,6 @@ app.whenReady().then(() => {
   app.setAppUserModelId('com.addwhatsapp.desktop');
   Menu.setApplicationMenu(null);
   const userDataPath = app.getPath('userData');
-  authStore = new AuthStore({
-    usersPath: path.join(userDataPath, 'auth', 'users.json'),
-    sessionPath: path.join(userDataPath, 'auth', 'session.json')
-  });
   cloudController = createCloudDesktopController({
     client: new CloudApiClient({
       baseUrl: process.env.ADD_WHATSAPP_API_URL || DEFAULT_API_BASE_URL
@@ -164,9 +158,9 @@ app.on('window-all-closed', () => {
 });
 
 function restoreAuthenticatedSession() {
-  const session = authStore.getSessionUser();
-  if (!session.authenticated) return;
-  accountContext.setCurrentUser(session.user);
+  const cloud = cloudState();
+  if (!cloud.authenticated || !cloud.user) return;
+  accountContext.setCurrentUser(desktopUserFromCloudUser(cloud.user));
   initializeAccountStores();
 }
 
@@ -210,6 +204,14 @@ function cloudState() {
     : { authenticated: false, user: null, entitlements: null };
 }
 
+function desktopUserFromCloudUser(user = {}) {
+  return {
+    accountId: user.id || user.accountId || user.username,
+    username: user.username || user.email || user.id,
+    cloudUserId: user.id || user.cloudUserId || null
+  };
+}
+
 function restoreCloudEntitlements() {
   const cloud = cloudState();
   if (cloud.authenticated && cloud.entitlements) {
@@ -221,7 +223,7 @@ function authState() {
   try {
     const user = accountContext.getCurrentUser();
     return {
-      hasUsers: authStore.listUsers().length > 0,
+      hasUsers: Boolean(user || (cloudState().authenticated && cloudState().user)),
       authenticated: Boolean(user),
       user,
       workspace: {
@@ -262,7 +264,7 @@ function protectedError(error) {
   return {
     ok: false,
     error: error.message,
-    authRequired: /请先登录本地账号/.test(error.message)
+    authRequired: /请先登录账号/.test(error.message)
   };
 }
 
@@ -330,15 +332,17 @@ ipcMain.handle('auth:get-state', async () => authState());
 
 ipcMain.handle('auth:register', async (_event, payload = {}) => {
   try {
-    const result = authStore.register({
+    const result = await cloudController.register({
       username: payload.username,
       password: payload.password
     });
-    authStore.createSession(result.user.accountId, 7);
-    accountContext.setCurrentUser(result.user);
+    subscriptionState = result.subscription;
+    const user = desktopUserFromCloudUser(result.cloud.user);
+    accountContext.setCurrentUser(user);
     initializeAccountStores();
-    sendToRenderer('auth:changed', authState());
-    return { ok: true, ...result };
+    const auth = authState();
+    sendToRenderer('auth:changed', auth);
+    return { ok: true, user, auth, cloud: result.cloud, subscription: publicSubscriptionState() };
   } catch (error) {
     return { ok: false, error: error.message };
   }
@@ -346,16 +350,18 @@ ipcMain.handle('auth:register', async (_event, payload = {}) => {
 
 ipcMain.handle('auth:login', async (_event, payload = {}) => {
   try {
-    const result = authStore.login({
+    const result = await cloudController.login({
       username: payload.username,
       password: payload.password
     });
     if (!result.ok) return result;
-    authStore.createSession(result.user.accountId, 7);
-    accountContext.setCurrentUser(result.user);
+    subscriptionState = result.subscription;
+    const user = desktopUserFromCloudUser(result.cloud.user);
+    accountContext.setCurrentUser(user);
     initializeAccountStores();
-    sendToRenderer('auth:changed', authState());
-    return { ok: true, user: result.user };
+    const auth = authState();
+    sendToRenderer('auth:changed', auth);
+    return { ok: true, user, auth, cloud: result.cloud, subscription: publicSubscriptionState() };
   } catch (error) {
     return { ok: false, error: error.message };
   }
@@ -363,7 +369,8 @@ ipcMain.handle('auth:login', async (_event, payload = {}) => {
 
 ipcMain.handle('auth:logout', async () => {
   if (currentTask) return { ok: false, error: '当前任务正在运行，请先暂停或等待结束后再退出账号。' };
-  authStore.logout();
+  cloudController.logout();
+  subscriptionState = defaultSubscriptionState();
   accountContext.clear();
   clearAccountState();
   await whatsappSessionManager.destroy();
@@ -372,43 +379,11 @@ ipcMain.handle('auth:logout', async () => {
 });
 
 ipcMain.handle('auth:reset-password', async (_event, payload = {}) => {
-  try {
-    const result = authStore.resetPassword({
-      username: payload.username,
-      recoveryCode: payload.recoveryCode,
-      newPassword: payload.newPassword
-    });
-    return { ok: true, ...result };
-  } catch (error) {
-    return { ok: false, error: error.message };
-  }
+  return { ok: false, error: '线上账号暂不支持在客户端重置密码，请联系管理员处理。' };
 });
 
 ipcMain.handle('auth:download-recovery', async (_event, payload = {}) => {
-  try {
-    const user = accountContext.getCurrentUser() || { username: payload.username, accountId: payload.accountId };
-    if (!user || !user.username || !payload.recoveryCode) throw new Error('缺少账号或恢复码。');
-    const safeUsername = String(user.username).replace(/[\\/:*?"<>|]/g, '_');
-    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const filePath = path.join(app.getPath('desktop'), `Add-WhatsApp-账号恢复信息-${safeUsername}-${stamp}.txt`);
-    const content = [
-      'Add WhatsApp 本地账号恢复信息',
-      '',
-      `账号：${user.username}`,
-      `恢复码：${payload.recoveryCode}`,
-      `创建时间：${new Date().toLocaleString()}`,
-      '',
-      '重要说明：',
-      '1. 这个文件不包含你的密码。',
-      '2. 恢复码可以用于重置本地账号密码，请妥善保存。',
-      '3. 拿到恢复码的人可能重置这个本地账号。'
-    ].join('\n');
-    fs.writeFileSync(filePath, content, 'utf-8');
-    if (user.accountId) authStore.markRecoveryDownloaded(user.accountId);
-    return { ok: true, filePath };
-  } catch (error) {
-    return { ok: false, error: error.message };
-  }
+  return { ok: false, error: '线上账号不需要下载恢复信息。' };
 });
 
 ipcMain.handle('auth:clear-whatsapp-session', async () => {
@@ -425,20 +400,6 @@ ipcMain.handle('auth:clear-whatsapp-session', async () => {
   }
 });
 
-ipcMain.handle('cloud:login', async (_event, payload = {}) => {
-  try {
-    const result = await cloudController.login({
-      username: payload.username,
-      password: payload.password
-    });
-    subscriptionState = result.subscription;
-    sendToRenderer('auth:changed', authState());
-    return result;
-  } catch (error) {
-    return { ok: false, error: error.message };
-  }
-});
-
 ipcMain.handle('cloud:refresh-entitlements', async () => {
   try {
     const result = await cloudController.refreshEntitlements();
@@ -452,12 +413,13 @@ ipcMain.handle('cloud:refresh-entitlements', async () => {
   }
 });
 
-ipcMain.handle('cloud:logout', async () => {
+ipcMain.handle('cloud:alipay-top-up', async (_event, payload = {}) => {
   try {
-    const result = cloudController.logout();
-    subscriptionState = defaultSubscriptionState();
-    sendToRenderer('auth:changed', authState());
-    return { ...result, subscription: publicSubscriptionState() };
+    const result = await cloudController.createAlipayTopUp({ planId: payload.planId });
+    if (result.ok && result.payment && result.payment.paymentUrl) {
+      await shell.openExternal(result.payment.paymentUrl);
+    }
+    return result;
   } catch (error) {
     return { ok: false, error: error.message };
   }

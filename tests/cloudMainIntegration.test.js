@@ -47,6 +47,51 @@ test('cloud login saves session and maps entitlements for the desktop subscripti
   assert.equal(sessionStore.load().accessToken, 'access-1');
 });
 
+test('cloud register creates the database account and saves it as the desktop session', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'add-whatsapp-cloud-register-'));
+  const sessionStore = new CloudSessionStore(path.join(dir, 'cloud-session.json'));
+  const client = new CloudApiClient({
+    baseUrl: 'http://api.test',
+    fetchImpl: async (url, options = {}) => {
+      if (url.endsWith('/v1/auth/register')) {
+        assert.deepEqual(JSON.parse(options.body), {
+          username: 'new-user',
+          password: 'StrongPass123',
+          deviceId: 'desktop-1',
+          planId: 'advanced'
+        });
+        return response(201, {
+          user: { id: 'user-new', username: 'new-user' },
+          accessToken: 'access-new',
+          refreshToken: 'refresh-new'
+        });
+      }
+      if (url.endsWith('/v1/me/entitlements')) {
+        assert.equal(options.headers.authorization, 'Bearer access-new');
+        return response(200, {
+          userId: 'user-new',
+          planId: 'advanced',
+          balanceCredits: 2000,
+          usedToday: 0,
+          usedThisMonth: 0,
+          availableToday: 200
+        });
+      }
+      throw new Error(`unexpected ${url}`);
+    }
+  });
+
+  const { createCloudDesktopController } = require('../src/main/cloudDesktopController');
+  const controller = createCloudDesktopController({ client, sessionStore, deviceId: 'desktop-1' });
+  const result = await controller.register({ username: 'new-user', password: 'StrongPass123' });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.cloud.user.id, 'user-new');
+  assert.equal(result.subscription.plan.id, 'advanced');
+  assert.equal(sessionStore.load().user.username, 'new-user');
+  assert.equal(sessionStore.load().accessToken, 'access-new');
+});
+
 test('cloud controller reports auth-required when refreshing without a token', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'add-whatsapp-cloud-empty-'));
   const sessionStore = new CloudSessionStore(path.join(dir, 'cloud-session.json'));
@@ -207,6 +252,76 @@ test('cloud controller renews and releases workspace leases', async () => {
     'http://api.test/v1/workspaces/leases/lease-1/renew',
     'http://api.test/v1/workspaces/leases/lease-1/release'
   ]);
+});
+
+test('cloud controller creates an Alipay top-up payment for the selected package', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'add-whatsapp-cloud-pay-'));
+  const sessionStore = new CloudSessionStore(path.join(dir, 'cloud-session.json'));
+  sessionStore.save({
+    user: { id: 'user-1', username: 'cloud-user' },
+    accessToken: 'access-1',
+    refreshToken: 'refresh-1',
+    entitlements: { userId: 'user-1', planId: 'advanced', balanceCredits: 2000 }
+  });
+  const calls = [];
+  const client = new CloudApiClient({
+    baseUrl: 'http://api.test',
+    fetchImpl: async (url, options = {}) => {
+      calls.push({ url, options });
+      assert.equal(options.headers.authorization, 'Bearer access-1');
+      if (url.endsWith('/v1/orders')) {
+        assert.deepEqual(JSON.parse(options.body), {
+          planId: 'professional',
+          credits: 5000,
+          amountCents: 150000
+        });
+        return response(201, {
+          id: 'order-1',
+          orderNo: '202606010001',
+          planId: 'professional',
+          credits: 5000,
+          amountCents: 150000,
+          status: 'created'
+        });
+      }
+      if (url.endsWith('/v1/orders/order-1/payments/alipay/page-pay')) {
+        return response(200, {
+          provider: 'alipay',
+          orderId: 'order-1',
+          orderNo: '202606010001',
+          paymentUrl: 'https://openapi.alipay.com/gateway.do?sign=abc'
+        });
+      }
+      throw new Error(`unexpected ${url}`);
+    }
+  });
+  const { createCloudDesktopController } = require('../src/main/cloudDesktopController');
+  const controller = createCloudDesktopController({ client, sessionStore, deviceId: 'desktop-1' });
+
+  const result = await controller.createAlipayTopUp({ planId: 'professional' });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.order.orderNo, '202606010001');
+  assert.equal(result.payment.paymentUrl, 'https://openapi.alipay.com/gateway.do?sign=abc');
+  assert.deepEqual(calls.map(call => call.url), [
+    'http://api.test/v1/orders',
+    'http://api.test/v1/orders/order-1/payments/alipay/page-pay'
+  ]);
+});
+
+test('cloud controller requires a cloud session before creating Alipay payments', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'add-whatsapp-cloud-pay-empty-'));
+  const sessionStore = new CloudSessionStore(path.join(dir, 'cloud-session.json'));
+  const { createCloudDesktopController } = require('../src/main/cloudDesktopController');
+  const controller = createCloudDesktopController({
+    sessionStore,
+    client: new CloudApiClient({ baseUrl: 'http://api.test', fetchImpl: async () => response(500, {}) })
+  });
+
+  const result = await controller.createAlipayTopUp({ planId: 'advanced' });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.authRequired, true);
 });
 
 function response(status, payload) {

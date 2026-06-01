@@ -326,3 +326,22 @@
 - 结果：进阶版显示 ¥0.40，专业版显示 ¥0.30，商业版显示 ¥0.20；dist\\Add WhatsApp 0.1.2.exe 已重新生成，网站下载包与 dist 包哈希一致。
 - 验证：node --test tests\\billingPlans.test.js server\\tests\\billing-service.test.mjs 通过 19/19；根项目 npm test 通过 99/99；server npm test 通过 23/23；website npm test 通过 6/6；npm run build 成功；asar 抽查 unitPriceCents 40/30/20 均为 true；三个 EXE SHA256 均为 837d84b7272723a8541de6cc3d4175dcaff27354d77cd35a8a48ad67448cce9f。
 - 下一步：打开 dist\\Add WhatsApp 0.1.2.exe 验证套餐页价格依次为 0.40、0.30、0.20。
+
+## 2026-06-01T23:05:00+08:00｜桌面端接入支付宝线上购买入口
+- 目标：用户已有公网后，把桌面端从“支付维护中”切到真实支付宝 page-pay 购买入口。
+- 动作：先写失败测试覆盖 `CloudApiClient.createOrder/createAlipayPagePay`、`createCloudDesktopController.createAlipayTopUp`、套餐线上支付能力和渲染契约；随后实现桌面端云端下单、支付宝 page-pay 换链、Electron `shell.openExternal` 打开收银台、preload API、套餐卡/额度页/账单页支付按钮和文案切换。
+- 动作：继续保持资金边界：Electron 只发送套餐 ID，订单金额和额度由主进程按本地套餐目录计算，服务端仍从订单行派生支付宝签名参数，支付宝私钥/公钥只通过 `server/` 环境变量注入。
+- 结果：付费套餐 `onlinePayment` 已打开；用户登录云端账号后可从套餐卡、额度页或账单页拉起支付宝收银台；未登录云端时按钮禁用并提示先登录云端。
+- 结果：重新打包 `dist\\Add WhatsApp 0.1.2.exe`，并同步到 `website\\public\\downloads\\latest\\Add-WhatsApp.exe` 与 `website\\public\\downloads\\releases\\0.1.2\\Add-WhatsApp-0.1.2.exe`；`update.json` 已更新为 2026-06-01、77064284 bytes、SHA256 `d3b6ce1e083fb28866339b8c4bf6aac1cedd0c13d995b5d482251c244a02f136`。
+- 验证：红灯测试先失败在缺少 `createOrder/createAlipayPagePay/createAlipayTopUp` 和维护态文案；实现后 `node --test tests\\cloudApiClient.test.js` 5/5、`node --test tests\\cloudMainIntegration.test.js` 8/8、`node --test tests\\billingPlans.test.js` 9/9、`node --test tests\\cloudRendererContract.test.js` 3/3 全部通过。
+- 验证：根项目 `npm test` 102/102 通过；`server npm test` 25/25 通过；`website npm test` 6/6 通过；根项目 `npm run build` 成功；latest/release 两个 EXE SHA256 均为 `d3b6ce1e083fb28866339b8c4bf6aac1cedd0c13d995b5d482251c244a02f136`。
+- 下一步：用真实公网 API 环境变量启动 server，并让桌面端通过 `ADD_WHATSAPP_API_URL` 指向公网 API，创建一笔新订单完成支付宝端到端付款和异步通知入账验证。
+
+## 2026-06-01T23:35:00+08:00｜桌面端账号改为单一数据库账号
+- 目标：移除用户可见的“本地账号 + 云端账号”双账号模型，让软件登录/注册直接使用后台数据库账号，支付宝支付按当前登录账号归属。
+- 动作：先写失败测试覆盖 `CloudApiClient.register`、`createCloudDesktopController.register` 和渲染契约；随后实现 `auth:register` / `auth:login` 直接调用云端 API，使用云端 `user.id` 作为桌面账号数据目录 ID，删除 preload 中第二套云端登录/退出 API。
+- 动作：清理登录页、设置页和支付锁定文案：删除恢复码/忘记密码入口、删除设置页云端登录面板，把“本地账号”改为单一“账号”，保留 WhatsApp 缓存和同步包作为账号下的本机数据能力。
+- 结果：用户打开客户端只需要注册或登录一个账号；套餐、余额、支付订单和本机数据目录都挂到同一个数据库账号，不再需要额外在设置页登录云端。
+- 结果：重新打包 `dist\\Add WhatsApp 0.1.2.exe` 并同步到 website latest/release；`update.json` 当前 `sizeBytes=77064878`，SHA256 `1e2cf253edc40e8fe7dcba8460cf114d3b434940f0397983db622683a8bbad2b`。
+- 验证：`node --test tests\\cloudApiClient.test.js tests\\cloudMainIntegration.test.js tests\\cloudRendererContract.test.js` 通过 18/18；根项目 `npm test` 通过 104/104；根项目 `npm run build` 成功；`server npm test` 通过 25/25；`website npm test` 通过 6/6。
+- 下一步：部署或更新桌面端运行环境后，用公网 API 登录一个数据库账号，点击套餐/额度/账单页支付宝支付，验证 `/v1/orders`、page-pay 打开和 `/v1/payments/alipay/notify` 入账。

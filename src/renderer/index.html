@@ -17,27 +17,26 @@
           </div>
           <div>
             <h1>Add WhatsApp</h1>
-            <p>本地账号保护 · 独立扫码缓存 · 加密同步包</p>
+            <p>账号登录 · 独立扫码缓存 · 加密同步包</p>
           </div>
         </div>
         <div class="auth-copy">
-          <p class="eyebrow">Local-first workspace</p>
-          <h2>把账号、扫码缓存和任务进度安静地留在本机。</h2>
-          <p>每个本地账号都有独立 WhatsApp 缓存。跨电脑继续任务时，用加密同步包迁移历史和进度。</p>
+          <p class="eyebrow">Online account workspace</p>
+          <h2>登录账号后，套餐、额度和支付直接和后台同步。</h2>
+          <p>每个账号都有独立 WhatsApp 缓存。跨电脑继续任务时，用加密同步包迁移历史和进度。</p>
         </div>
       </div>
 
       <div class="auth-panel">
-        <div class="auth-tabs" role="tablist" aria-label="本地账号">
+        <div class="auth-tabs" role="tablist" aria-label="账号">
           <button class="auth-tab active" type="button" data-auth-mode="login">登录</button>
           <button class="auth-tab" type="button" data-auth-mode="register">注册</button>
-          <button class="auth-tab" type="button" data-auth-mode="reset">忘记密码</button>
         </div>
 
         <form id="loginForm" class="auth-form active" data-auth-form="login">
           <div>
-            <h3>登录本地账号</h3>
-            <p>登录后才会加载表格、模板、历史和 WhatsApp 缓存。</p>
+            <h3>登录账号</h3>
+            <p>登录后会加载表格、模板、历史、套餐额度和 WhatsApp 缓存。</p>
           </div>
           <label class="field">
             <span>账号</span>
@@ -52,8 +51,8 @@
 
         <form id="registerForm" class="auth-form" data-auth-form="register">
           <div>
-            <h3>注册本地账号</h3>
-            <p>密码只保存哈希。注册成功后请下载恢复信息。</p>
+            <h3>注册账号</h3>
+            <p>注册成功后会自动登录，并从后台初始化套餐额度。</p>
           </div>
           <label class="field">
             <span>账号</span>
@@ -66,31 +65,6 @@
           <button class="button primary" type="submit">注册并登录</button>
         </form>
 
-        <form id="resetForm" class="auth-form" data-auth-form="reset">
-          <div>
-            <h3>用恢复码重置密码</h3>
-            <p>恢复码只显示一次，如果没有保存就无法本地找回。</p>
-          </div>
-          <label class="field">
-            <span>账号</span>
-            <input id="resetUsername" type="text" autocomplete="username" />
-          </label>
-          <label class="field">
-            <span>恢复码</span>
-            <input id="resetRecoveryCode" type="text" autocomplete="off" />
-          </label>
-          <label class="field">
-            <span>新密码</span>
-            <input id="resetPassword" type="password" autocomplete="new-password" />
-          </label>
-          <button class="button primary" type="submit">重置密码</button>
-        </form>
-
-        <div id="recoveryBox" class="recovery-box" hidden>
-          <span>恢复信息已生成</span>
-          <strong id="recoveryCodeText">-</strong>
-          <button id="downloadRecoveryButton" class="button secondary" type="button">下载到桌面</button>
-        </div>
         <p id="authMessage" class="auth-message" role="status"></p>
       </div>
     </section>
@@ -149,9 +123,9 @@
         <div class="sidebar-footer">
           <span class="status-pill">
             <span class="status-light"></span>
-            本地模式
+            在线账号
           </span>
-          <p>客户表格和登录缓存默认留在本机，不进入 Git。</p>
+          <p>客户表格和扫码缓存按账号隔离，不进入 Git。</p>
         </div>
       </aside>
 
@@ -432,8 +406,8 @@
             <span id="activePlanBadge" class="table-state">当前套餐</span>
           </section>
           <section id="planPaymentNotice" class="plan-notice" aria-label="支付维护提示">
-            <strong>支付宝沙盒官方异常修复中，线上支付暂不可用。</strong>
-            <span>当前只开放套餐边界和人工开通流程：能用的功能直接可用，套餐外功能会被锁定，充值和升级先联系人工处理。</span>
+            <strong>支付宝线上支付已接入。</strong>
+          <span>登录账号后可直接拉起支付宝收银台；支付成功后由服务器回调验签并自动写入额度账本。</span>
           </section>
           <section id="planCards" class="plan-grid" aria-label="套餐列表"></section>
           <section class="panel rule-panel">
@@ -556,7 +530,7 @@
             <div class="panel-head">
               <div>
                 <h3>购买额度</h3>
-                <p>支付宝沙盒官方异常修复中，线上支付暂不可用；当前先按套餐规则做权限锁定。</p>
+                <p>按当前套餐起充额度生成订单，并用支付宝完成付款。</p>
               </div>
             </div>
             <div class="quota-packages" aria-label="额度包">
@@ -568,7 +542,7 @@
             <div class="purchase-total">
               <span>预计金额按当前套餐单价计算</span>
               <strong id="quotaEstimate">¥600.00</strong>
-              <button class="button primary" type="button" disabled>支付维护中</button>
+              <button id="quotaPayButton" class="button primary" type="button">支付宝支付</button>
             </div>
           </section>
 
@@ -592,7 +566,7 @@
             <div>
               <span>您的下次付款</span>
               <strong>¥0.00</strong>
-              <p>支付宝沙盒官方异常修复中，当前不开放线上支付和自动入账。</p>
+              <p>支付完成后等待支付宝异步通知，入账结果可在后台支付事件中追踪。</p>
             </div>
             <div>
               <span>账单信息</span>
@@ -605,7 +579,7 @@
                 <h3>当前套餐</h3>
                 <p id="billingPlanDescription">当前使用本地套餐规则。</p>
               </div>
-              <button class="button primary" type="button" disabled>联系开通</button>
+              <button id="billingPayButton" class="button primary" type="button">支付宝充值</button>
             </div>
             <div class="billing-feature-grid">
               <div id="billingIncludedList"></div>
@@ -688,37 +662,12 @@
           </section>
         </section>
 
-        <section id="accountPage" class="page" data-title="管理本地账号、扫码缓存和跨设备同步" data-eyebrow="设置">
+        <section id="accountPage" class="page" data-title="管理账号、扫码缓存和跨设备同步" data-eyebrow="设置">
           <section class="account-grid">
-            <article id="cloudAccountPanel" class="panel account-panel cloud-account-panel">
-              <div class="panel-head">
-                <div>
-                  <h3>云端账号和套餐</h3>
-                  <p id="cloudStatusText">未连接后台 API，当前显示本地预览额度。</p>
-                </div>
-                <span id="cloudPlanBadge" class="table-state">本地预览</span>
-              </div>
-              <form id="cloudLoginForm" class="cloud-login-form">
-                <label class="field">
-                  <span>云端账号</span>
-                  <input id="cloudUsernameInput" type="text" autocomplete="username" />
-                </label>
-                <label class="field">
-                  <span>云端密码</span>
-                  <input id="cloudPasswordInput" type="password" autocomplete="current-password" />
-                </label>
-                <div class="task-actions">
-                  <button id="cloudLoginButton" class="button primary" type="submit">登录云端</button>
-                  <button id="cloudRefreshButton" class="button secondary" type="button">刷新套餐</button>
-                </div>
-                <button id="cloudLogoutButton" class="button ghost" type="button">退出云端账号</button>
-              </form>
-            </article>
-
             <article class="panel account-panel">
               <div class="panel-head">
                 <div>
-                  <h3>本地账号</h3>
+                  <h3>账号</h3>
                   <p>退出只清除应用登录状态，不删除这个账号自己的历史和 WhatsApp 缓存。</p>
                 </div>
                 <span id="accountNameBadge" class="table-state">-</span>
@@ -726,7 +675,8 @@
               <div class="account-actions">
                 <button id="openWorkspaceButton" class="button primary" type="button">新建工作台 / 打开另一个账号</button>
                 <button id="proxySettingsButton" class="button ghost" type="button" hidden>IP 设置</button>
-                <button id="logoutButton" class="button danger-button" type="button">退出本地账号</button>
+                <button id="refreshEntitlementsButton" class="button secondary" type="button">刷新套餐</button>
+                <button id="logoutButton" class="button danger-button" type="button">退出账号</button>
               </div>
             </article>
 
@@ -734,7 +684,7 @@
               <div class="panel-head">
                 <div>
                   <h3>WhatsApp 扫码缓存</h3>
-                  <p>每个本地账号都有独立缓存。清除后，下次开始任务会重新扫码。</p>
+                  <p>每个账号都有独立缓存。清除后，下次开始任务会重新扫码。</p>
                 </div>
               </div>
               <button id="clearWhatsAppButton" class="button ghost" type="button">清除当前账号 WhatsApp 缓存</button>
@@ -744,7 +694,7 @@
               <div class="panel-head">
                 <div>
                   <h3>跨设备同步包</h3>
-                  <p>同步包只迁移历史和进度，不包含密码、恢复码、WhatsApp 登录缓存或原始表格。</p>
+                  <p>同步包只迁移历史和进度，不包含密码、WhatsApp 登录缓存或原始表格。</p>
                 </div>
               </div>
               <div class="sync-actions">

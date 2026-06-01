@@ -5,39 +5,44 @@ const test = require('node:test');
 
 const root = path.join(__dirname, '..');
 
-test('renderer exposes a cloud account panel wired to preload cloud APIs', () => {
+test('auth surface uses one database account and removes the secondary cloud login panel', () => {
   const html = fs.readFileSync(path.join(root, 'src', 'renderer', 'index.html'), 'utf-8');
   const renderer = fs.readFileSync(path.join(root, 'src', 'renderer', 'renderer.js'), 'utf-8');
   const preload = fs.readFileSync(path.join(root, 'src', 'main', 'preload.js'), 'utf-8');
+  const main = fs.readFileSync(path.join(root, 'src', 'main', 'main.js'), 'utf-8');
 
   for (const id of [
     'cloudAccountPanel',
     'cloudLoginForm',
     'cloudUsernameInput',
     'cloudPasswordInput',
-    'cloudStatusText',
-    'cloudRefreshButton',
-    'cloudLogoutButton'
+    'downloadRecoveryButton',
+    'resetPasswordForm'
   ]) {
-    assert.match(html, new RegExp(`id="${id}"`));
-    assert.match(renderer, new RegExp(id));
+    assert.doesNotMatch(html, new RegExp(`id="${id}"`));
+    assert.doesNotMatch(renderer, new RegExp(id));
   }
 
-  assert.match(preload, /loginCloudAccount/);
-  assert.match(preload, /refreshCloudEntitlements/);
-  assert.match(preload, /logoutCloudAccount/);
-  assert.match(renderer, /loginCloudAccount/);
-  assert.match(renderer, /refreshCloudEntitlements/);
-  assert.match(renderer, /logoutCloudAccount/);
+  assert.doesNotMatch(html, /本地账号|云端账号和套餐|恢复码/);
+  assert.doesNotMatch(renderer, /请先在设置页登录云端账号|loginCloudAccount|logoutCloudAccount/);
+  assert.doesNotMatch(preload, /loginCloudAccount|logoutCloudAccount/);
+  assert.doesNotMatch(main, /new AuthStore|authStore\.login|authStore\.register/);
+  assert.match(main, /cloudController\.login/);
+  assert.match(main, /cloudController\.register/);
 });
 
-test('pricing page makes payment maintenance and package locks visible', () => {
+test('pricing page exposes Alipay payment actions instead of maintenance copy', () => {
   const html = fs.readFileSync(path.join(root, 'src', 'renderer', 'index.html'), 'utf-8');
   const renderer = fs.readFileSync(path.join(root, 'src', 'renderer', 'renderer.js'), 'utf-8');
+  const preload = fs.readFileSync(path.join(root, 'src', 'main', 'preload.js'), 'utf-8');
+  const main = fs.readFileSync(path.join(root, 'src', 'main', 'main.js'), 'utf-8');
 
-  assert.match(html, /id="planPaymentNotice"/);
-  assert.match(html, /支付宝沙盒官方异常修复中/);
-  assert.match(renderer, /支付维护中/);
+  assert.match(html, /id="quotaPayButton"/);
+  assert.match(renderer, /startAlipayTopUp/);
+  assert.match(preload, /startAlipayTopUp/);
+  assert.match(main, /cloud:alipay-top-up/);
+  assert.doesNotMatch(html, /支付宝沙盒官方异常修复中/);
+  assert.doesNotMatch(renderer, /支付维护中/);
   assert.match(renderer, /lockedFeatureList/);
 });
 

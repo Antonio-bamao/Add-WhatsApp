@@ -1,7 +1,6 @@
 const state = {
   auth: { authenticated: false, user: null },
   subscription: null,
-  pendingRecovery: null,
   imported: null,
   templates: { en: [], es: [], fr: [] },
   taskStats: { sent: 0, failed: 0, unregistered: 0, invalid: 0 },
@@ -19,13 +18,6 @@ const elements = {
   registerForm: document.getElementById('registerForm'),
   registerUsername: document.getElementById('registerUsername'),
   registerPassword: document.getElementById('registerPassword'),
-  resetForm: document.getElementById('resetForm'),
-  resetUsername: document.getElementById('resetUsername'),
-  resetRecoveryCode: document.getElementById('resetRecoveryCode'),
-  resetPassword: document.getElementById('resetPassword'),
-  recoveryBox: document.getElementById('recoveryBox'),
-  recoveryCodeText: document.getElementById('recoveryCodeText'),
-  downloadRecoveryButton: document.getElementById('downloadRecoveryButton'),
   authMessage: document.getElementById('authMessage'),
   pageEyebrow: document.getElementById('pageEyebrow'),
   pageTitle: document.getElementById('pageTitle'),
@@ -129,23 +121,16 @@ const elements = {
   quotaCardUserName: document.getElementById('quotaCardUserName'),
   quotaCardPlanSubtitle: document.getElementById('quotaCardPlanSubtitle'),
   quotaEstimate: document.getElementById('quotaEstimate'),
+  quotaPayButton: document.getElementById('quotaPayButton'),
   billingPlanDescription: document.getElementById('billingPlanDescription'),
+  billingPayButton: document.getElementById('billingPayButton'),
   billingIncludedList: document.getElementById('billingIncludedList'),
   billingExcludedList: document.getElementById('billingExcludedList'),
-  cloudAccountPanel: document.getElementById('cloudAccountPanel'),
-  cloudLoginForm: document.getElementById('cloudLoginForm'),
-  cloudUsernameInput: document.getElementById('cloudUsernameInput'),
-  cloudPasswordInput: document.getElementById('cloudPasswordInput'),
-  cloudStatusText: document.getElementById('cloudStatusText'),
-  cloudPlanBadge: document.getElementById('cloudPlanBadge'),
-  cloudLoginButton: document.getElementById('cloudLoginButton'),
-  cloudRefreshButton: document.getElementById('cloudRefreshButton'),
-  cloudLogoutButton: document.getElementById('cloudLogoutButton')
+  refreshEntitlementsButton: document.getElementById('refreshEntitlementsButton')
 };
 
 const PAGE_ACTIONS = new Set(['importPage']);
 const IMPORT_OPTIONS_STORAGE_KEY = 'addWhatsapp.importOptions';
-const PAYMENT_MAINTENANCE_MESSAGE = '支付宝沙盒官方异常修复中，线上支付暂不可用。请先走人工开通或联系运营处理。';
 const TEMPLATE_META = {
   en: { title: '英语模板', description: '英语区号码随机选择这些文案。', badge: 'EN' },
   es: { title: '西班牙语模板', description: '西班牙、墨西哥和拉美号码随机选择这些文案。', badge: 'ES' },
@@ -171,7 +156,6 @@ function setAuthMessage(message, tone = '') {
 function applyAuthState(auth) {
   state.auth = auth || { authenticated: false, user: null };
   if (state.auth.subscription) renderSubscriptionState(state.auth.subscription);
-  renderCloudState(state.auth.cloud);
   const authenticated = Boolean(state.auth.authenticated && state.auth.user);
   elements.authGate.hidden = authenticated;
   elements.appShell.hidden = !authenticated;
@@ -189,7 +173,6 @@ function applyAuthState(auth) {
   }
   if (!authenticated) {
     state.imported = null;
-    elements.recoveryBox.hidden = !state.pendingRecovery;
   }
 }
 
@@ -215,7 +198,8 @@ function renderPlanCards(subscription) {
       : '无需充值';
     const templateLimit = plan.templateLimit ? `自定义文案模板 X${plan.templateLimit}` : '自定义文案模板不限';
     const lockedItems = lockedFeatureList(plan);
-    const actionText = isActive ? '当前套餐' : '支付维护中 / 联系人工开通';
+    const actionText = isActive ? '当前套餐' : '支付宝支付';
+    const disabled = isActive || !plan.capabilities || !plan.capabilities.onlinePayment;
     card.innerHTML = `
       <div class="plan-card-head">
         <div>
@@ -241,36 +225,26 @@ function renderPlanCards(subscription) {
       <div class="plan-lock-list" aria-label="${escapeHtml(plan.name)}锁定功能">
         ${lockedItems.map(item => `<span>${escapeHtml(item)}</span>`).join('')}
       </div>
-      <button class="button ${isActive ? 'secondary' : 'ghost'}" type="button" disabled>${actionText}</button>
+      <button class="button ${isActive ? 'secondary' : 'ghost'}" type="button" data-plan-pay="${escapeHtml(plan.id)}" ${disabled ? 'disabled' : ''}>${actionText}</button>
     `;
+    const payButton = card.querySelector('[data-plan-pay]');
+    if (payButton && !disabled) {
+      payButton.addEventListener('click', () => startAlipayTopUp(plan.id, payButton));
+    }
     elements.planCards.appendChild(card);
   }
 }
 
 function lockedFeatureList(plan = {}) {
   const capabilities = plan.capabilities || {};
-  const locks = ['线上支付维护中'];
+  const locks = [];
+  if (!capabilities.onlinePayment) locks.push('线上支付宝支付锁定');
   if (!capabilities.exportPreview) locks.push('导出预检锁定');
   if (!capabilities.secondaryWorkspace) locks.push('新建工作台锁定');
   if (!capabilities.proxySettings) locks.push('代理 IP 设置锁定');
   if (plan.templateLimit) locks.push(`超过 ${formatCredits(plan.templateLimit)} 条自定义文案锁定`);
   if (plan.id === 'business') locks.push('第 6 个工作台起需人工审核');
   return locks;
-}
-
-function renderCloudState(cloud) {
-  if (!elements.cloudStatusText) return;
-  const connected = Boolean(cloud && cloud.authenticated && cloud.user);
-  const entitlements = cloud && cloud.entitlements ? cloud.entitlements : null;
-  const cloudName = connected ? (cloud.user.username || cloud.user.email || '云端账号') : '';
-  elements.cloudPlanBadge.textContent = entitlements && entitlements.planId
-    ? `云端：${entitlements.planId}`
-    : '本地预览';
-  elements.cloudStatusText.textContent = connected
-    ? `${cloudName} 已连接后台 API，余额 ${formatCredits(entitlements && entitlements.balanceCredits)}，今日已用 ${formatCredits(entitlements && entitlements.usedToday)}。`
-    : '未连接后台 API，当前显示本地预览额度。';
-  elements.cloudRefreshButton.disabled = !connected;
-  elements.cloudLogoutButton.disabled = !connected;
 }
 
 function renderSubscriptionState(subscription) {
@@ -393,16 +367,13 @@ function planExcludedFeatures(plan = {}) {
   if (!capabilities.proxySettings) excluded.push('代理 IP 设置');
   if (plan.templateLimit) excluded.push(`超过 ${formatCredits(plan.templateLimit)} 条自定义文案模板`);
   if (plan.id === 'business') excluded.push('第 6 个及以上工作台需人工审核扩容');
-  excluded.push('线上自动支付（支付宝沙盒维护中）');
+  if (!capabilities.onlinePayment) excluded.push('线上支付宝支付');
   excluded.push('自动发票');
   return excluded;
 }
 
 function featureAccess(feature) {
   const plan = state.subscription && state.subscription.plan ? state.subscription.plan : {};
-  if (feature === 'onlinePayment') {
-    return { ok: false, message: PAYMENT_MAINTENANCE_MESSAGE };
-  }
   if (plan.capabilities && plan.capabilities[feature]) return { ok: true };
   const labels = {
     exportPreview: '导出预检属于进阶版及以上功能',
@@ -438,6 +409,26 @@ function updateActionLocks() {
     const taskAccess = taskStartAccess();
     elements.runButton.disabled = !state.imported || validCount <= 0 || !taskAccess.ok;
     elements.runButton.title = taskAccess.ok ? '' : taskAccess.message;
+  }
+  const paymentAccess = featureAccess('onlinePayment');
+  const canPay = Boolean(paymentAccess.ok && state.auth && state.auth.authenticated);
+  for (const button of [elements.quotaPayButton, elements.billingPayButton]) {
+    if (!button) continue;
+    button.disabled = !canPay;
+    button.title = paymentAccess.ok
+      ? (canPay ? '' : '请先登录账号。')
+      : paymentAccess.message;
+  }
+  const activePlanId = state.subscription && state.subscription.plan && state.subscription.plan.id;
+  const catalog = state.subscription && state.subscription.catalog ? state.subscription.catalog : [];
+  for (const button of document.querySelectorAll('[data-plan-pay]')) {
+    const plan = catalog.find(item => item.id === button.dataset.planPay);
+    const planCanPay = Boolean(plan && plan.capabilities && plan.capabilities.onlinePayment);
+    const isActivePlan = button.dataset.planPay === activePlanId;
+    button.disabled = isActivePlan || !planCanPay || !canPay;
+    button.title = isActivePlan
+      ? ''
+      : (canPay ? '' : '请先登录账号。');
   }
 }
 
@@ -478,7 +469,7 @@ async function handleLogin(event) {
     setAuthMessage(response.error || '登录失败。', 'error');
     return;
   }
-  applyAuthState({ authenticated: true, user: response.user });
+  applyAuthState(response.auth || { authenticated: true, user: response.user, subscription: response.subscription, cloud: response.cloud });
   await loadAuthenticatedWorkspace();
 }
 
@@ -492,49 +483,9 @@ async function handleRegister(event) {
     setAuthMessage(response.error || '注册失败。', 'error');
     return;
   }
-  state.pendingRecovery = {
-    username: response.user.username,
-    accountId: response.user.accountId,
-    recoveryCode: response.recoveryCode
-  };
-  elements.recoveryCodeText.textContent = response.recoveryCode;
-  elements.recoveryBox.hidden = false;
-  setAuthMessage('账号已注册。请先下载恢复信息，再继续使用。', 'strong');
-  applyAuthState({ authenticated: true, user: response.user });
+  setAuthMessage('账号已注册并登录。', 'strong');
+  applyAuthState(response.auth || { authenticated: true, user: response.user, subscription: response.subscription, cloud: response.cloud });
   await loadAuthenticatedWorkspace();
-}
-
-async function handleResetPassword(event) {
-  event.preventDefault();
-  const response = await window.addWhatsapp.resetPassword({
-    username: elements.resetUsername.value,
-    recoveryCode: elements.resetRecoveryCode.value,
-    newPassword: elements.resetPassword.value
-  });
-  if (!response.ok) {
-    setAuthMessage(response.error || '重置失败。', 'error');
-    return;
-  }
-  state.pendingRecovery = {
-    username: response.user.username,
-    accountId: response.user.accountId,
-    recoveryCode: response.recoveryCode
-  };
-  elements.recoveryCodeText.textContent = response.recoveryCode;
-  elements.recoveryBox.hidden = false;
-  switchAuthMode('login');
-  setAuthMessage('密码已重置。新的恢复码已生成，请下载保存。', 'strong');
-}
-
-async function downloadRecovery() {
-  if (!state.pendingRecovery) return;
-  const response = await window.addWhatsapp.downloadRecovery(state.pendingRecovery);
-  if (!response.ok) {
-    setAuthMessage(response.error || '下载失败。', 'error');
-    return;
-  }
-  setAuthMessage(`恢复信息已保存到桌面：${shortPath(response.filePath)}`, 'strong');
-  elements.recoveryBox.hidden = true;
 }
 
 async function logoutAccount() {
@@ -547,45 +498,37 @@ async function logoutAccount() {
   switchAuthMode('login');
 }
 
-async function loginCloudAccount(event) {
-  event.preventDefault();
-  elements.cloudLoginButton.disabled = true;
-  elements.cloudStatusText.textContent = '正在连接后台 API...';
-  const response = await window.addWhatsapp.loginCloudAccount({
-    username: elements.cloudUsernameInput.value,
-    password: elements.cloudPasswordInput.value
-  });
-  elements.cloudLoginButton.disabled = false;
-  if (!response.ok) {
-    elements.cloudStatusText.textContent = response.error || '云端登录失败。';
-    return;
-  }
-  elements.cloudPasswordInput.value = '';
-  if (response.subscription) renderSubscriptionState(response.subscription);
-  renderCloudState(response.cloud);
-}
-
 async function refreshCloudEntitlements() {
-  elements.cloudRefreshButton.disabled = true;
-  elements.cloudStatusText.textContent = '正在刷新云端套餐...';
+  elements.refreshEntitlementsButton.disabled = true;
+  elements.syncState.textContent = '正在刷新套餐...';
   const response = await window.addWhatsapp.refreshCloudEntitlements();
+  elements.refreshEntitlementsButton.disabled = false;
   if (response.ok && response.subscription) {
     renderSubscriptionState(response.subscription);
-    renderCloudState(response.cloud);
+    elements.syncState.textContent = '套餐余额已刷新。';
   } else {
-    elements.cloudStatusText.textContent = response.error || '刷新云端套餐失败。';
-    renderCloudState(response.cloud || (state.auth && state.auth.cloud));
+    elements.syncState.textContent = response.error || '刷新套餐失败。';
   }
 }
 
-async function logoutCloudAccount() {
-  const response = await window.addWhatsapp.logoutCloudAccount();
+async function startAlipayTopUp(planId = null, sourceButton = null) {
+  const plan = planId
+    ? (state.subscription && state.subscription.catalog || []).find(item => item.id === planId)
+    : state.subscription && state.subscription.plan;
+  const targetPlanId = plan && plan.id ? plan.id : (state.subscription && state.subscription.plan && state.subscription.plan.id);
+  const buttons = [sourceButton, elements.quotaPayButton, elements.billingPayButton].filter(Boolean);
+  for (const button of buttons) button.disabled = true;
+  elements.syncState.textContent = '正在创建支付宝订单...';
+
+  const response = await window.addWhatsapp.startAlipayTopUp({ planId: targetPlanId });
   if (!response.ok) {
-    elements.cloudStatusText.textContent = response.error || '退出云端失败。';
+    elements.syncState.textContent = response.error || '支付宝订单创建失败。';
+    updateActionLocks();
     return;
   }
-  if (response.subscription) renderSubscriptionState(response.subscription);
-  renderCloudState(response.cloud);
+
+  elements.syncState.textContent = `已打开支付宝收银台，订单 ${response.order.orderNo}，付款后请刷新套餐余额。`;
+  updateActionLocks();
 }
 
 function showWorkspaceRiskModal() {
@@ -612,7 +555,7 @@ async function openAnotherWorkspace() {
   }
   hideWorkspaceRiskModal();
   elements.syncState.textContent = response.ok
-    ? '已打开独立工作台。请在新窗口登录另一个本地账号，任务不会自动开始。'
+    ? '已打开独立工作台。请在新窗口登录另一个账号，任务不会自动开始。'
     : (response.error || '打开新工作台失败。');
   const subscription = await window.addWhatsapp.getSubscriptionState();
   renderSubscriptionState(subscription);
@@ -1334,11 +1277,9 @@ for (const tab of elements.authTabs) {
 }
 elements.loginForm.addEventListener('submit', handleLogin);
 elements.registerForm.addEventListener('submit', handleRegister);
-elements.resetForm.addEventListener('submit', handleResetPassword);
-elements.cloudLoginForm.addEventListener('submit', loginCloudAccount);
-elements.cloudRefreshButton.addEventListener('click', refreshCloudEntitlements);
-elements.cloudLogoutButton.addEventListener('click', logoutCloudAccount);
-elements.downloadRecoveryButton.addEventListener('click', downloadRecovery);
+elements.refreshEntitlementsButton.addEventListener('click', refreshCloudEntitlements);
+elements.quotaPayButton.addEventListener('click', () => startAlipayTopUp());
+elements.billingPayButton.addEventListener('click', () => startAlipayTopUp());
 elements.importButton.addEventListener('click', importContacts);
 elements.dropImportButton.addEventListener('click', importContacts);
 elements.exportButton.addEventListener('click', exportReport);

@@ -54,6 +54,7 @@ test('exposes package capability boundaries for lockable desktop features', () =
   assert.equal(advanced.capabilities.exportPreview, true);
   assert.equal(advanced.capabilities.secondaryWorkspace, true);
   assert.equal(advanced.capabilities.proxySettings, true);
+  assert.equal(advanced.capabilities.onlinePayment, true);
   assert.equal(business.capabilities.workspaceExpansionReview, true);
 });
 
@@ -114,11 +115,7 @@ test('returns clear locked messages for features outside the active package', ()
     message: '导出预检属于进阶版及以上功能，当前免费版不可用。'
   });
   assert.deepEqual(resolveFeatureAccess(advanced, 'exportPreview'), { ok: true });
-  assert.deepEqual(resolveFeatureAccess(advanced, 'onlinePayment'), {
-    ok: false,
-    reason: 'PAYMENT_MAINTENANCE',
-    message: '支付宝沙盒官方异常修复中，线上支付暂不可用。请先走人工开通或联系运营处理。'
-  });
+  assert.deepEqual(resolveFeatureAccess(advanced, 'onlinePayment'), { ok: true });
 });
 
 test('limits each language template pool by package', () => {

@@ -1,6 +1,4 @@
 const DAY_MS = 24 * 60 * 60 * 1000;
-const PAYMENT_MAINTENANCE_MESSAGE = '支付宝沙盒官方异常修复中，线上支付暂不可用。请先走人工开通或联系运营处理。';
-
 const PLANS = [
   {
     id: 'free',
@@ -47,7 +45,7 @@ const PLANS = [
       secondaryWorkspace: true,
       proxySettings: true,
       customTemplates: true,
-      onlinePayment: false,
+      onlinePayment: true,
       workspaceExpansionReview: false
     },
     features: ['包含免费版的全部功能', '导出预检', '新建工作台多账号添加 X2', '代理 IP 设置', '自定义文案模板 X2']
@@ -73,7 +71,7 @@ const PLANS = [
       secondaryWorkspace: true,
       proxySettings: true,
       customTemplates: true,
-      onlinePayment: false,
+      onlinePayment: true,
       workspaceExpansionReview: false
     },
     features: ['包含进阶版的全部功能', '新建工作台多账号添加 X3', '自定义文案模板 X4']
@@ -98,7 +96,7 @@ const PLANS = [
       secondaryWorkspace: true,
       proxySettings: true,
       customTemplates: true,
-      onlinePayment: false,
+      onlinePayment: true,
       workspaceExpansionReview: true
     },
     features: ['包含专业版的全部功能', '默认支持 5 个工作台，可申请扩容', '自定义文案模板不限']
@@ -160,13 +158,6 @@ function planFrom(value) {
 
 function resolveFeatureAccess(entitlementOrPlan, feature) {
   const plan = planFrom(entitlementOrPlan);
-  if (feature === 'onlinePayment') {
-    return {
-      ok: false,
-      reason: 'PAYMENT_MAINTENANCE',
-      message: PAYMENT_MAINTENANCE_MESSAGE
-    };
-  }
   if (plan.capabilities && plan.capabilities[feature]) return { ok: true };
   const labels = {
     exportPreview: '导出预检属于进阶版及以上功能',
@@ -274,7 +265,6 @@ function usageSummary(entitlement) {
 module.exports = {
   DEFAULT_PLAN_ID,
   DAY_MS,
-  PAYMENT_MAINTENANCE_MESSAGE,
   canOpenSecondaryWorkspace,
   createEntitlementState,
   getPlan,

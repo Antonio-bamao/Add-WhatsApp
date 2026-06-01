@@ -18,6 +18,13 @@ class CloudApiClient {
     });
   }
 
+  async register({ username, password, deviceId, planId = 'advanced' }) {
+    return this.request('/v1/auth/register', {
+      method: 'POST',
+      body: { username, password, deviceId, planId }
+    });
+  }
+
   async getEntitlements(accessToken) {
     return this.request('/v1/me/entitlements', {
       headers: { authorization: `Bearer ${accessToken}` }
@@ -29,6 +36,22 @@ class CloudApiClient {
       method: 'POST',
       headers: { authorization: `Bearer ${accessToken}` },
       body: payload
+    });
+  }
+
+  async createOrder(accessToken, payload) {
+    return this.request('/v1/orders', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${accessToken}` },
+      body: payload
+    });
+  }
+
+  async createAlipayPagePay(accessToken, orderId) {
+    return this.request(`/v1/orders/${encodeURIComponent(orderId)}/payments/alipay/page-pay`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${accessToken}` },
+      body: {}
     });
   }
 

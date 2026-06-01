@@ -45,6 +45,38 @@ test('logs in to the cloud API and fetches entitlements with bearer auth', async
   assert.equal(requests.length, 2);
 });
 
+test('registers a database account and returns the issued cloud session', async () => {
+  const client = new CloudApiClient({
+    baseUrl: 'http://127.0.0.1:4110',
+    fetchImpl: async (url, options = {}) => {
+      assert.equal(url, 'http://127.0.0.1:4110/v1/auth/register');
+      assert.equal(options.method, 'POST');
+      assert.deepEqual(JSON.parse(options.body), {
+        username: 'new-user',
+        password: 'StrongPass123',
+        deviceId: 'desktop-1',
+        planId: 'advanced'
+      });
+      return response(201, {
+        user: { id: 'user-new', username: 'new-user', status: 'active' },
+        accessToken: 'access-new',
+        refreshToken: 'refresh-new'
+      });
+    }
+  });
+
+  const registered = await client.register({
+    username: 'new-user',
+    password: 'StrongPass123',
+    deviceId: 'desktop-1',
+    planId: 'advanced'
+  });
+
+  assert.equal(registered.user.id, 'user-new');
+  assert.equal(registered.accessToken, 'access-new');
+  assert.equal(registered.refreshToken, 'refresh-new');
+});
+
 test('maps cloud entitlements into desktop subscription state shape', () => {
   const mapped = mapCloudEntitlements({
     planId: 'business',
@@ -117,6 +149,59 @@ test('renews and releases workspace leases with bearer auth', async () => {
   assert.equal(renewed.status, 'active');
   assert.equal(released.status, 'released');
   assert.equal(requests.length, 2);
+});
+
+test('creates a cloud order and requests an Alipay page-pay link with bearer auth', async () => {
+  const requests = [];
+  const client = new CloudApiClient({
+    baseUrl: 'http://127.0.0.1:4110',
+    fetchImpl: async (url, options = {}) => {
+      requests.push({ url, options });
+      assert.equal(options.headers.authorization, 'Bearer access-1');
+      if (url.endsWith('/v1/orders')) {
+        assert.equal(options.method, 'POST');
+        assert.deepEqual(JSON.parse(options.body), {
+          planId: 'professional',
+          credits: 5000,
+          amountCents: 150000
+        });
+        return response(201, {
+          id: 'order-1',
+          orderNo: '202606010001',
+          planId: 'professional',
+          credits: 5000,
+          amountCents: 150000,
+          status: 'created'
+        });
+      }
+      if (url.endsWith('/v1/orders/order-1/payments/alipay/page-pay')) {
+        assert.equal(options.method, 'POST');
+        return response(200, {
+          provider: 'alipay',
+          orderId: 'order-1',
+          orderNo: '202606010001',
+          paymentUrl: 'https://openapi.alipay.com/gateway.do?sign=abc',
+          paymentHtml: '<form></form>'
+        });
+      }
+      throw new Error(`unexpected url: ${url}`);
+    }
+  });
+
+  const order = await client.createOrder('access-1', {
+    planId: 'professional',
+    credits: 5000,
+    amountCents: 150000
+  });
+  const payment = await client.createAlipayPagePay('access-1', order.id);
+
+  assert.equal(order.orderNo, '202606010001');
+  assert.equal(payment.provider, 'alipay');
+  assert.equal(payment.paymentUrl, 'https://openapi.alipay.com/gateway.do?sign=abc');
+  assert.deepEqual(requests.map(item => item.url), [
+    'http://127.0.0.1:4110/v1/orders',
+    'http://127.0.0.1:4110/v1/orders/order-1/payments/alipay/page-pay'
+  ]);
 });
 
 function response(status, payload) {

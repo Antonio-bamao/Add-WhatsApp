@@ -1,6 +1,6 @@
 const path = require('node:path');
 
-const AUTH_REQUIRED_ERROR = /请先登录本地账号/;
+const AUTH_REQUIRED_ERROR = /请先登录账号/;
 
 function accountDirectoryFor(userDataPath, accountId) {
   return path.join(userDataPath, 'accounts', accountId);
@@ -28,7 +28,7 @@ class AccountContext {
   }
 
   requireCurrentUser() {
-    if (!this.currentUser) throw new Error('请先登录本地账号。');
+    if (!this.currentUser) throw new Error('请先登录账号。');
     return this.getCurrentUser();
   }
 

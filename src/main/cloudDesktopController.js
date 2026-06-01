@@ -1,7 +1,25 @@
+const { getPlan } = require('../core/billingPlans');
 const { mapCloudEntitlements } = require('../core/cloudApiClient');
 const crypto = require('node:crypto');
 
 function createCloudDesktopController({ client, sessionStore, deviceId = 'desktop' }) {
+  async function register({ username, password, planId = 'advanced' }) {
+    const session = await client.register({ username, password, deviceId, planId });
+    const entitlements = await client.getEntitlements(session.accessToken);
+    const subscription = mapCloudEntitlements(entitlements);
+    sessionStore.save({
+      user: session.user,
+      accessToken: session.accessToken,
+      refreshToken: session.refreshToken,
+      entitlements
+    });
+    return {
+      ok: true,
+      cloud: publicCloudState({ ...sessionStore.load(), entitlements }),
+      subscription
+    };
+  }
+
   async function login({ username, password }) {
     const session = await client.login({ username, password, deviceId });
     const entitlements = await client.getEntitlements(session.accessToken);
@@ -22,7 +40,7 @@ function createCloudDesktopController({ client, sessionStore, deviceId = 'deskto
   async function refreshEntitlements() {
     const session = sessionStore.load();
     if (!session.authenticated || !session.accessToken) {
-      return { ok: false, authRequired: true, error: '请先登录云端账号。' };
+      return { ok: false, authRequired: true, error: '请先登录账号。' };
     }
     const entitlements = await client.getEntitlements(session.accessToken);
     const subscription = mapCloudEntitlements(entitlements);
@@ -93,6 +111,36 @@ function createCloudDesktopController({ client, sessionStore, deviceId = 'deskto
     return { ok: true, lease };
   }
 
+  async function createAlipayTopUp({ planId }) {
+    const session = sessionStore.load();
+    if (!session.authenticated || !session.accessToken) {
+      return { ok: false, authRequired: true, error: '请先登录账号。' };
+    }
+    const plan = getPlan(planId || session.entitlements?.planId || 'advanced');
+    const credits = Number(plan.minimumTopUpCredits || 0);
+    const amountCents = credits * Number(plan.unitPriceCents || 0);
+    if (!credits || !amountCents) {
+      return { ok: false, error: '当前套餐不需要线上充值。' };
+    }
+    const order = await client.createOrder(session.accessToken, {
+      planId: plan.id,
+      credits,
+      amountCents
+    });
+    const payment = await client.createAlipayPagePay(session.accessToken, order.id);
+    return {
+      ok: true,
+      order,
+      payment,
+      plan: {
+        id: plan.id,
+        name: plan.name,
+        credits,
+        amountCents
+      }
+    };
+  }
+
   function logout() {
     sessionStore.clear();
     return { ok: true, cloud: publicCloudState(sessionStore.load()) };
@@ -108,6 +156,8 @@ function createCloudDesktopController({ client, sessionStore, deviceId = 'deskto
     issueWorkspaceLease,
     renewWorkspaceLease,
     releaseWorkspaceLease,
+    createAlipayTopUp,
+    register,
     login,
     logout,
     refreshEntitlements
@@ -130,3 +180,4 @@ module.exports = {
   createCloudDesktopController,
   publicCloudState
 };
+
