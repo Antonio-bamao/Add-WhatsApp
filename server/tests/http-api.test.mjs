@@ -186,7 +186,24 @@ describe("cloud API skeleton", () => {
       assert.equal(consoleSnapshot.payload.source, "server-local-preview");
       assert.equal(consoleSnapshot.payload.summary.users, 1);
       assert.equal(consoleSnapshot.payload.summary.paymentEvents, 1);
+      assert.deepEqual(consoleSnapshot.payload.modules.users.recordHeaders, [
+        "注册时间",
+        "用户 ID",
+        "账号",
+        "状态",
+        "套餐",
+        "余额",
+        "会话"
+      ]);
       assert.equal(consoleSnapshot.payload.modules.users.records.length, 1);
+      const userRow = consoleSnapshot.payload.modules.users.records[0];
+      assert.equal(userRow[1], registered.payload.user.id);
+      assert.equal(userRow[2], "api-user");
+      assert.equal(userRow[3], "active");
+      assert.equal(userRow[4], "advanced");
+      assert.equal(userRow[5], "2299");
+      assert.match(userRow[6], /sessions/);
+      assert.doesNotMatch(JSON.stringify(consoleSnapshot.payload.modules.users), /password/i);
       assert.equal(consoleSnapshot.payload.modules.plans.records.length, 4);
       assert.ok(consoleSnapshot.payload.modules.orders.paymentEvents.some((row) => row.includes("evt-api-paid-1")));
       assert.ok(consoleSnapshot.payload.auditTrail.some((entry) => entry.action === "credit.adjustment"));

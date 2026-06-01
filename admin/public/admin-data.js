@@ -1,14 +1,14 @@
 export const adminModules = [
   {
     key: "users",
-    title: "用户与云端账号",
+    title: "注册用户",
     owner: "Auth Module",
-    desktopSurface: "云端登录、免费试用、本机资料档案绑定",
+    desktopSurface: "登录注册、套餐权益、支付归属",
     primaryAction: "冻结账号或重置会话",
     metric: "1,286",
-    metricLabel: "云账号",
+    metricLabel: "注册账号",
     status: "待接 API",
-    guards: ["密码只存哈希", "本地账号和云端账号分开命名", "封禁后桌面端停止新任务"]
+    guards: ["密码只保存不可逆校验值", "后台不展示原始密码", "封禁后桌面端停止新任务"]
   },
   {
     key: "plans",
@@ -92,17 +92,18 @@ export const adminModules = [
 const modulePageConfig = {
   users: {
     route: "#/users",
-    pageTitle: "用户与云端账号",
-    pageDescription: "管理云端登录主体、账号状态、会话和设备入口；本机资料档案仍留在桌面端。",
+    pageTitle: "注册用户",
+    pageDescription: "查看数据库注册账号、注册时间、套餐、余额和会话；密码只保留不可逆校验值，后台不展示原始密码。",
     sections: [
-      { title: "账号状态", body: "筛选 active、frozen、deleted，封禁后桌面端下一次请求必须停止新的任务启动。" },
-      { title: "登录与会话", body: "查看 refresh session、设备名和最后活跃时间，支持重置会话。" },
-      { title: "本地边界", body: "本地账号只作为本机资料档案，云端账号才是付费主体。" }
+      { title: "注册情况", body: "用户注册后写入 users 表，列表按注册时间展示账号、用户 ID、状态和当前套餐。" },
+      { title: "密码边界", body: "数据库保存不可逆校验值，登录时只做校验比对，后台永远不显示原始密码。" },
+      { title: "支付归属", body: "支付宝订单、额度账本、会话和工作台租约都归属同一个数据库用户 ID。" }
     ],
+    recordHeaders: ["注册时间", "用户 ID", "账号", "状态", "套餐", "余额", "会话"],
     records: [
-      ["plus-user", "active", "PLUS", "2 台设备"],
-      ["audit-user", "active", "ULTRA", "1 台设备"],
-      ["risk-review", "frozen", "FREE", "0 台设备"]
+      ["2026-06-01 23:40", "user_1024", "plus-user", "active", "advanced", "2000", "2 sessions"],
+      ["2026-06-01 23:28", "user_2048", "audit-user", "active", "business", "8600", "1 sessions"],
+      ["2026-06-01 22:59", "user_4096", "risk-review", "frozen", "free", "0", "0 sessions"]
     ]
   },
   plans: {
@@ -251,7 +252,7 @@ export const desktopAdminMappings = [
     desktopPage: "推荐奖励页",
     adminModule: "推荐审核",
     sourceOfTruth: "referral_codes + referral_records",
-    adminChecks: ["推荐码是否绑定云账号", "自邀请是否进入 held_for_review", "奖励是否只发一次"]
+    adminChecks: ["推荐码是否绑定注册账号", "自邀请是否进入 held_for_review", "奖励是否只发一次"]
   }
 ];
 

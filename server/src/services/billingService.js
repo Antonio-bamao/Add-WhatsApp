@@ -670,6 +670,8 @@ function tableRows(items, mapper) {
   return items.length > 0 ? items.map(mapper) : [["暂无记录", "empty", "等待 API 写入", "本地预览"]];
 }
 
+const USER_RECORD_HEADERS = ["注册时间", "用户 ID", "账号", "状态", "套餐", "余额", "会话"];
+
 function auditPreviewRows(auditLogs) {
   return auditLogs.map((entry) => ({
     at: entry.createdAt.replace("T", " ").slice(0, 16),
@@ -749,9 +751,19 @@ export function getAdminConsoleSnapshot(store) {
     users: {
       metric: String(users.length),
       status: "本地 API 预览",
+      recordHeaders: USER_RECORD_HEADERS,
       records: tableRows(users, (user) => {
         const subscription = getSubscription(store, user.id);
-        return [user.username, user.status, subscription.planId, `${[...store.sessions.values()].filter((session) => session.userId === user.id).length} sessions`];
+        const sessions = [...store.sessions.values()].filter((session) => session.userId === user.id).length;
+        return [
+          user.createdAt,
+          user.id,
+          user.username,
+          user.status,
+          subscription.planId,
+          String(balanceFor(store, user.id)),
+          `${sessions} sessions`
+        ];
       })
     },
     plans: {

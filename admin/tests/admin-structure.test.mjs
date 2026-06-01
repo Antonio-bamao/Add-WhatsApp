@@ -72,7 +72,7 @@ describe("admin console structure", () => {
     const js = readText("public/admin.js");
 
     for (const expectedText of [
-      "用户与云端账号",
+      "注册用户",
       "套餐与订阅",
       "额度账本",
       "用量限额",
@@ -170,5 +170,21 @@ describe("admin console structure", () => {
     assert.match(js, /handlePaymentEventControlChange/);
     assert.match(css, /\.event-pagination/);
     assert.match(css, /\.event-summary/);
+  });
+
+  it("renders the users module as a registration list without password fields", () => {
+    const data = readText("public/admin-data.js");
+    const js = readText("public/admin.js");
+
+    assert.match(data, /pageTitle: "注册用户"/);
+    assert.match(data, /注册时间/);
+    assert.match(data, /用户 ID/);
+    assert.match(data, /账号/);
+    assert.match(data, /套餐/);
+    assert.match(data, /余额/);
+    assert.match(data, /会话/);
+    assert.match(js, /module\.recordHeaders/);
+    assert.doesNotMatch(data, /password_hash|passwordHash|明文密码|密码哈希/i);
+    assert.doesNotMatch(js, /password_hash|passwordHash|明文密码|密码哈希/i);
   });
 });

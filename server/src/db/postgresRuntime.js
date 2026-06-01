@@ -867,6 +867,22 @@ export function createPostgresRuntime({ databaseUrl, pool } = {}) {
       const client = await db.connect();
       try {
         const users = await client.query("SELECT * FROM users ORDER BY created_at DESC LIMIT 50");
+        const userIds = users.rows.map((user) => user.id);
+        const subscriptions = userIds.length
+          ? await client.query(
+              "SELECT DISTINCT ON (user_id) user_id, plan_id FROM subscriptions WHERE user_id = ANY($1::text[]) AND status = 'active' ORDER BY user_id, started_at DESC",
+              [userIds]
+            )
+          : { rows: [] };
+        const balances = userIds.length
+          ? await client.query("SELECT user_id, COALESCE(SUM(amount), 0)::int AS balance FROM credit_ledger WHERE user_id = ANY($1::text[]) GROUP BY user_id", [userIds])
+          : { rows: [] };
+        const sessions = userIds.length
+          ? await client.query("SELECT user_id, COUNT(*)::int AS count FROM sessions WHERE user_id = ANY($1::text[]) AND revoked_at IS NULL GROUP BY user_id", [userIds])
+          : { rows: [] };
+        const subscriptionByUser = new Map(subscriptions.rows.map((row) => [row.user_id, row.plan_id]));
+        const balanceByUser = new Map(balances.rows.map((row) => [row.user_id, Number(row.balance || 0)]));
+        const sessionsByUser = new Map(sessions.rows.map((row) => [row.user_id, Number(row.count || 0)]));
         const plans = await client.query("SELECT * FROM plans ORDER BY unit_price_cents, id");
         const ledger = await client.query("SELECT * FROM credit_ledger ORDER BY created_at DESC LIMIT 50");
         const dailyUsage = await client.query("SELECT * FROM usage_daily ORDER BY business_date DESC LIMIT 50");
@@ -893,7 +909,16 @@ export function createPostgresRuntime({ databaseUrl, pool } = {}) {
             users: {
               metric: String(users.rows.length),
               status: "PostgreSQL 已接",
-              records: tableRows(users.rows, (user) => [user.username, user.status, user.id, user.created_at])
+              recordHeaders: ["注册时间", "用户 ID", "账号", "状态", "套餐", "余额", "会话"],
+              records: tableRows(users.rows, (user) => [
+                user.created_at,
+                user.id,
+                user.username,
+                user.status,
+                subscriptionByUser.get(user.id) || "-",
+                String(balanceByUser.get(user.id) || 0),
+                `${sessionsByUser.get(user.id) || 0} sessions`
+              ])
             },
             plans: {
               metric: String(planRows.length),

@@ -38,6 +38,7 @@
 - 已完成：`dist\Add WhatsApp 0.1.2.exe` 已重新打包并同步到 `website\public\downloads\latest\Add-WhatsApp.exe` 和 `website\public\downloads\releases\0.1.2\Add-WhatsApp-0.1.2.exe`；`update.json` 已更新到 `releaseDate=2026-06-01`、`sizeBytes=77064284`、SHA256 `d3b6ce1e083fb28866339b8c4bf6aac1cedd0c13d995b5d482251c244a02f136`。
 - 已完成：桌面端账号模型从“本地账号 + 云端账号”双入口改为单一数据库账号；登录/注册直接走云端 API `/v1/auth/login` 和 `/v1/auth/register`，返回的云端 `user.id` 作为桌面账号数据目录 ID，设置页删除第二套云端登录面板、恢复码和本地账号文案。
 - 已完成：单一数据库账号改造后重新打包 `dist\Add WhatsApp 0.1.2.exe` 并同步到 `website\public\downloads\latest\Add-WhatsApp.exe` 和 `website\public\downloads\releases\0.1.2\Add-WhatsApp-0.1.2.exe`；`update.json` 当前为 `releaseDate=2026-06-01`、`sizeBytes=77064878`、SHA256 `1e2cf253edc40e8fe7dcba8460cf114d3b434940f0397983db622683a8bbad2b`。
+- 已完成：后台管理台用户模块已改为“注册用户”列表；`/v1/admin/console` 的 users 模块现在输出注册时间、用户 ID、账号、状态、套餐、余额和会话数，内存 runtime 与 PostgreSQL runtime 均不向后台快照返回密码字段。
 - 进行中：真实支付宝端到端付款仍需用当前公网 HTTPS 域名、商户/沙箱凭据和云端账号生成新订单后完成一次扫码/PC 支付，确认支付宝异步通知能打到 `/v1/payments/alipay/notify` 并自动入账。
 - 验证：`website\npm test` 通过 6/6；`website\npm run build` 成功；根项目 `npm test` 通过 77/77；本地 `http://localhost:3100` 桌面/移动端 Chrome headless 截图已复查，样式不再退化为裸 HTML；浏览器插件调试确认首屏只剩 1 个 WebGL canvas、无旧 `.globe-static` SVG 叠加、无 Server Error，地球 HUD 文案已删除，路线扩展到 20 条；下载页返回 200，`/downloads/latest/Add-WhatsApp.exe` HEAD 长度为 `77060652`。
 - 验证：`admin\npm test` 通过 5/5；本地 `http://127.0.0.1:3220/` 返回 200；管理台 JS 已包含 `ADD_WHATSAPP_API_URL`、`/v1/admin/console`、API 回退逻辑和运行时快照合并逻辑。
@@ -59,6 +60,7 @@
 - 验证：套餐单价调整后，`node --test tests\billingPlans.test.js server\tests\billing-service.test.mjs` 通过 19/19；根项目 `npm test` 通过 99/99；`server\npm test` 通过 23/23；`website\npm test` 通过 6/6；根项目 `npm run build` 成功，asar 抽查新价格 40/30/20 已进入打包产物。
 - 验证：桌面端支付宝购买入口接入后，先写失败测试再实现；`node --test tests\cloudApiClient.test.js` 通过 5/5；`node --test tests\cloudMainIntegration.test.js` 通过 8/8；`node --test tests\billingPlans.test.js` 通过 9/9；`node --test tests\cloudRendererContract.test.js` 通过 3/3；根项目 `npm test` 通过 102/102；`server\npm test` 通过 25/25；`website\npm test` 通过 6/6；根项目 `npm run build` 成功。
 - 验证：单一数据库账号改造后，`node --test tests\cloudApiClient.test.js tests\cloudMainIntegration.test.js tests\cloudRendererContract.test.js` 通过 18/18；根项目 `npm test` 通过 104/104；根项目 `npm run build` 成功；`server\npm test` 通过 25/25；`website\npm test` 通过 6/6。
+- 验证：后台注册用户列表改造后，`admin\npm test` 通过 8/8；`server\npm test` 通过 25/25。
 - 下一步：用实际公网 API 环境变量启动服务端：`DATABASE_URL`、`ALIPAY_APP_ID`、`ALIPAY_APP_PRIVATE_KEY`、`ALIPAY_PUBLIC_KEY`、`ALIPAY_NOTIFY_URL`、`ALIPAY_RETURN_URL`、`ALIPAY_GATEWAY_URL`；桌面端设置 `ADD_WHATSAPP_API_URL` 指向公网 API 后，登录云端账号并点击支付宝支付完成一笔真实联调。
 - 阻塞项：如果继续使用旧沙箱应用，需确认支付宝沙箱 `alipay.trade.page.pay` 已恢复；此前沙箱曾出现 `SYSTEM_ERROR` / `504 Gateway Time-out`，并且 `alipay.trade.query` 返回 `ACQ.TRADE_NOT_EXIST`。
 - 阻塞项：管理员登录方式、支付渠道/人工收款流程、生产域名和部署平台还未最终确定。

@@ -345,3 +345,11 @@
 - 结果：重新打包 `dist\\Add WhatsApp 0.1.2.exe` 并同步到 website latest/release；`update.json` 当前 `sizeBytes=77064878`，SHA256 `1e2cf253edc40e8fe7dcba8460cf114d3b434940f0397983db622683a8bbad2b`。
 - 验证：`node --test tests\\cloudApiClient.test.js tests\\cloudMainIntegration.test.js tests\\cloudRendererContract.test.js` 通过 18/18；根项目 `npm test` 通过 104/104；根项目 `npm run build` 成功；`server npm test` 通过 25/25；`website npm test` 通过 6/6。
 - 下一步：部署或更新桌面端运行环境后，用公网 API 登录一个数据库账号，点击套餐/额度/账单页支付宝支付，验证 `/v1/orders`、page-pay 打开和 `/v1/payments/alipay/notify` 入账。
+
+## 2026-06-02T00:10:00+08:00｜后台显示注册用户列表
+- 目标：用户要求后台能看到账号注册情况，并确认账号密码是否进入数据库。
+- 动作：先写失败测试锁定后台用户模块为“注册用户”列表，要求显示注册时间、用户 ID、账号、状态、套餐、余额和会话，且不暴露 password/password_hash 字段；随后更新 admin 文案和表格表头。
+- 动作：更新 `/v1/admin/console` users 模块，内存 runtime 与 PostgreSQL runtime 均输出注册用户行；PostgreSQL 路径额外聚合 active subscription、credit_ledger 余额和未撤销 session 数。
+- 结果：后台用户页现在用于看注册情况；密码只在数据库里以不可逆校验值保存，后台快照不返回原始密码或密码字段。
+- 验证：`admin npm test` 通过 8/8；`server npm test` 通过 25/25。
+- 下一步：部署最新 server/admin 后，登录后台打开 `#/users` 查看真实数据库注册账号。

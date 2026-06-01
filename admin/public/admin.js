@@ -492,7 +492,7 @@ function renderModulePage(module) {
     <div class="page-layout">
       <section class="section-block">
         <h2>当前记录</h2>
-        ${table(["对象", "状态", "规则", "备注"], module.records)}
+        ${table(module.recordHeaders || ["对象", "状态", "规则", "备注"], module.records)}
       </section>
 
       <aside class="section-block">
