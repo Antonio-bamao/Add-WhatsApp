@@ -1,6 +1,6 @@
 const { createEntitlementState } = require('./billingPlans');
 
-const DEFAULT_API_BASE_URL = 'http://127.0.0.1:4110';
+const DEFAULT_API_BASE_URL = 'https://api.addwhatsapp.com';
 
 class CloudApiClient {
   constructor({ baseUrl = DEFAULT_API_BASE_URL, fetchImpl = globalThis.fetch } = {}) {

@@ -1,7 +1,11 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { CloudApiClient, mapCloudEntitlements } = require('../src/core/cloudApiClient');
+const { CloudApiClient, DEFAULT_API_BASE_URL, mapCloudEntitlements } = require('../src/core/cloudApiClient');
+
+test('uses the production API domain by default for packaged desktop clients', () => {
+  assert.equal(DEFAULT_API_BASE_URL, 'https://api.addwhatsapp.com');
+});
 
 test('logs in to the cloud API and fetches entitlements with bearer auth', async () => {
   const requests = [];

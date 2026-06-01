@@ -353,3 +353,11 @@
 - 结果：后台用户页现在用于看注册情况；密码只在数据库里以不可逆校验值保存，后台快照不返回原始密码或密码字段。
 - 验证：`admin npm test` 通过 8/8；`server npm test` 通过 25/25。
 - 下一步：部署最新 server/admin 后，登录后台打开 `#/users` 查看真实数据库注册账号。
+
+## 2026-06-02T00:35:00+08:00｜桌面端默认连接公网 API
+- 目标：支付联调继续推进时，确保给用户下载的打包客户端默认连接 `https://api.addwhatsapp.com`，而不是开发机 localhost。
+- 动作：先写失败测试锁定 `DEFAULT_API_BASE_URL` 必须是生产 API 域名；实现后保留 `ADD_WHATSAPP_API_URL` 作为本地开发覆盖开关。
+- 动作：重新打包 `dist\\Add WhatsApp 0.1.2.exe`，同步到 `website\\public\\downloads\\latest\\Add-WhatsApp.exe` 与 `website\\public\\downloads\\releases\\0.1.2\\Add-WhatsApp-0.1.2.exe`，并更新 latest `update.json`。
+- 结果：新 EXE 打开后会直接请求公网 API；只要 server 环境变量配置好支付宝和 PostgreSQL，桌面端注册、登录、下单、page-pay 都会走线上 API。
+- 验证：`node --test tests\\cloudApiClient.test.js` 通过 7/7；根项目 `npm test` 通过 105/105；`npm run build` 成功；打包 asar 抽查包含 `https://api.addwhatsapp.com`；`website npm test` 通过 6/6；`website npm run build` 成功；新下载包 SHA256 `2e4025e235ebbae906dc6c3b5b0c37a9a74d236dfb952a96b919d2f79ec8958d`。
+- 下一步：在生产 API 部署环境配置 `DATABASE_URL` 和支付宝 7 个环境变量，重启 server 后用新版 EXE 创建订单并打开支付宝收银台。
