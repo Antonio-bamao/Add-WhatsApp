@@ -330,7 +330,7 @@ function renderOperationPanel(moduleKey) {
           <p>输入云端用户 ID，切换账号状态。冻结后用户下一次云端请求会被拒绝。</p>
         </div>
         <form class="operation-form" data-operation-form="user-status">
-          <label><span>用户 ID</span><input name="userId" required placeholder="user_..." /></label>
+          <label><span>账号 / 用户 ID</span><input name="account" required placeholder="用户名或 user_..." /></label>
           <label>
             <span>状态</span>
             <select name="status" required>
@@ -366,7 +366,7 @@ function renderOperationPanel(moduleKey) {
           <p>确认收款后把订单置为 paid，并写入 purchase 额度流水；重复提交不会重复入账。</p>
         </div>
         <form class="operation-form" data-operation-form="order-mark-paid">
-          <label><span>订单 ID</span><input name="orderId" required placeholder="order_..." /></label>
+          <label><span>订单号 / 订单 ID</span><input name="orderId" required placeholder="订单号或 order_..." /></label>
           <label><span>收款流水号</span><input name="providerTradeNo" placeholder="bank-transfer-..." /></label>
           <button type="submit">标记订单已支付</button>
           <small class="operation-status" data-operation-status="order-mark-paid"></small>
@@ -546,7 +546,7 @@ function setOperationStatus(formName, message, tone = "neutral") {
 async function submitCreditAdjustment(form) {
   const body = formPayload(form);
   return postAdminOperation("/v1/admin/credits/adjust", {
-    userId: body.userId,
+    account: body.account,
     amount: Number(body.amount),
     reason: body.reason
   });

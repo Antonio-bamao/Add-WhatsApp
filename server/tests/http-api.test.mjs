@@ -81,6 +81,15 @@ describe("cloud API skeleton", () => {
       assert.equal(adjusted.response.status, 200);
       assert.equal(adjusted.payload.balanceCredits, 300);
 
+      const adjustedByAccount = await request(baseUrl, "/v1/admin/credits/adjust", {
+        method: "POST",
+        headers: adminAuth,
+        body: { account: "api-user", amount: 100, reason: "manual qr payment" }
+      });
+      assert.equal(adjustedByAccount.response.status, 200);
+      assert.equal(adjustedByAccount.payload.userId, registered.payload.user.id);
+      assert.equal(adjustedByAccount.payload.balanceCredits, 400);
+
       const entitlements = await request(baseUrl, "/v1/me/entitlements", { headers: auth });
       assert.equal(entitlements.response.status, 200);
       assert.equal(entitlements.payload.availableToday, 200);
@@ -92,6 +101,18 @@ describe("cloud API skeleton", () => {
       });
       assert.equal(order.response.status, 201);
       assert.equal(order.payload.status, "created");
+
+      const manualPayment = await request(baseUrl, `/v1/orders/${order.payload.id}/payments/manual`, {
+        method: "POST",
+        headers: auth,
+        body: {}
+      });
+      assert.equal(manualPayment.response.status, 200);
+      assert.equal(manualPayment.payload.provider, "manual");
+      assert.equal(manualPayment.payload.orderId, order.payload.id);
+      assert.equal(manualPayment.payload.orderNo, order.payload.orderNo);
+      assert.equal(manualPayment.payload.paymentNote, `ADWA-${order.payload.orderNo}`);
+      assert.equal(manualPayment.payload.alipayQrImageUrl, "https://addwhatsapp.com/pay/alipay.png");
 
       const rejectedPaymentEvent = await request(baseUrl, "/v1/payments/events", {
         method: "POST",
@@ -118,6 +139,21 @@ describe("cloud API skeleton", () => {
       });
       assert.equal(paymentEvent.response.status, 200);
       assert.equal(paymentEvent.payload.order.status, "paid");
+
+      const secondOrder = await request(baseUrl, "/v1/orders", {
+        method: "POST",
+        headers: auth,
+        body: { planId: "advanced", credits: 2000, amountCents: 60000 }
+      });
+      assert.equal(secondOrder.response.status, 201);
+
+      const markedByOrderNo = await request(baseUrl, `/v1/admin/orders/${secondOrder.payload.orderNo}/mark-paid`, {
+        method: "POST",
+        headers: adminAuth,
+        body: { providerTradeNo: "manual-order-no-1" }
+      });
+      assert.equal(markedByOrderNo.response.status, 200);
+      assert.equal(markedByOrderNo.payload.status, "paid");
 
       const duplicatePaymentEvent = await request(baseUrl, "/v1/payments/events", {
         method: "POST",
@@ -153,7 +189,7 @@ describe("cloud API skeleton", () => {
         }
       });
       assert.equal(consumed.response.status, 200);
-      assert.equal(consumed.payload.balanceCredits, 2299);
+      assert.equal(consumed.payload.balanceCredits, 4399);
 
       const lease = await request(baseUrl, "/v1/workspaces/leases", {
         method: "POST",
@@ -201,13 +237,13 @@ describe("cloud API skeleton", () => {
       assert.equal(userRow[2], "api-user");
       assert.equal(userRow[3], "active");
       assert.equal(userRow[4], "advanced");
-      assert.equal(userRow[5], "2299");
+      assert.equal(userRow[5], "4399");
       assert.match(userRow[6], /sessions/);
       assert.doesNotMatch(JSON.stringify(consoleSnapshot.payload.modules.users), /password/i);
       assert.equal(consoleSnapshot.payload.modules.plans.records.length, 4);
       assert.ok(consoleSnapshot.payload.modules.orders.paymentEvents.some((row) => row.includes("evt-api-paid-1")));
       assert.ok(consoleSnapshot.payload.auditTrail.some((entry) => entry.action === "credit.adjustment"));
-    });
+    }, { env: { MANUAL_PAYMENT_ALIPAY_QR_URL: "https://addwhatsapp.com/pay/alipay.png" } });
   });
 
   it("accepts signed mock_alipay notifications and rejects tampered callbacks", async () => {
@@ -378,7 +414,7 @@ describe("cloud API skeleton", () => {
         ALIPAY_GATEWAY_URL: "https://openapi-sandbox.dl.alipaydev.com/gateway.do",
         ALIPAY_FIXED_TIMESTAMP: "2026-05-29 10:20:30"
       }
-    });
+    }, { env: { MANUAL_PAYMENT_ALIPAY_QR_URL: "https://addwhatsapp.com/pay/alipay.png" } });
   });
 
   it("lists payment events for admins with filters and pagination", async () => {

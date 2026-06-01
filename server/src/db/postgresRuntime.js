@@ -145,6 +145,17 @@ async function requireActiveUser(client, userId) {
   return user;
 }
 
+async function requireActiveUserForAdmin(client, { userId, account }) {
+  if (userId) return requireActiveUser(client, userId);
+  const normalized = String(account || "").trim().toLowerCase();
+  if (!/^[a-z0-9._-]{3,64}$/.test(normalized)) throw new Error("USERNAME_INVALID");
+  const result = await client.query("SELECT * FROM users WHERE username = $1", [normalized]);
+  const user = result.rows[0];
+  if (!user) throw new Error("USER_NOT_FOUND");
+  if (user.status !== "active") throw new Error("USER_NOT_ACTIVE");
+  return user;
+}
+
 async function requireUser(client, userId) {
   const result = await client.query("SELECT * FROM users WHERE id = $1", [userId]);
   const user = result.rows[0];
@@ -257,7 +268,7 @@ async function appendAuditLog(client, { adminUserId, action, targetType, targetI
 async function orderByIdOrNumber(client, { orderId, orderNo, forUpdate = false }) {
   const lock = forUpdate ? " FOR UPDATE" : "";
   if (orderId) {
-    const result = await client.query(`SELECT * FROM orders WHERE id = $1${lock}`, [orderId]);
+    const result = await client.query(`SELECT * FROM orders WHERE id = $1 OR order_no = $1${lock}`, [orderId]);
     return result.rows[0] || null;
   }
   if (orderNo) {
@@ -458,13 +469,14 @@ export function createPostgresRuntime({ databaseUrl, pool } = {}) {
       }
     },
 
-    async adjustCredits({ adminUserId, userId, amount, reason, ip }) {
+    async adjustCredits({ adminUserId, userId, account, amount, reason, ip }) {
       const numericAmount = Number(amount);
       if (!Number.isInteger(numericAmount) || numericAmount === 0) throw new Error("ADJUSTMENT_AMOUNT_INVALID");
       const client = await db.connect();
       try {
         await client.query("BEGIN");
-        await requireActiveUser(client, userId);
+        const user = await requireActiveUserForAdmin(client, { userId, account });
+        userId = user.id;
         const before = { balanceCredits: await balanceFor(client, userId) };
         const { entry } = await appendLedger(client, {
           userId,
@@ -484,7 +496,7 @@ export function createPostgresRuntime({ databaseUrl, pool } = {}) {
           ip
         });
         await client.query("COMMIT");
-        return after;
+        return { userId, account: user.username, ...after };
       } catch (error) {
         await client.query("ROLLBACK");
         throw error;

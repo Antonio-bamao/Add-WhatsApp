@@ -208,6 +208,59 @@ test('creates a cloud order and requests an Alipay page-pay link with bearer aut
   ]);
 });
 
+test('creates a cloud order and requests manual payment instructions with bearer auth', async () => {
+  const requests = [];
+  const client = new CloudApiClient({
+    baseUrl: 'http://127.0.0.1:4110',
+    fetchImpl: async (url, options = {}) => {
+      requests.push({ url, options });
+      assert.equal(options.headers.authorization, 'Bearer access-1');
+      if (url.endsWith('/v1/orders')) {
+        assert.equal(options.method, 'POST');
+        assert.deepEqual(JSON.parse(options.body), {
+          planId: 'advanced',
+          credits: 2000,
+          amountCents: 80000
+        });
+        return response(201, {
+          id: 'order-manual-1',
+          orderNo: '202606020001',
+          planId: 'advanced',
+          credits: 2000,
+          amountCents: 80000,
+          status: 'created'
+        });
+      }
+      if (url.endsWith('/v1/orders/order-manual-1/payments/manual')) {
+        assert.equal(options.method, 'POST');
+        return response(200, {
+          provider: 'manual',
+          orderId: 'order-manual-1',
+          orderNo: '202606020001',
+          amountCents: 80000,
+          paymentNote: 'ADWA-202606020001',
+          alipayQrImageUrl: 'https://addwhatsapp.com/pay/alipay.png'
+        });
+      }
+      throw new Error(`unexpected url: ${url}`);
+    }
+  });
+
+  const order = await client.createOrder('access-1', {
+    planId: 'advanced',
+    credits: 2000,
+    amountCents: 80000
+  });
+  const payment = await client.createManualPayment('access-1', order.id);
+
+  assert.equal(payment.provider, 'manual');
+  assert.equal(payment.paymentNote, 'ADWA-202606020001');
+  assert.deepEqual(requests.map(item => item.url), [
+    'http://127.0.0.1:4110/v1/orders',
+    'http://127.0.0.1:4110/v1/orders/order-manual-1/payments/manual'
+  ]);
+});
+
 function response(status, payload) {
   return {
     ok: status >= 200 && status < 300,

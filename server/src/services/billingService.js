@@ -104,6 +104,15 @@ function getUser(store, userId) {
   return user;
 }
 
+function resolveUserForAdmin(store, { userId, account }) {
+  if (userId) return getUser(store, userId);
+  const normalized = normalizeUsername(account);
+  const user = [...store.users.values()].find((item) => item.username === normalized);
+  if (!user) throw new Error("USER_NOT_FOUND");
+  if (user.status !== "active") throw new Error("USER_NOT_ACTIVE");
+  return user;
+}
+
 function findUser(store, userId) {
   const user = store.users.get(userId);
   if (!user) throw new Error("USER_NOT_FOUND");
@@ -358,8 +367,9 @@ export function getEntitlements(store, userId) {
   };
 }
 
-export function adjustCredits(store, { adminUserId, userId, amount, reason, ip }) {
-  getUser(store, userId);
+export function adjustCredits(store, { adminUserId, userId, account, amount, reason, ip }) {
+  const user = resolveUserForAdmin(store, { userId, account });
+  userId = user.id;
   const numericAmount = Number(amount);
   if (!Number.isInteger(numericAmount) || numericAmount === 0) throw new Error("ADJUSTMENT_AMOUNT_INVALID");
   const before = { balanceCredits: balanceFor(store, userId) };
@@ -380,7 +390,7 @@ export function adjustCredits(store, { adminUserId, userId, amount, reason, ip }
     after,
     ip
   });
-  return after;
+  return { userId, account: user.username, ...after };
 }
 
 export function consumeCredit(store, { userId, idempotencyKey, taskId, contactHash, workspaceId, sentAt }) {
@@ -477,7 +487,7 @@ function creditPaidOrder(store, order, { providerTradeNo, notePrefix = "payment"
 }
 
 export function markOrderPaid(store, { orderId, adminUserId, providerTradeNo, ip }) {
-  const order = store.orders.get(orderId);
+  const order = store.orders.get(orderId) || orderByIdOrNumber(store, { orderNo: orderId });
   if (!order) throw new Error("ORDER_NOT_FOUND");
   const before = { status: order.status, balanceCredits: balanceFor(store, order.userId) };
 

@@ -406,8 +406,24 @@
             <span id="activePlanBadge" class="table-state">当前套餐</span>
           </section>
           <section id="planPaymentNotice" class="plan-notice" aria-label="支付维护提示">
-            <strong>支付宝线上支付已接入。</strong>
-          <span>登录账号后可直接拉起支付宝收银台；支付成功后由服务器回调验签并自动写入额度账本。</span>
+            <strong>当前使用人工收款码支付。</strong>
+          <span>生成订单后按付款备注付款，管理员确认收款后会在后台给账号充值。</span>
+          </section>
+          <section id="manualPaymentPanel" class="panel manual-payment-panel" hidden aria-label="人工收款订单">
+            <div class="manual-payment-copy">
+              <p class="eyebrow">人工收款</p>
+              <h3 id="manualPaymentTitle">等待生成订单</h3>
+              <p id="manualPaymentDescription">点击购买后这里会显示金额、订单号和付款备注。</p>
+              <div class="manual-payment-facts">
+                <div><span>订单号</span><strong id="manualPaymentOrderNo">-</strong></div>
+                <div><span>付款金额</span><strong id="manualPaymentAmount">-</strong></div>
+                <div><span>付款备注</span><strong id="manualPaymentNote">-</strong></div>
+              </div>
+            </div>
+            <div class="manual-payment-qr">
+              <img id="manualPaymentQr" alt="支付宝收款码" hidden />
+              <div id="manualPaymentQrFallback">收款码未配置</div>
+            </div>
           </section>
           <section id="planCards" class="plan-grid" aria-label="套餐列表"></section>
           <section class="panel rule-panel">
@@ -530,7 +546,7 @@
             <div class="panel-head">
               <div>
                 <h3>购买额度</h3>
-                <p>按当前套餐起充额度生成订单，并用支付宝完成付款。</p>
+                <p>按当前套餐起充额度生成订单，付款备注会绑定你的账号和订单。</p>
               </div>
             </div>
             <div class="quota-packages" aria-label="额度包">
@@ -542,7 +558,7 @@
             <div class="purchase-total">
               <span>预计金额按当前套餐单价计算</span>
               <strong id="quotaEstimate">¥600.00</strong>
-              <button id="quotaPayButton" class="button primary" type="button">支付宝支付</button>
+              <button id="quotaPayButton" class="button primary" type="button">生成付款订单</button>
             </div>
           </section>
 
@@ -566,7 +582,7 @@
             <div>
               <span>您的下次付款</span>
               <strong>¥0.00</strong>
-              <p>支付完成后等待支付宝异步通知，入账结果可在后台支付事件中追踪。</p>
+              <p>人工确认收款后，管理员在后台写入额度账本。</p>
             </div>
             <div>
               <span>账单信息</span>
@@ -579,7 +595,7 @@
                 <h3>当前套餐</h3>
                 <p id="billingPlanDescription">当前使用本地套餐规则。</p>
               </div>
-              <button id="billingPayButton" class="button primary" type="button">支付宝充值</button>
+              <button id="billingPayButton" class="button primary" type="button">生成付款订单</button>
             </div>
             <div class="billing-feature-grid">
               <div id="billingIncludedList"></div>

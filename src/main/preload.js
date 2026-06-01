@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld('addWhatsapp', {
   logoutAccount: () => ipcRenderer.invoke('auth:logout'),
   clearWhatsAppSession: () => ipcRenderer.invoke('auth:clear-whatsapp-session'),
   refreshCloudEntitlements: () => ipcRenderer.invoke('cloud:refresh-entitlements'),
+  startManualTopUp: payload => ipcRenderer.invoke('cloud:manual-top-up', payload),
   startAlipayTopUp: payload => ipcRenderer.invoke('cloud:alipay-top-up', payload),
   openAnotherWorkspace: payload => ipcRenderer.invoke('workspace:open-another-account', payload),
   getProxySettings: () => ipcRenderer.invoke('proxy:get'),

@@ -31,16 +31,17 @@ test('auth surface uses one database account and removes the secondary cloud log
   assert.match(main, /cloudController\.register/);
 });
 
-test('pricing page exposes Alipay payment actions instead of maintenance copy', () => {
+test('pricing page exposes manual payment actions instead of maintenance copy', () => {
   const html = fs.readFileSync(path.join(root, 'src', 'renderer', 'index.html'), 'utf-8');
   const renderer = fs.readFileSync(path.join(root, 'src', 'renderer', 'renderer.js'), 'utf-8');
   const preload = fs.readFileSync(path.join(root, 'src', 'main', 'preload.js'), 'utf-8');
   const main = fs.readFileSync(path.join(root, 'src', 'main', 'main.js'), 'utf-8');
 
   assert.match(html, /id="quotaPayButton"/);
-  assert.match(renderer, /startAlipayTopUp/);
-  assert.match(preload, /startAlipayTopUp/);
-  assert.match(main, /cloud:alipay-top-up/);
+  assert.match(html, /id="manualPaymentPanel"/);
+  assert.match(renderer, /startManualTopUp/);
+  assert.match(preload, /startManualTopUp/);
+  assert.match(main, /cloud:manual-top-up/);
   assert.doesNotMatch(html, /支付宝沙盒官方异常修复中/);
   assert.doesNotMatch(renderer, /支付维护中/);
   assert.match(renderer, /lockedFeatureList/);

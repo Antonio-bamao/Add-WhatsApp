@@ -425,6 +425,14 @@ ipcMain.handle('cloud:alipay-top-up', async (_event, payload = {}) => {
   }
 });
 
+ipcMain.handle('cloud:manual-top-up', async (_event, payload = {}) => {
+  try {
+    return await cloudController.createManualTopUp({ planId: payload.planId });
+  } catch (error) {
+    return { ok: false, error: error.message };
+  }
+});
+
 ipcMain.handle('workspace:open-another-account', async (_event, payload = {}) => {
   try {
     if (workspaceId) {

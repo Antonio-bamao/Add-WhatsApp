@@ -122,6 +122,14 @@ const elements = {
   quotaCardPlanSubtitle: document.getElementById('quotaCardPlanSubtitle'),
   quotaEstimate: document.getElementById('quotaEstimate'),
   quotaPayButton: document.getElementById('quotaPayButton'),
+  manualPaymentPanel: document.getElementById('manualPaymentPanel'),
+  manualPaymentTitle: document.getElementById('manualPaymentTitle'),
+  manualPaymentDescription: document.getElementById('manualPaymentDescription'),
+  manualPaymentOrderNo: document.getElementById('manualPaymentOrderNo'),
+  manualPaymentAmount: document.getElementById('manualPaymentAmount'),
+  manualPaymentNote: document.getElementById('manualPaymentNote'),
+  manualPaymentQr: document.getElementById('manualPaymentQr'),
+  manualPaymentQrFallback: document.getElementById('manualPaymentQrFallback'),
   billingPlanDescription: document.getElementById('billingPlanDescription'),
   billingPayButton: document.getElementById('billingPayButton'),
   billingIncludedList: document.getElementById('billingIncludedList'),
@@ -198,7 +206,7 @@ function renderPlanCards(subscription) {
       : '无需充值';
     const templateLimit = plan.templateLimit ? `自定义文案模板 X${plan.templateLimit}` : '自定义文案模板不限';
     const lockedItems = lockedFeatureList(plan);
-    const actionText = isActive ? '当前套餐' : '支付宝支付';
+    const actionText = isActive ? '当前套餐' : '生成付款订单';
     const disabled = isActive || !plan.capabilities || !plan.capabilities.onlinePayment;
     card.innerHTML = `
       <div class="plan-card-head">
@@ -229,7 +237,7 @@ function renderPlanCards(subscription) {
     `;
     const payButton = card.querySelector('[data-plan-pay]');
     if (payButton && !disabled) {
-      payButton.addEventListener('click', () => startAlipayTopUp(plan.id, payButton));
+      payButton.addEventListener('click', () => startManualTopUp(plan.id, payButton));
     }
     elements.planCards.appendChild(card);
   }
@@ -238,7 +246,7 @@ function renderPlanCards(subscription) {
 function lockedFeatureList(plan = {}) {
   const capabilities = plan.capabilities || {};
   const locks = [];
-  if (!capabilities.onlinePayment) locks.push('线上支付宝支付锁定');
+  if (!capabilities.onlinePayment) locks.push('人工充值锁定');
   if (!capabilities.exportPreview) locks.push('导出预检锁定');
   if (!capabilities.secondaryWorkspace) locks.push('新建工作台锁定');
   if (!capabilities.proxySettings) locks.push('代理 IP 设置锁定');
@@ -367,7 +375,7 @@ function planExcludedFeatures(plan = {}) {
   if (!capabilities.proxySettings) excluded.push('代理 IP 设置');
   if (plan.templateLimit) excluded.push(`超过 ${formatCredits(plan.templateLimit)} 条自定义文案模板`);
   if (plan.id === 'business') excluded.push('第 6 个及以上工作台需人工审核扩容');
-  if (!capabilities.onlinePayment) excluded.push('线上支付宝支付');
+  if (!capabilities.onlinePayment) excluded.push('人工充值');
   excluded.push('自动发票');
   return excluded;
 }
@@ -511,23 +519,46 @@ async function refreshCloudEntitlements() {
   }
 }
 
-async function startAlipayTopUp(planId = null, sourceButton = null) {
+function renderManualPayment(paymentResult) {
+  if (!elements.manualPaymentPanel || !paymentResult || !paymentResult.payment) return;
+  const { order, payment, plan } = paymentResult;
+  elements.manualPaymentPanel.hidden = false;
+  elements.manualPaymentTitle.textContent = `${plan.name} ${formatCredits(plan.credits)} 额度`;
+  elements.manualPaymentDescription.textContent = '付款时备注下面这串内容，后台看到后会给这个账号入账。';
+  elements.manualPaymentOrderNo.textContent = order.orderNo;
+  elements.manualPaymentAmount.textContent = `¥${(Number(payment.amountCents || plan.amountCents || 0) / 100).toFixed(2)}`;
+  elements.manualPaymentNote.textContent = payment.paymentNote || order.orderNo;
+  const qrUrl = payment.alipayQrImageUrl || payment.wechatQrImageUrl || '';
+  if (qrUrl) {
+    elements.manualPaymentQr.hidden = false;
+    elements.manualPaymentQr.src = qrUrl;
+    elements.manualPaymentQrFallback.hidden = true;
+  } else {
+    elements.manualPaymentQr.hidden = true;
+    elements.manualPaymentQr.removeAttribute('src');
+    elements.manualPaymentQrFallback.hidden = false;
+    elements.manualPaymentQrFallback.textContent = '服务器还没配置收款码图片 URL';
+  }
+}
+
+async function startManualTopUp(planId = null, sourceButton = null) {
   const plan = planId
     ? (state.subscription && state.subscription.catalog || []).find(item => item.id === planId)
     : state.subscription && state.subscription.plan;
   const targetPlanId = plan && plan.id ? plan.id : (state.subscription && state.subscription.plan && state.subscription.plan.id);
   const buttons = [sourceButton, elements.quotaPayButton, elements.billingPayButton].filter(Boolean);
   for (const button of buttons) button.disabled = true;
-  elements.syncState.textContent = '正在创建支付宝订单...';
+  elements.syncState.textContent = '正在生成付款订单...';
 
-  const response = await window.addWhatsapp.startAlipayTopUp({ planId: targetPlanId });
+  const response = await window.addWhatsapp.startManualTopUp({ planId: targetPlanId });
   if (!response.ok) {
-    elements.syncState.textContent = response.error || '支付宝订单创建失败。';
+    elements.syncState.textContent = response.error || '付款订单创建失败。';
     updateActionLocks();
     return;
   }
 
-  elements.syncState.textContent = `已打开支付宝收银台，订单 ${response.order.orderNo}，付款后请刷新套餐余额。`;
+  renderManualPayment(response);
+  elements.syncState.textContent = `订单 ${response.order.orderNo} 已生成，付款后等管理员确认入账。`;
   updateActionLocks();
 }
 
@@ -1278,8 +1309,8 @@ for (const tab of elements.authTabs) {
 elements.loginForm.addEventListener('submit', handleLogin);
 elements.registerForm.addEventListener('submit', handleRegister);
 elements.refreshEntitlementsButton.addEventListener('click', refreshCloudEntitlements);
-elements.quotaPayButton.addEventListener('click', () => startAlipayTopUp());
-elements.billingPayButton.addEventListener('click', () => startAlipayTopUp());
+elements.quotaPayButton.addEventListener('click', () => startManualTopUp());
+elements.billingPayButton.addEventListener('click', () => startManualTopUp());
 elements.importButton.addEventListener('click', importContacts);
 elements.dropImportButton.addEventListener('click', importContacts);
 elements.exportButton.addEventListener('click', exportReport);

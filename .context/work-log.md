@@ -361,3 +361,12 @@
 - 结果：新 EXE 打开后会直接请求公网 API；只要 server 环境变量配置好支付宝和 PostgreSQL，桌面端注册、登录、下单、page-pay 都会走线上 API。
 - 验证：`node --test tests\\cloudApiClient.test.js` 通过 7/7；根项目 `npm test` 通过 105/105；`npm run build` 成功；打包 asar 抽查包含 `https://api.addwhatsapp.com`；`website npm test` 通过 6/6；`website npm run build` 成功；新下载包 SHA256 `2e4025e235ebbae906dc6c3b5b0c37a9a74d236dfb952a96b919d2f79ec8958d`。
 - 下一步：在生产 API 部署环境配置 `DATABASE_URL` 和支付宝 7 个环境变量，重启 server 后用新版 EXE 创建订单并打开支付宝收银台。
+
+## 2026-06-02T01:25:00+08:00｜切换为人工收款码和后台充值
+- 目标：放弃当前阶段的支付宝/微信官方自动支付接入，先用人工收款码收款，并由后台给对应注册账号充值。
+- 动作：先写失败测试覆盖桌面端手动支付接口、主进程 controller、服务端 `/v1/orders/:id/payments/manual`、后台账号充值表单和订单号入账；随后实现手动付款指引、付款备注、二维码 URL 环境变量、后台按账号用户名调账、后台按订单号标记已支付。
+- 结果：桌面端套餐卡、额度页和账单页从“支付宝支付/充值”改为“生成付款订单”；生成订单后显示订单号、金额、付款备注和收款码区域；服务端通过 `MANUAL_PAYMENT_ALIPAY_QR_URL` / `MANUAL_PAYMENT_WECHAT_QR_URL` 控制二维码图片。
+- 结果：后台 `#/credits` 的人工调账表单可以直接填注册账号用户名或用户 ID；`#/orders` 的人工标记已支付可以填订单号或订单 ID，减少复制内部 ID 的操作成本。
+- 结果：重新打包 `dist\\Add WhatsApp 0.1.2.exe`，同步到 website latest/release，并更新 `update.json` 为 `sizeBytes=77063741`、SHA256 `2edf0e6cc87396ad1f60d25c43aad772545a26e76dd366eab3586f2ef544cb46`。
+- 验证：`node --test tests\\cloudApiClient.test.js` 8/8、`node --test tests\\cloudMainIntegration.test.js` 11/11、`node --test tests\\cloudRendererContract.test.js` 3/3 通过；根项目 `npm test` 108/108 通过；`server npm test` 25/25 通过；`admin npm test` 8/8 通过；`website npm test` 6/6 通过；根项目 `npm run build` 成功；`website npm run build` 成功；asar 抽查包含 `cloud:manual-top-up`。
+- 下一步：把收款码图片放到公网静态地址，服务器 env 写入 `MANUAL_PAYMENT_ALIPAY_QR_URL`，重启 API 后用新版客户端生成订单并在后台按账号充值验证。

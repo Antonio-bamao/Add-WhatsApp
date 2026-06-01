@@ -62,6 +62,22 @@ function clientIp(request) {
   return request.headers["x-forwarded-for"]?.split(",")[0]?.trim() || request.socket.remoteAddress || "127.0.0.1";
 }
 
+function manualPaymentInstructions(order, env = {}) {
+  return {
+    provider: "manual",
+    orderId: order.id,
+    orderNo: order.orderNo,
+    planId: order.planId,
+    credits: order.credits,
+    amountCents: order.amountCents,
+    amountYuan: (Number(order.amountCents || 0) / 100).toFixed(2),
+    paymentNote: `${env.MANUAL_PAYMENT_NOTE_PREFIX || "ADWA"}-${order.orderNo}`,
+    alipayQrImageUrl: env.MANUAL_PAYMENT_ALIPAY_QR_URL || "",
+    wechatQrImageUrl: env.MANUAL_PAYMENT_WECHAT_QR_URL || "",
+    contactText: env.MANUAL_PAYMENT_CONTACT || ""
+  };
+}
+
 function errorStatus(error) {
   if (/ADMIN_FORBIDDEN/.test(error.message)) return 403;
   if (/SIGNATURE/.test(error.message)) return 401;
@@ -166,6 +182,14 @@ export function createAppServer(options = {}) {
           qrcodeWidth: env.ALIPAY_QRCODE_WIDTH,
           timestamp: env.ALIPAY_FIXED_TIMESTAMP
         }));
+        return;
+      }
+
+      if (request.method === "POST" && /^\/v1\/orders\/[^/]+\/payments\/manual$/.test(url.pathname)) {
+        const userId = await authUserId(runtime, request);
+        const orderId = url.pathname.split("/")[3];
+        const order = await runtime.getOrderForPayment({ userId, orderId });
+        jsonResponse(response, 200, manualPaymentInstructions(order, env));
         return;
       }
 

@@ -143,6 +143,8 @@ describe("admin console structure", () => {
 
     assert.match(js, /data-operation-form="credits-adjust"/);
     assert.match(js, /data-operation-form="order-mark-paid"/);
+    assert.match(js, /账号 \/ 用户 ID/);
+    assert.match(js, /订单号 \/ 订单 ID/);
     assert.match(js, /data-operation-form="order-compensate"/);
     assert.match(js, /data-operation-form="workspace-release"/);
     assert.match(js, /data-operation-form="user-status"/);

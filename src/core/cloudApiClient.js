@@ -55,6 +55,14 @@ class CloudApiClient {
     });
   }
 
+  async createManualPayment(accessToken, orderId) {
+    return this.request(`/v1/orders/${encodeURIComponent(orderId)}/payments/manual`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${accessToken}` },
+      body: {}
+    });
+  }
+
   async issueWorkspaceLease(accessToken, payload) {
     return this.request('/v1/workspaces/leases', {
       method: 'POST',
