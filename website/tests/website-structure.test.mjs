@@ -58,8 +58,10 @@ describe("public website structure", () => {
     const releasesPage = readText("app/releases/page.js");
 
     assert.match(layout, /href="\/site\.css"/);
+    assert.match(layout, /icon: "\/icon\.png"/);
     assert.match(homePage, /LandingExperience/);
     assert.match(landingExperience, /Add WhatsApp/);
+    assert.match(landingExperience, /src="\/logo\.png"/);
     assert.match(landingExperience, /官方下载/);
     assert.match(landingExperience, /全球/);
     assert.doesNotMatch(landingExperience, /上线前最常见的问题|FAQ/);
@@ -118,6 +120,9 @@ describe("public website structure", () => {
     assert.ok(fs.existsSync(path.join(websiteRoot, "public/downloads/latest/Add-WhatsApp.exe")));
     assert.ok(fs.existsSync(path.join(websiteRoot, "public/downloads/releases/0.1.2/Add-WhatsApp-0.1.2.exe")));
     assert.ok(fs.existsSync(path.join(websiteRoot, "public/site.css")));
+    assert.ok(fs.existsSync(path.join(websiteRoot, "public/logo.png")));
+    assert.ok(fs.existsSync(path.join(websiteRoot, "public/icon.png")));
+    assert.ok(fs.existsSync(path.join(websiteRoot, "app/icon.png")));
   });
 
   it("does not publish placeholder support contact details", () => {

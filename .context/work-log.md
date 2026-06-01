@@ -370,3 +370,12 @@
 - 结果：重新打包 `dist\\Add WhatsApp 0.1.2.exe`，同步到 website latest/release，并更新 `update.json` 为 `sizeBytes=77063741`、SHA256 `2edf0e6cc87396ad1f60d25c43aad772545a26e76dd366eab3586f2ef544cb46`。
 - 验证：`node --test tests\\cloudApiClient.test.js` 8/8、`node --test tests\\cloudMainIntegration.test.js` 11/11、`node --test tests\\cloudRendererContract.test.js` 3/3 通过；根项目 `npm test` 108/108 通过；`server npm test` 25/25 通过；`admin npm test` 8/8 通过；`website npm test` 6/6 通过；根项目 `npm run build` 成功；`website npm run build` 成功；asar 抽查包含 `cloud:manual-top-up`。
 - 下一步：把收款码图片放到公网静态地址，服务器 env 写入 `MANUAL_PAYMENT_ALIPAY_QR_URL`，重启 API 后用新版客户端生成订单并在后台按账号充值验证。
+
+## 2026-06-02T02:15:00+08:00｜内置收款码并替换应用图标
+- 目标：用户已把收款码和新图标放进项目，要求无需公网图片地址，直接在安装包里显示收款码，并把桌面端、官网 logo 和浏览器标签页图标全部换成新图标，同时去掉白底。
+- 动作：把 `assets/pay/alipay-qr.jpg` 转换为桌面端默认读取的 `assets/pay/alipay-qr.png`；桌面端手动付款渲染改为服务端二维码 URL 优先、无 URL 时默认使用 `../../assets/pay/alipay-qr.png`。
+- 动作：用边缘白底识别生成透明底 `assets/icon.png`，并生成 Windows `assets/icon.ico`、官网 `website/public/logo.png`、`website/public/icon.png` 和 Next App Router `website/app/icon.png`；桌面端登录页/侧边栏/关闭弹窗、官网导航/页脚和 metadata icons 均改为引用新图。
+- 结果：人工收款码不再需要额外上传公网静态图片；新版 EXE 自带二维码和新图标。若生产 API 仍配置 `MANUAL_PAYMENT_ALIPAY_QR_URL`，服务端返回的 URL 仍会覆盖本地二维码，想走内置图需要删除或留空该 env。
+- 结果：重新打包 `dist\\Add WhatsApp 0.1.2.exe`，同步到 website latest/release，并更新 `update.json` 为 `sizeBytes=78645319`、SHA256 `ab6b513ccc82f5a2487ffd36854eb1c618d1b3ccb313b4313e87a345a8fc8860`。
+- 验证：`node --test tests\\cloudRendererContract.test.js` 3/3 通过；`npm test` 108/108 通过；`server npm test` 25/25 通过；`admin npm test` 8/8 通过；`website npm test` 6/6 通过；`website npm run build` 成功；根项目 `npm run build` 成功；透明图标左上角 alpha 为 0；`.context` 校验通过。
+- 下一步：部署最新 website，让官网下载链接指向新 EXE；用户重新下载后生成付款订单即可看到内置支付宝收款码，付款后后台按账号或订单号充值。

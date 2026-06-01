@@ -5,7 +5,9 @@ export function SiteHeader() {
   return (
     <header className="site-header">
       <Link className="brand" href="/" aria-label="Add WhatsApp 首页">
-        <span className="brand-mark">AW</span>
+        <span className="brand-mark" aria-hidden="true">
+          <img src="/logo.png" alt="" />
+        </span>
         <span>Add WhatsApp</span>
       </Link>
       <nav className="nav-links" aria-label="主导航">

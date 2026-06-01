@@ -88,7 +88,13 @@ a {
   color: var(--primary-strong);
   background: linear-gradient(140deg, rgba(85, 244, 206, 0.18), rgba(255, 255, 255, 0.04));
   box-shadow: 0 0 24px rgba(85, 244, 206, 0.16);
-  font-size: 13px;
+}
+
+.brand-mark img {
+  width: 25px;
+  height: 25px;
+  object-fit: contain;
+  display: block;
 }
 
 .nav-links {
@@ -701,9 +707,18 @@ h3 {
 }
 
 .footer-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
   margin: 0 0 8px;
   color: var(--text);
   font-weight: 800;
+}
+
+.footer-brand img {
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
 }
 
 .footer-links {

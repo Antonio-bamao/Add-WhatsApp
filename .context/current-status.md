@@ -42,7 +42,10 @@
 - 已完成：桌面端打包版默认云端 API 已从本地 `http://127.0.0.1:4110` 切到 `https://api.addwhatsapp.com`；本地开发仍可用 `ADD_WHATSAPP_API_URL` 覆盖。新 EXE 已同步到 website latest/release，`update.json` 当前 `sizeBytes=77064174`、SHA256 `2e4025e235ebbae906dc6c3b5b0c37a9a74d236dfb952a96b919d2f79ec8958d`。
 - 已完成：支付入口从支付宝官方 page-pay 默认路径切换为“人工收款码 + 后台确认充值”；桌面端购买按钮生成云端订单并显示订单号、金额和付款备注，后端新增 `/v1/orders/:id/payments/manual` 返回人工收款指引，后台额度调账支持直接填注册账号用户名，订单人工入账支持填订单号或订单 ID。
 - 已完成：重新打包 `dist\Add WhatsApp 0.1.2.exe` 并同步到 `website\public\downloads\latest\Add-WhatsApp.exe` 和 `website\public\downloads\releases\0.1.2\Add-WhatsApp-0.1.2.exe`；`update.json` 当前 `releaseDate=2026-06-02`、`sizeBytes=77063741`、SHA256 `2edf0e6cc87396ad1f60d25c43aad772545a26e76dd366eab3586f2ef544cb46`。
-- 进行中：人工收款码图片仍需部署到公网静态地址，并在生产 API 环境变量中配置 `MANUAL_PAYMENT_ALIPAY_QR_URL`；配置后桌面端生成付款订单会显示二维码。
+- 已完成：人工收款码已改为随桌面端安装包本地携带；`assets/pay/alipay-qr.jpg` 已转换为 `assets/pay/alipay-qr.png`，桌面端在服务端未返回二维码 URL 时默认显示本地 `../../assets/pay/alipay-qr.png`，不再必须配置公网收款码图片地址。
+- 已完成：应用图标已替换为用户提供的 `assets/iconn.png` 处理版；已生成透明底 `assets/icon.png`、Windows `assets/icon.ico`、官网 `/logo.png`、官网 `/icon.png` 和 Next `app/icon.png`，桌面端品牌图标、关闭弹窗图标、官网导航 logo、页脚 logo 和浏览器标签页图标均已切换到新图。
+- 已完成：重新打包 `dist\Add WhatsApp 0.1.2.exe` 并同步到 `website\public\downloads\latest\Add-WhatsApp.exe` 和 `website\public\downloads\releases\0.1.2\Add-WhatsApp-0.1.2.exe`；`update.json` 当前 `releaseDate=2026-06-02`、`sizeBytes=78645319`、SHA256 `ab6b513ccc82f5a2487ffd36854eb1c618d1b3ccb313b4313e87a345a8fc8860`。
+- 进行中：等待部署最新 website/下载包，并由用户下载新版 EXE 验证内置收款码和新图标。
 - 验证：`website\npm test` 通过 6/6；`website\npm run build` 成功；根项目 `npm test` 通过 77/77；本地 `http://localhost:3100` 桌面/移动端 Chrome headless 截图已复查，样式不再退化为裸 HTML；浏览器插件调试确认首屏只剩 1 个 WebGL canvas、无旧 `.globe-static` SVG 叠加、无 Server Error，地球 HUD 文案已删除，路线扩展到 20 条；下载页返回 200，`/downloads/latest/Add-WhatsApp.exe` HEAD 长度为 `77060652`。
 - 验证：`admin\npm test` 通过 5/5；本地 `http://127.0.0.1:3220/` 返回 200；管理台 JS 已包含 `ADD_WHATSAPP_API_URL`、`/v1/admin/console`、API 回退逻辑和运行时快照合并逻辑。
 - 验证：后台拆页后，浏览器验证运营首页只显示 8 个模块入口且不渲染 8 个模块详情；`#/referrals` 只显示推荐审核模块详情，3 个详情区、3 条记录、无 console error/warning、无横向溢出。
@@ -66,6 +69,6 @@
 - 验证：后台注册用户列表改造后，`admin\npm test` 通过 8/8；`server\npm test` 通过 25/25。
 - 验证：公网 API 默认值改造后，先写失败测试再实现；`node --test tests\cloudApiClient.test.js` 通过 7/7；根项目 `npm test` 通过 105/105；根项目 `npm run build` 成功；打包 asar 抽查包含 `https://api.addwhatsapp.com`；`website\npm test` 通过 6/6；`website\npm run build` 成功。
 - 验证：人工收款码改造后，先写失败测试再实现；`node --test tests\cloudApiClient.test.js` 通过 8/8；`node --test tests\cloudMainIntegration.test.js` 通过 11/11；`node --test tests\cloudRendererContract.test.js` 通过 3/3；根项目 `npm test` 通过 108/108；`server\npm test` 通过 25/25；`admin\npm test` 通过 8/8；`website\npm test` 通过 6/6；根项目 `npm run build` 成功；`website\npm run build` 成功；打包 asar 抽查包含 `cloud:manual-top-up`。
-- 下一步：部署最新 server/admin/website 后，在服务器 `/etc/add-whatsapp-api.env` 增加 `MANUAL_PAYMENT_ALIPAY_QR_URL=<公网收款码图片地址>` 并重启 `add-whatsapp-api.service`；用户付款后后台 `#/credits` 可填账号用户名补额度，或 `#/orders` 填订单号标记已支付。
+- 下一步：部署最新 website 和下载包后，让用户重新下载新版 EXE；服务器 `/etc/add-whatsapp-api.env` 不需要再配置 `MANUAL_PAYMENT_ALIPAY_QR_URL`，如果已配置则会优先覆盖本地收款码，想使用安装包内置收款码需删除或留空该变量；用户付款后后台 `#/credits` 可填账号用户名补额度，或 `#/orders` 填订单号标记已支付。
 - 阻塞项：如果继续使用旧沙箱应用，需确认支付宝沙箱 `alipay.trade.page.pay` 已恢复；此前沙箱曾出现 `SYSTEM_ERROR` / `504 Gateway Time-out`，并且 `alipay.trade.query` 返回 `ACQ.TRADE_NOT_EXIST`。
 - 阻塞项：管理员登录方式、支付渠道/人工收款流程、生产域名和部署平台还未最终确定。

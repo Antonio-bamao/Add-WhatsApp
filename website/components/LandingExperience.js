@@ -198,7 +198,9 @@ export default function LandingExperience() {
       <main className="cinematic-page">
         <header className="cinematic-header" aria-label="网站导航">
           <Link className="cinematic-brand" href="/" aria-label="Add WhatsApp 首页">
-            <span className="brand-mark">AW</span>
+            <span className="brand-mark" aria-hidden="true">
+              <img src="/logo.png" alt="" />
+            </span>
             <span>Add WhatsApp</span>
           </Link>
           <nav className="cinematic-nav" aria-label="主导航">

@@ -139,6 +139,7 @@ const elements = {
 
 const PAGE_ACTIONS = new Set(['importPage']);
 const IMPORT_OPTIONS_STORAGE_KEY = 'addWhatsapp.importOptions';
+const DEFAULT_MANUAL_ALIPAY_QR = '../../assets/pay/alipay-qr.png';
 const TEMPLATE_META = {
   en: { title: '英语模板', description: '英语区号码随机选择这些文案。', badge: 'EN' },
   es: { title: '西班牙语模板', description: '西班牙、墨西哥和拉美号码随机选择这些文案。', badge: 'ES' },
@@ -528,10 +529,15 @@ function renderManualPayment(paymentResult) {
   elements.manualPaymentOrderNo.textContent = order.orderNo;
   elements.manualPaymentAmount.textContent = `¥${(Number(payment.amountCents || plan.amountCents || 0) / 100).toFixed(2)}`;
   elements.manualPaymentNote.textContent = payment.paymentNote || order.orderNo;
-  const qrUrl = payment.alipayQrImageUrl || payment.wechatQrImageUrl || '';
+  const qrUrl = payment.alipayQrImageUrl || payment.wechatQrImageUrl || DEFAULT_MANUAL_ALIPAY_QR;
   if (qrUrl) {
     elements.manualPaymentQr.hidden = false;
     elements.manualPaymentQr.src = qrUrl;
+    elements.manualPaymentQr.onerror = () => {
+      elements.manualPaymentQr.hidden = true;
+      elements.manualPaymentQrFallback.hidden = false;
+      elements.manualPaymentQrFallback.textContent = '收款码图片未放入 assets/pay/alipay-qr.png';
+    };
     elements.manualPaymentQrFallback.hidden = true;
   } else {
     elements.manualPaymentQr.hidden = true;

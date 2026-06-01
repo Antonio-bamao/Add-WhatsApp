@@ -40,11 +40,17 @@ test('pricing page exposes manual payment actions instead of maintenance copy', 
   assert.match(html, /id="quotaPayButton"/);
   assert.match(html, /id="manualPaymentPanel"/);
   assert.match(renderer, /startManualTopUp/);
+  assert.match(renderer, /assets\/pay\/alipay-qr\.png/);
+  assert.match(renderer, /manualPaymentQr\.onerror/);
   assert.match(preload, /startManualTopUp/);
   assert.match(main, /cloud:manual-top-up/);
   assert.doesNotMatch(html, /支付宝沙盒官方异常修复中/);
   assert.doesNotMatch(renderer, /支付维护中/);
   assert.match(renderer, /lockedFeatureList/);
+  assert.match(html, /assets\/icon\.png/);
+  assert.ok(fs.existsSync(path.join(root, 'assets', 'icon.png')));
+  assert.ok(fs.existsSync(path.join(root, 'assets', 'icon.ico')));
+  assert.ok(fs.existsSync(path.join(root, 'assets', 'pay', 'alipay-qr.png')));
 });
 
 test('task controls enforce package daily limit and 44 second minimum delay', () => {

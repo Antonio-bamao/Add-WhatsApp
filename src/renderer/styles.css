@@ -267,10 +267,11 @@ button {
   border-radius: 50%;
 }
 
-.brand-mark svg {
-  width: 30px;
-  height: 30px;
-  fill: #073f38;
+.brand-mark img {
+  width: 34px;
+  height: 34px;
+  object-fit: contain;
+  display: block;
 }
 
 .brand h1,
@@ -1200,6 +1201,13 @@ td {
   width: 32px;
   height: 32px;
   fill: #073f38;
+}
+
+.modal-mark img {
+  width: 36px;
+  height: 36px;
+  object-fit: contain;
+  display: block;
 }
 
 .modal-mark.risk-mark {

@@ -4,7 +4,10 @@ export function SiteFooter() {
   return (
     <footer className="site-footer">
       <div>
-        <p className="footer-brand">Add WhatsApp</p>
+        <p className="footer-brand">
+          <img src="/logo.png" alt="" aria-hidden="true" />
+          <span>Add WhatsApp</span>
+        </p>
         <p>面向 WhatsApp 客户跟进、批量导入和团队增长的 Windows 桌面软件。</p>
       </div>
       <div className="footer-links">
