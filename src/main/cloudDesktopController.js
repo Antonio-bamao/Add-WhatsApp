@@ -141,6 +141,36 @@ function createCloudDesktopController({ client, sessionStore, deviceId = 'deskto
     };
   }
 
+  async function createZpayTopUp({ planId }) {
+    const session = sessionStore.load();
+    if (!session.authenticated || !session.accessToken) {
+      return { ok: false, authRequired: true, error: '请先登录账号。' };
+    }
+    const plan = getPlan(planId || session.entitlements?.planId || 'advanced');
+    const credits = Number(plan.minimumTopUpCredits || 0);
+    const amountCents = credits * Number(plan.unitPriceCents || 0);
+    if (!credits || !amountCents) {
+      return { ok: false, error: '当前套餐不需要线上充值。' };
+    }
+    const order = await client.createOrder(session.accessToken, {
+      planId: plan.id,
+      credits,
+      amountCents
+    });
+    const payment = await client.createZpayPagePay(session.accessToken, order.id);
+    return {
+      ok: true,
+      order,
+      payment,
+      plan: {
+        id: plan.id,
+        name: plan.name,
+        credits,
+        amountCents
+      }
+    };
+  }
+
   async function createManualTopUp({ planId }) {
     const session = sessionStore.load();
     if (!session.authenticated || !session.accessToken) {
@@ -188,6 +218,7 @@ function createCloudDesktopController({ client, sessionStore, deviceId = 'deskto
     releaseWorkspaceLease,
     createManualTopUp,
     createAlipayTopUp,
+    createZpayTopUp,
     register,
     login,
     logout,

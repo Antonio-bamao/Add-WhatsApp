@@ -402,23 +402,23 @@
             <span id="activePlanBadge" class="table-state">当前套餐</span>
           </section>
           <section id="planPaymentNotice" class="plan-notice" aria-label="支付维护提示">
-            <strong>当前使用人工收款码支付。</strong>
-          <span>生成订单后按付款备注付款，管理员确认收款后会在后台给账号充值。</span>
+            <strong>当前使用 ZPAY 聚合支付。</strong>
+          <span>生成订单后会打开 ZPAY 收银台，付款成功后系统自动给账号入账。</span>
           </section>
-          <section id="manualPaymentPanel" class="panel manual-payment-panel" hidden aria-label="人工收款订单">
+          <section id="manualPaymentPanel" class="panel manual-payment-panel" hidden aria-label="支付订单">
             <div class="manual-payment-copy">
-              <p class="eyebrow">人工收款</p>
+              <p class="eyebrow">ZPAY 收银台</p>
               <h3 id="manualPaymentTitle">等待生成订单</h3>
-              <p id="manualPaymentDescription">点击购买后这里会显示金额、订单号和付款备注。</p>
+              <p id="manualPaymentDescription">点击购买后这里会显示金额和订单号，并自动打开支付页面。</p>
               <div class="manual-payment-facts">
                 <div><span>订单号</span><strong id="manualPaymentOrderNo">-</strong></div>
                 <div><span>付款金额</span><strong id="manualPaymentAmount">-</strong></div>
-                <div><span>付款备注</span><strong id="manualPaymentNote">-</strong></div>
+                <div><span>支付状态</span><strong id="manualPaymentNote">-</strong></div>
               </div>
             </div>
             <div class="manual-payment-qr">
-              <img id="manualPaymentQr" alt="支付宝收款码" hidden />
-              <div id="manualPaymentQrFallback">收款码未配置</div>
+              <img id="manualPaymentQr" alt="备用收款码" hidden />
+              <div id="manualPaymentQrFallback">等待支付链接</div>
             </div>
           </section>
           <section id="planCards" class="plan-grid" aria-label="套餐列表"></section>
@@ -554,7 +554,7 @@
             <div class="purchase-total">
               <span>预计金额按当前套餐单价计算</span>
               <strong id="quotaEstimate">¥600.00</strong>
-              <button id="quotaPayButton" class="button primary" type="button">生成付款订单</button>
+              <button id="quotaPayButton" class="button primary" type="button">ZPAY 支付</button>
             </div>
           </section>
 
@@ -578,7 +578,7 @@
             <div>
               <span>您的下次付款</span>
               <strong>¥0.00</strong>
-              <p>人工确认收款后，管理员在后台写入额度账本。</p>
+              <p>ZPAY 回调成功后，系统自动写入额度账本。</p>
             </div>
             <div>
               <span>账单信息</span>
@@ -591,7 +591,7 @@
                 <h3>当前套餐</h3>
                 <p id="billingPlanDescription">当前使用本地套餐规则。</p>
               </div>
-              <button id="billingPayButton" class="button primary" type="button">生成付款订单</button>
+              <button id="billingPayButton" class="button primary" type="button">ZPAY 支付</button>
             </div>
             <div class="billing-feature-grid">
               <div id="billingIncludedList"></div>

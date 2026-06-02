@@ -31,7 +31,7 @@ test('auth surface uses one database account and removes the secondary cloud log
   assert.match(main, /cloudController\.register/);
 });
 
-test('pricing page exposes manual payment actions instead of maintenance copy', () => {
+test('pricing page exposes ZPAY payment actions instead of maintenance copy', () => {
   const html = fs.readFileSync(path.join(root, 'src', 'renderer', 'index.html'), 'utf-8');
   const renderer = fs.readFileSync(path.join(root, 'src', 'renderer', 'renderer.js'), 'utf-8');
   const preload = fs.readFileSync(path.join(root, 'src', 'main', 'preload.js'), 'utf-8');
@@ -39,6 +39,12 @@ test('pricing page exposes manual payment actions instead of maintenance copy', 
 
   assert.match(html, /id="quotaPayButton"/);
   assert.match(html, /id="manualPaymentPanel"/);
+  assert.match(html, /ZPAY 聚合支付/);
+  assert.match(html, /ZPAY 支付/);
+  assert.match(renderer, /startZpayTopUp/);
+  assert.match(renderer, /renderZpayPayment/);
+  assert.match(preload, /startZpayTopUp/);
+  assert.match(main, /cloud:zpay-top-up/);
   assert.match(renderer, /startManualTopUp/);
   assert.match(renderer, /assets\/pay\/alipay-qr\.png/);
   assert.match(renderer, /manualPaymentQr\.onerror/);

@@ -2,7 +2,7 @@ import http from "node:http";
 import { pathToFileURL } from "node:url";
 import { createPostgresRuntime } from "./db/postgresRuntime.js";
 import { createMemoryRuntime } from "./services/billingService.js";
-import { buildAlipayPagePayRequest, parseAlipayNotification, parseMockAlipayNotification, queryAlipayTrade } from "./services/paymentProviders.js";
+import { buildAlipayPagePayRequest, buildZpayPagePayRequest, parseAlipayNotification, parseMockAlipayNotification, parseZpayNotification, queryAlipayTrade } from "./services/paymentProviders.js";
 
 function jsonResponse(response, statusCode, payload) {
   response.writeHead(statusCode, {
@@ -185,6 +185,23 @@ export function createAppServer(options = {}) {
         return;
       }
 
+      if (request.method === "POST" && /^\/v1\/orders\/[^/]+\/payments\/zpay\/page-pay$/.test(url.pathname)) {
+        const userId = await authUserId(runtime, request);
+        const orderId = url.pathname.split("/")[3];
+        const order = await runtime.getOrderForPayment({ userId, orderId });
+        jsonResponse(response, 200, buildZpayPagePayRequest(order, {
+          gatewayUrl: env.ZPAY_GATEWAY_URL,
+          pid: env.ZPAY_PID,
+          key: env.ZPAY_KEY,
+          notifyUrl: env.ZPAY_NOTIFY_URL,
+          returnUrl: env.ZPAY_RETURN_URL,
+          type: env.ZPAY_TYPE || "wxpay",
+          siteName: env.ZPAY_SITE_NAME || "Add WhatsApp",
+          channelId: env.ZPAY_CHANNEL_ID
+        }));
+        return;
+      }
+
       if (request.method === "POST" && /^\/v1\/orders\/[^/]+\/payments\/manual$/.test(url.pathname)) {
         const userId = await authUserId(runtime, request);
         const orderId = url.pathname.split("/")[3];
@@ -212,6 +229,19 @@ export function createAppServer(options = {}) {
         const event = parseAlipayNotification(body, {
           alipayPublicKey: env.ALIPAY_PUBLIC_KEY,
           expectedAppId: env.ALIPAY_APP_ID
+        });
+        await runtime.processPaymentEvent(event);
+        textResponse(response, 200, "success");
+        return;
+      }
+
+      if ((request.method === "GET" || request.method === "POST") && url.pathname === "/v1/payments/zpay/notify") {
+        const body = request.method === "GET"
+          ? Object.fromEntries(url.searchParams.entries())
+          : await readFormOrJson(request);
+        const event = parseZpayNotification(body, {
+          key: env.ZPAY_KEY,
+          expectedPid: env.ZPAY_PID
         });
         await runtime.processPaymentEvent(event);
         textResponse(response, 200, "success");

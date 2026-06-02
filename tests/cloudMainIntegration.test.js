@@ -309,6 +309,63 @@ test('cloud controller creates an Alipay top-up payment for the selected package
   ]);
 });
 
+test('cloud controller creates a ZPAY top-up payment for the selected package', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'add-whatsapp-cloud-zpay-'));
+  const sessionStore = new CloudSessionStore(path.join(dir, 'cloud-session.json'));
+  sessionStore.save({
+    user: { id: 'user-1', username: 'cloud-user' },
+    accessToken: 'access-1',
+    refreshToken: 'refresh-1',
+    entitlements: { userId: 'user-1', planId: 'advanced', balanceCredits: 0 }
+  });
+  const calls = [];
+  const client = new CloudApiClient({
+    baseUrl: 'http://api.test',
+    fetchImpl: async (url, options = {}) => {
+      calls.push({ url, options });
+      assert.equal(options.headers.authorization, 'Bearer access-1');
+      if (url.endsWith('/v1/orders')) {
+        assert.deepEqual(JSON.parse(options.body), {
+          planId: 'advanced',
+          credits: 2000,
+          amountCents: 80000
+        });
+        return response(201, {
+          id: 'order-zpay-1',
+          orderNo: '202606020002',
+          planId: 'advanced',
+          credits: 2000,
+          amountCents: 80000,
+          status: 'created'
+        });
+      }
+      if (url.endsWith('/v1/orders/order-zpay-1/payments/zpay/page-pay')) {
+        return response(200, {
+          provider: 'zpay',
+          orderId: 'order-zpay-1',
+          orderNo: '202606020002',
+          amountCents: 80000,
+          paymentUrl: 'https://zpayz.cn/submit.php?pid=2026060213344566'
+        });
+      }
+      throw new Error(`unexpected ${url}`);
+    }
+  });
+  const { createCloudDesktopController } = require('../src/main/cloudDesktopController');
+  const controller = createCloudDesktopController({ client, sessionStore, deviceId: 'desktop-1' });
+
+  const result = await controller.createZpayTopUp({ planId: 'advanced' });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.order.orderNo, '202606020002');
+  assert.equal(result.payment.provider, 'zpay');
+  assert.equal(result.payment.paymentUrl, 'https://zpayz.cn/submit.php?pid=2026060213344566');
+  assert.deepEqual(calls.map(call => call.url), [
+    'http://api.test/v1/orders',
+    'http://api.test/v1/orders/order-zpay-1/payments/zpay/page-pay'
+  ]);
+});
+
 test('cloud controller creates a manual top-up order and payment instructions', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'add-whatsapp-cloud-manual-pay-'));
   const sessionStore = new CloudSessionStore(path.join(dir, 'cloud-session.json'));
@@ -391,6 +448,21 @@ test('cloud controller requires a cloud session before creating Alipay payments'
   });
 
   const result = await controller.createAlipayTopUp({ planId: 'advanced' });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.authRequired, true);
+});
+
+test('cloud controller requires a cloud session before creating ZPAY payments', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'add-whatsapp-cloud-zpay-empty-'));
+  const sessionStore = new CloudSessionStore(path.join(dir, 'cloud-session.json'));
+  const { createCloudDesktopController } = require('../src/main/cloudDesktopController');
+  const controller = createCloudDesktopController({
+    sessionStore,
+    client: new CloudApiClient({ baseUrl: 'http://api.test', fetchImpl: async () => response(500, {}) })
+  });
+
+  const result = await controller.createZpayTopUp({ planId: 'advanced' });
 
   assert.equal(result.ok, false);
   assert.equal(result.authRequired, true);

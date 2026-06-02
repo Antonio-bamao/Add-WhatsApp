@@ -207,7 +207,7 @@ function renderPlanCards(subscription) {
       : '无需充值';
     const templateLimit = plan.templateLimit ? `自定义文案模板 X${plan.templateLimit}` : '自定义文案模板不限';
     const lockedItems = lockedFeatureList(plan);
-    const actionText = isActive ? '当前套餐' : '生成付款订单';
+    const actionText = isActive ? '当前套餐' : 'ZPAY 支付';
     const disabled = isActive || !plan.capabilities || !plan.capabilities.onlinePayment;
     card.innerHTML = `
       <div class="plan-card-head">
@@ -238,7 +238,7 @@ function renderPlanCards(subscription) {
     `;
     const payButton = card.querySelector('[data-plan-pay]');
     if (payButton && !disabled) {
-      payButton.addEventListener('click', () => startManualTopUp(plan.id, payButton));
+      payButton.addEventListener('click', () => startZpayTopUp(plan.id, payButton));
     }
     elements.planCards.appendChild(card);
   }
@@ -547,6 +547,21 @@ function renderManualPayment(paymentResult) {
   }
 }
 
+function renderZpayPayment(paymentResult) {
+  if (!elements.manualPaymentPanel || !paymentResult || !paymentResult.payment) return;
+  const { order, payment, plan } = paymentResult;
+  elements.manualPaymentPanel.hidden = false;
+  elements.manualPaymentTitle.textContent = `${plan.name} ${formatCredits(plan.credits)} 额度`;
+  elements.manualPaymentDescription.textContent = 'ZPAY 收银台已在浏览器打开。付款成功后系统会自动入账，稍后点击刷新套餐。';
+  elements.manualPaymentOrderNo.textContent = order.orderNo;
+  elements.manualPaymentAmount.textContent = `¥${(Number(payment.amountCents || plan.amountCents || 0) / 100).toFixed(2)}`;
+  elements.manualPaymentNote.textContent = '等待 ZPAY 回调';
+  elements.manualPaymentQr.hidden = true;
+  elements.manualPaymentQr.removeAttribute('src');
+  elements.manualPaymentQrFallback.hidden = false;
+  elements.manualPaymentQrFallback.textContent = payment.paymentUrl ? '浏览器没有打开时，请重新点击支付按钮生成收银台。' : '支付链接生成失败';
+}
+
 async function startManualTopUp(planId = null, sourceButton = null) {
   const plan = planId
     ? (state.subscription && state.subscription.catalog || []).find(item => item.id === planId)
@@ -565,6 +580,27 @@ async function startManualTopUp(planId = null, sourceButton = null) {
 
   renderManualPayment(response);
   elements.syncState.textContent = `订单 ${response.order.orderNo} 已生成，付款后等管理员确认入账。`;
+  updateActionLocks();
+}
+
+async function startZpayTopUp(planId = null, sourceButton = null) {
+  const plan = planId
+    ? (state.subscription && state.subscription.catalog || []).find(item => item.id === planId)
+    : state.subscription && state.subscription.plan;
+  const targetPlanId = plan && plan.id;
+  const buttons = [sourceButton, elements.quotaPayButton, elements.billingPayButton].filter(Boolean);
+  for (const button of buttons) button.disabled = true;
+  elements.syncState.textContent = '正在生成 ZPAY 付款订单...';
+
+  const response = await window.addWhatsapp.startZpayTopUp({ planId: targetPlanId });
+  if (!response.ok) {
+    elements.syncState.textContent = response.error || 'ZPAY 付款订单创建失败。';
+    updateActionLocks();
+    return;
+  }
+
+  renderZpayPayment(response);
+  elements.syncState.textContent = `订单 ${response.order.orderNo} 已生成，ZPAY 收银台已打开，付款后会自动入账。`;
   updateActionLocks();
 }
 
@@ -1315,8 +1351,8 @@ for (const tab of elements.authTabs) {
 elements.loginForm.addEventListener('submit', handleLogin);
 elements.registerForm.addEventListener('submit', handleRegister);
 elements.refreshEntitlementsButton.addEventListener('click', refreshCloudEntitlements);
-elements.quotaPayButton.addEventListener('click', () => startManualTopUp());
-elements.billingPayButton.addEventListener('click', () => startManualTopUp());
+elements.quotaPayButton.addEventListener('click', () => startZpayTopUp());
+elements.billingPayButton.addEventListener('click', () => startZpayTopUp());
 elements.importButton.addEventListener('click', importContacts);
 elements.dropImportButton.addEventListener('click', importContacts);
 elements.exportButton.addEventListener('click', exportReport);

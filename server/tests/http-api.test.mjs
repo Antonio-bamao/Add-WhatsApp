@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import crypto from "node:crypto";
 
 import { createAppServer, createRuntimeFromEnv } from "../src/app.js";
-import { signMockAlipayPayload } from "../src/services/paymentProviders.js";
+import { signMockAlipayPayload, signZpayPayload } from "../src/services/paymentProviders.js";
 
 async function withServer(testFn, options = {}) {
   const server = createAppServer(options);
@@ -415,6 +415,71 @@ describe("cloud API skeleton", () => {
         ALIPAY_FIXED_TIMESTAMP: "2026-05-29 10:20:30"
       }
     }, { env: { MANUAL_PAYMENT_ALIPAY_QR_URL: "https://addwhatsapp.com/pay/alipay.png" } });
+  });
+
+  it("creates signed ZPAY page-pay requests and accepts signed callbacks", async () => {
+    const key = "zpay_http_secret";
+    const pid = "2026060213344566";
+    await withServer(async (baseUrl) => {
+      const registered = await request(baseUrl, "/v1/auth/register", {
+        method: "POST",
+        body: { username: "zpay-link-user", password: "StrongPass123", planId: "advanced" }
+      });
+      const auth = { authorization: `Bearer ${registered.payload.accessToken}` };
+      const order = await request(baseUrl, "/v1/orders", {
+        method: "POST",
+        headers: auth,
+        body: { planId: "advanced", credits: 2000, amountCents: 80000 }
+      });
+
+      const payment = await request(baseUrl, `/v1/orders/${order.payload.id}/payments/zpay/page-pay`, {
+        method: "POST",
+        headers: auth,
+        body: {}
+      });
+      assert.equal(payment.response.status, 200);
+      assert.equal(payment.payload.provider, "zpay");
+      assert.equal(payment.payload.orderId, order.payload.id);
+      assert.equal(payment.payload.orderNo, order.payload.orderNo);
+      assert.ok(payment.payload.paymentUrl.startsWith("https://zpayz.cn/submit.php?"));
+      assert.equal(payment.payload.params.pid, pid);
+      assert.equal(payment.payload.params.type, "wxpay");
+      assert.equal(payment.payload.params.notify_url, "https://api.addwhatsapp.com/v1/payments/zpay/notify");
+
+      const notifyPayload = {
+        pid,
+        out_trade_no: order.payload.orderNo,
+        trade_no: "zpay-http-trade-001",
+        trade_status: "TRADE_SUCCESS",
+        money: "800.00",
+        type: "wxpay",
+        sign_type: "MD5"
+      };
+      const signed = { ...notifyPayload, sign: signZpayPayload(notifyPayload, key) };
+      const callback = await requestText(baseUrl, `/v1/payments/zpay/notify?${new URLSearchParams(signed)}`, {
+        method: "GET"
+      });
+      assert.equal(callback.response.status, 200);
+      assert.equal(callback.text, "success");
+
+      const balance = await request(baseUrl, "/v1/me/entitlements", { headers: auth });
+      assert.equal(balance.payload.balanceCredits, 2000);
+
+      const tampered = await requestText(baseUrl, `/v1/payments/zpay/notify?${new URLSearchParams({ ...signed, money: "1.00" })}`, {
+        method: "GET"
+      });
+      assert.equal(tampered.response.status, 401);
+    }, {
+      env: {
+        ZPAY_GATEWAY_URL: "https://zpayz.cn",
+        ZPAY_PID: pid,
+        ZPAY_KEY: key,
+        ZPAY_NOTIFY_URL: "https://api.addwhatsapp.com/v1/payments/zpay/notify",
+        ZPAY_RETURN_URL: "https://addwhatsapp.com",
+        ZPAY_TYPE: "wxpay",
+        ZPAY_SITE_NAME: "Add WhatsApp"
+      }
+    });
   });
 
   it("lists payment events for admins with filters and pagination", async () => {

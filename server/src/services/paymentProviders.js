@@ -17,6 +17,14 @@ function canonicalizeAlipayPayload(payload) {
     .join("&");
 }
 
+function canonicalizeZpayPayload(payload) {
+  return Object.keys(payload)
+    .filter((key) => key !== "sign" && key !== "sign_type" && payload[key] !== "" && payload[key] !== undefined && payload[key] !== null)
+    .sort()
+    .map((key) => `${key}=${String(payload[key])}`)
+    .join("&");
+}
+
 function formatAlipayTimestamp(date = new Date()) {
   const pad = (value) => String(value).padStart(2, "0");
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
@@ -52,6 +60,15 @@ export function signMockAlipayPayload(payload, secret) {
   return crypto
     .createHmac("sha256", String(secret))
     .update(canonicalizePayload(payload))
+    .digest("hex");
+}
+
+export function signZpayPayload(payload, key) {
+  const merchantKey = String(key || "").trim();
+  if (!merchantKey) throw new Error("ZPAY_KEY_REQUIRED");
+  return crypto
+    .createHash("md5")
+    .update(canonicalizeZpayPayload(payload) + merchantKey)
     .digest("hex");
 }
 
@@ -102,6 +119,30 @@ export function parseAlipayNotification(payload, { alipayPublicKey, expectedAppI
     eventType: successful ? "payment_succeeded" : "payment_ignored",
     providerTradeNo: payload.trade_no,
     payload: publicPayloadWithoutSignature(payload)
+  };
+}
+
+export function parseZpayNotification(payload, { key, expectedPid } = {}) {
+  const merchantKey = String(key || "").trim();
+  if (!merchantKey) throw new Error("ZPAY_KEY_REQUIRED");
+  const signature = payload.sign;
+  if (!signature) throw new Error("PAYMENT_SIGNATURE_REQUIRED");
+  if (payload.sign_type && String(payload.sign_type).toUpperCase() !== "MD5") throw new Error("PAYMENT_SIGN_TYPE_UNSUPPORTED");
+  if (expectedPid && String(payload.pid) !== String(expectedPid)) throw new Error("PAYMENT_PID_MISMATCH");
+  const expected = signZpayPayload(payload, merchantKey);
+  if (!timingSafeEqualText(String(signature).toLowerCase(), expected)) throw new Error("PAYMENT_SIGNATURE_INVALID");
+
+  const tradeStatus = String(payload.trade_status || "");
+  const successful = tradeStatus === "TRADE_SUCCESS";
+  const publicPayload = publicPayloadWithoutSignature(payload);
+
+  return {
+    provider: "zpay",
+    providerEventId: `zpay:${payload.trade_no || payload.out_trade_no}:${tradeStatus || "UNKNOWN"}`,
+    orderNo: payload.out_trade_no,
+    eventType: successful ? "payment_succeeded" : "payment_ignored",
+    providerTradeNo: payload.trade_no,
+    payload: publicPayload
   };
 }
 
@@ -156,6 +197,49 @@ export function buildAlipayPagePayRequest(order, options = {}) {
     params,
     paymentUrl,
     paymentHtml
+  };
+}
+
+export function buildZpayPagePayRequest(order, options = {}) {
+  const gatewayUrl = String(options.gatewayUrl || "https://zpayz.cn/").trim().replace(/\/+$/, "");
+  const pid = String(options.pid || "").trim();
+  const key = String(options.key || "").trim();
+  const notifyUrl = String(options.notifyUrl || "").trim();
+  const returnUrl = String(options.returnUrl || "").trim();
+  const type = String(options.type || "wxpay").trim();
+  if (!pid) throw new Error("ZPAY_PID_REQUIRED");
+  if (!key) throw new Error("ZPAY_KEY_REQUIRED");
+  if (!notifyUrl) throw new Error("ZPAY_NOTIFY_URL_REQUIRED");
+  if (!returnUrl) throw new Error("ZPAY_RETURN_URL_REQUIRED");
+
+  const amountCents = Number(order.amountCents);
+  if (!Number.isInteger(amountCents) || amountCents <= 0) throw new Error("ORDER_AMOUNT_INVALID");
+  const credits = Number(order.credits);
+  if (!Number.isInteger(credits) || credits <= 0) throw new Error("ORDER_CREDITS_INVALID");
+
+  const params = {
+    pid,
+    type,
+    out_trade_no: String(order.orderNo),
+    notify_url: notifyUrl,
+    return_url: returnUrl,
+    name: String(options.name || `Add WhatsApp ${credits} credits`).slice(0, 100),
+    money: (amountCents / 100).toFixed(2),
+    sign_type: "MD5"
+  };
+  if (options.siteName) params.sitename = String(options.siteName);
+  if (options.channelId) params.cid = String(options.channelId);
+  if (options.param) params.param = String(options.param);
+  params.sign = signZpayPayload(params, key);
+
+  const query = new URLSearchParams(params).toString();
+  return {
+    provider: "zpay",
+    orderId: order.id,
+    orderNo: order.orderNo,
+    amountCents,
+    params,
+    paymentUrl: `${gatewayUrl}/submit.php?${query}`
   };
 }
 

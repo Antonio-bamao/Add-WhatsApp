@@ -4,9 +4,12 @@ import crypto from "node:crypto";
 
 import {
   buildAlipayPagePayRequest,
+  buildZpayPagePayRequest,
   parseAlipayNotification,
+  parseZpayNotification,
   parseMockAlipayNotification,
-  signMockAlipayPayload
+  signMockAlipayPayload,
+  signZpayPayload
 } from "../src/services/paymentProviders.js";
 
 function signAlipayPayload(payload, privateKey) {
@@ -186,5 +189,68 @@ describe("payment provider adapters", () => {
     assert.equal(bizContent.product_code, "FAST_INSTANT_TRADE_PAY");
     assert.equal(bizContent.qr_pay_mode, "4");
     assert.equal(bizContent.qrcode_width, 120);
+  });
+
+  it("builds and verifies a ZPAY easy-pay request and success notification", () => {
+    const order = {
+      id: "order_zpay_001",
+      orderNo: "2026060213340001",
+      planId: "advanced",
+      credits: 2000,
+      amountCents: 80000
+    };
+
+    const request = buildZpayPagePayRequest(order, {
+      gatewayUrl: "https://zpayz.cn/",
+      pid: "2026060213344566",
+      key: "zpay_secret_key",
+      notifyUrl: "https://api.addwhatsapp.com/v1/payments/zpay/notify",
+      returnUrl: "https://addwhatsapp.com",
+      type: "wxpay",
+      siteName: "Add WhatsApp"
+    });
+
+    assert.equal(request.provider, "zpay");
+    assert.equal(request.orderId, "order_zpay_001");
+    assert.equal(request.orderNo, "2026060213340001");
+    assert.equal(request.amountCents, 80000);
+    assert.ok(request.paymentUrl.startsWith("https://zpayz.cn/submit.php?"));
+    assert.equal(request.params.pid, "2026060213344566");
+    assert.equal(request.params.type, "wxpay");
+    assert.equal(request.params.out_trade_no, "2026060213340001");
+    assert.equal(request.params.money, "800.00");
+    assert.equal(request.params.name, "Add WhatsApp 2000 credits");
+    assert.equal(request.params.notify_url, "https://api.addwhatsapp.com/v1/payments/zpay/notify");
+    assert.equal(request.params.return_url, "https://addwhatsapp.com");
+    assert.equal(request.params.sign_type, "MD5");
+    assert.equal(request.params.sign, signZpayPayload(request.params, "zpay_secret_key"));
+
+    const notifyPayload = {
+      pid: "2026060213344566",
+      trade_no: "zpay-trade-001",
+      out_trade_no: "2026060213340001",
+      type: "wxpay",
+      name: "Add WhatsApp 2000 credits",
+      money: "800.00",
+      trade_status: "TRADE_SUCCESS"
+    };
+    const signedNotify = {
+      ...notifyPayload,
+      sign: signZpayPayload(notifyPayload, "zpay_secret_key"),
+      sign_type: "MD5"
+    };
+
+    const event = parseZpayNotification(signedNotify, {
+      key: "zpay_secret_key",
+      expectedPid: "2026060213344566"
+    });
+
+    assert.equal(event.provider, "zpay");
+    assert.equal(event.providerEventId, "zpay:zpay-trade-001:TRADE_SUCCESS");
+    assert.equal(event.orderNo, "2026060213340001");
+    assert.equal(event.eventType, "payment_succeeded");
+    assert.equal(event.providerTradeNo, "zpay-trade-001");
+    assert.equal(event.payload.sign, undefined);
+    assert.equal(event.payload.sign_type, undefined);
   });
 });

@@ -15,6 +15,8 @@
 | 支付按钮打开但服务端未配置真实支付宝环境 | 桌面端已开放支付宝支付入口，但公网 API 缺少 `ALIPAY_APP_ID`、应用私钥、支付宝公钥、notify URL 或可用网关 | 用户点击支付时创建订单失败、收银台打不开或付款后无法自动入账 | 按 `docs/payment-production-checklist.md` 配置服务端环境变量；桌面端未登录云端时禁用支付；支付完成后以 `/v1/payments/alipay/notify` 和后台 payment-events 为准排查 |
 | 人工收款码未配置或备注填错 | 生产 API 没有 `MANUAL_PAYMENT_ALIPAY_QR_URL`，或用户付款时没有填写订单付款备注 | 客户无法扫码付款，或管理员难以确认该给哪个账号充值 | 收款码图片放到公网静态地址并写入 server env；桌面端生成订单后显示订单号和付款备注；后台支持按用户名充值和按订单号标记已支付 |
 | 人工收款确认延迟 | 用户付款后必须等待管理员手动充值 | 付款后不立即到账，增加售后沟通成本 | 付款页面明确“管理员确认后入账”；后台充值表单支持用户名，减少查找成本；后续再接自动支付或聚合支付时复用现有订单/账本幂等 |
+| ZPAY 聚合支付 KEY 泄露 | 把 ZPAY KEY 填入前端、官网、后台静态文件或提交到 Git | 攻击者可伪造支付请求或回调，造成资金/额度风险 | `ZPAY_KEY` 只写服务器 `/etc/add-whatsapp-api.env`；代码和文档只记录变量名；ZPAY 回调必须校验 PID、MD5 签名和订单归属 |
+| ZPAY 回调未到或被拦截 | 服务器 notify URL 配错、HTTPS/Nginx 转发失败、ZPAY 平台重试失败 | 用户付款后订单未自动入账 | ZPAY notify URL 固定为 `https://api.addwhatsapp.com/v1/payments/zpay/notify`；后台保留人工按订单号入账和补偿队列；联调用 0.01 元测试支付检查 payment-events |
 | 旧本地账号数据切换为数据库账号后看不到 | 老版本用户的历史、模板或 WhatsApp 缓存曾挂在旧本地 accountId 下，新版本用云端 `user.id` 作为账号目录 | 老用户首次升级后可能误以为原本机历史或扫码缓存丢失，需要重新扫码或迁移数据 | 新产品文案不再暴露本地账号；如要保留旧数据，需要后续做按用户名或手动同步包的迁移工具，把旧账号目录迁到数据库账号目录 |
 | 官网下载包过期 | 桌面端重新打包后未同步 `website/public/downloads` 和 `update.json` | 用户下载旧版本或校验信息不一致 | 每次发布执行复制 EXE、计算 SHA256、更新 latest/release 目录和版本页，再跑 website 测试与 build |
 | 公开官网误放敏感配置 | 官网后续接后台/API 时混入密钥、数据库 URL 或客户数据 | 公开站点泄露管理能力或用户数据 | 官网目录只放公开内容和下载元数据；后台走 `admin.addwhatsapp.com`，API 走 `api.addwhatsapp.com`，结构测试扫描敏感导入和密钥字样 |

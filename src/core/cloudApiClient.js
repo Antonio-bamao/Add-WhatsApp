@@ -55,6 +55,14 @@ class CloudApiClient {
     });
   }
 
+  async createZpayPagePay(accessToken, orderId) {
+    return this.request(`/v1/orders/${encodeURIComponent(orderId)}/payments/zpay/page-pay`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${accessToken}` },
+      body: {}
+    });
+  }
+
   async createManualPayment(accessToken, orderId) {
     return this.request(`/v1/orders/${encodeURIComponent(orderId)}/payments/manual`, {
       method: 'POST',

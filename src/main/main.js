@@ -425,6 +425,18 @@ ipcMain.handle('cloud:alipay-top-up', async (_event, payload = {}) => {
   }
 });
 
+ipcMain.handle('cloud:zpay-top-up', async (_event, payload = {}) => {
+  try {
+    const result = await cloudController.createZpayTopUp({ planId: payload.planId });
+    if (result.ok && result.payment && result.payment.paymentUrl) {
+      await shell.openExternal(result.payment.paymentUrl);
+    }
+    return result;
+  } catch (error) {
+    return { ok: false, error: error.message };
+  }
+});
+
 ipcMain.handle('cloud:manual-top-up', async (_event, payload = {}) => {
   try {
     return await cloudController.createManualTopUp({ planId: payload.planId });

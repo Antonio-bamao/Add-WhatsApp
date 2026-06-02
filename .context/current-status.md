@@ -46,7 +46,10 @@
 - 已完成：应用图标已重新从 `assets/iconn.png` 抠图，边缘连通非绿色背景全部透明化，`assets/icon.png`、`assets/icon.ico`、官网 `website/public/logo.png`、`website/public/icon.png`、`website/app/icon.png`、`website/app/favicon.ico`、后台 `admin/public/logo.png`、`admin/public/favicon.png` 和 `admin/public/favicon.ico` 均已替换为透明底版本。
 - 已完成：桌面端品牌图标/关闭弹窗、官网导航 logo/页脚 logo/浏览器标签页图标、后台管理台左侧 logo/标签页图标均已切换到新图；官网、后台和桌面端普通品牌图标容器已去掉白色背景和方形/圆形底。
 - 已完成：重新打包 `dist\Add WhatsApp 0.1.2.exe` 并同步到 `website\public\downloads\latest\Add-WhatsApp.exe` 和 `website\public\downloads\releases\0.1.2\Add-WhatsApp-0.1.2.exe`；`update.json` 当前 `releaseDate=2026-06-02`、`sizeBytes=78742200`、SHA256 `0757ba33927f74564e23aa88647bbc851a4cd20f303c9490a67b14b0b60d9d04`。
-- 进行中：等待部署最新 website/下载包，并由用户下载新版 EXE 验证内置收款码和新图标。
+- 已完成：ZPAY 聚合支付接入为当前自动支付路径；`server/` 新增 `/v1/orders/:id/payments/zpay/page-pay` 和 `/v1/payments/zpay/notify`，使用 PID/KEY 生成兼容易支付收银台链接，并对 ZPAY 回调做 PID 校验、MD5 验签和统一支付事件幂等入账。
+- 已完成：桌面端购买入口从人工收款默认路径改为 ZPAY 收银台；套餐卡、额度页和账单页会调用 `cloud:zpay-top-up`，主进程创建云端订单后请求 ZPAY page-pay 并用系统浏览器打开收银台；人工收款接口和内置收款码仍保留为备用。
+- 已完成：重新打包 `dist\Add WhatsApp 0.1.2.exe` 并同步到 `website\public\downloads\latest\Add-WhatsApp.exe` 和 `website\public\downloads\releases\0.1.2\Add-WhatsApp-0.1.2.exe`；`update.json` 当前 `releaseDate=2026-06-02`、`sizeBytes=78742578`、SHA256 `5d5eee9068f228c0cc867b1b0703542812938435f48d82ca97eafa418d227ae5`。
+- 进行中：等待用户从 ZPAY 后台“发送到邮箱”拿到 KEY，并在生产服务器 `/etc/add-whatsapp-api.env` 配置 `ZPAY_GATEWAY_URL`、`ZPAY_PID`、`ZPAY_KEY`、`ZPAY_NOTIFY_URL`、`ZPAY_RETURN_URL`、`ZPAY_TYPE`、`ZPAY_SITE_NAME` 后重启 API 联调。
 - 验证：`website\npm test` 通过 6/6；`website\npm run build` 成功；根项目 `npm test` 通过 77/77；本地 `http://localhost:3100` 桌面/移动端 Chrome headless 截图已复查，样式不再退化为裸 HTML；浏览器插件调试确认首屏只剩 1 个 WebGL canvas、无旧 `.globe-static` SVG 叠加、无 Server Error，地球 HUD 文案已删除，路线扩展到 20 条；下载页返回 200，`/downloads/latest/Add-WhatsApp.exe` HEAD 长度为 `77060652`。
 - 验证：`admin\npm test` 通过 5/5；本地 `http://127.0.0.1:3220/` 返回 200；管理台 JS 已包含 `ADD_WHATSAPP_API_URL`、`/v1/admin/console`、API 回退逻辑和运行时快照合并逻辑。
 - 验证：后台拆页后，浏览器验证运营首页只显示 8 个模块入口且不渲染 8 个模块详情；`#/referrals` 只显示推荐审核模块详情，3 个详情区、3 条记录、无 console error/warning、无横向溢出。
@@ -70,6 +73,7 @@
 - 验证：后台注册用户列表改造后，`admin\npm test` 通过 8/8；`server\npm test` 通过 25/25。
 - 验证：公网 API 默认值改造后，先写失败测试再实现；`node --test tests\cloudApiClient.test.js` 通过 7/7；根项目 `npm test` 通过 105/105；根项目 `npm run build` 成功；打包 asar 抽查包含 `https://api.addwhatsapp.com`；`website\npm test` 通过 6/6；`website\npm run build` 成功。
 - 验证：人工收款码改造后，先写失败测试再实现；`node --test tests\cloudApiClient.test.js` 通过 8/8；`node --test tests\cloudMainIntegration.test.js` 通过 11/11；`node --test tests\cloudRendererContract.test.js` 通过 3/3；根项目 `npm test` 通过 108/108；`server\npm test` 通过 25/25；`admin\npm test` 通过 8/8；`website\npm test` 通过 6/6；根项目 `npm run build` 成功；`website\npm run build` 成功；打包 asar 抽查包含 `cloud:manual-top-up`。
-- 下一步：部署最新 website 和下载包后，让用户重新下载新版 EXE；服务器 `/etc/add-whatsapp-api.env` 不需要再配置 `MANUAL_PAYMENT_ALIPAY_QR_URL`，如果已配置则会优先覆盖本地收款码，想使用安装包内置收款码需删除或留空该变量；用户付款后后台 `#/credits` 可填账号用户名补额度，或 `#/orders` 填订单号标记已支付。
+- 验证：ZPAY 聚合支付接入后，先写失败测试再实现；`node --test server\tests\payment-providers.test.mjs` 通过 6/6；`node --test tests\cloudApiClient.test.js` 通过 9/9；`node --test tests\cloudMainIntegration.test.js` 通过 13/13；`node --test tests\cloudRendererContract.test.js` 通过 3/3；`node --test server\tests\http-api.test.mjs` 通过 9/9；根项目 `npm test` 通过 111/111；`server\npm test` 通过 27/27；`admin\npm test` 通过 8/8；`website\npm test` 通过 6/6；根项目 `npm run build` 成功；`website\npm run build` 成功。
+- 下一步：生产服务器 `/etc/add-whatsapp-api.env` 加上 ZPAY 变量并 `systemctl restart add-whatsapp-api.service`；部署最新 website/admin/API 代码后，登录新版 EXE 生成一笔 0.01 或最低金额测试单，确认浏览器打开 ZPAY 收银台、付款后 `/v1/payments/zpay/notify` 返回 `success`、后台 payment-events 出现 `provider=zpay` 且账号余额增加。
 - 阻塞项：如果继续使用旧沙箱应用，需确认支付宝沙箱 `alipay.trade.page.pay` 已恢复；此前沙箱曾出现 `SYSTEM_ERROR` / `504 Gateway Time-out`，并且 `alipay.trade.query` 返回 `ACQ.TRADE_NOT_EXIST`。
 - 阻塞项：管理员登录方式、支付渠道/人工收款流程、生产域名和部署平台还未最终确定。

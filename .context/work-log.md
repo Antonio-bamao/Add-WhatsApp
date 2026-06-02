@@ -387,3 +387,13 @@
 - 结果：后台管理台、官网落地页导航 logo、页脚 logo、官网标签页、后台标签页和桌面端品牌图标都使用透明底新图；新 EXE 已同步到 website latest/release，`update.json` 为 `sizeBytes=78742200`、SHA256 `0757ba33927f74564e23aa88647bbc851a4cd20f303c9490a67b14b0b60d9d04`。
 - 验证：`admin npm test` 8/8 通过；`website npm test` 6/6 通过；`node --test tests\\cloudRendererContract.test.js` 3/3 通过；根项目 `npm test` 108/108 通过；`website npm run build` 成功；根项目 `npm run build` 成功；图标文件左上角 alpha 均为 0；`.context` 校验通过。
 - 下一步：部署最新 admin/website 后，强制刷新浏览器缓存或用无痕窗口确认后台 logo、官网 logo 和标签页 favicon 已更新。
+
+## 2026-06-02T15:20:00+08:00｜接入 ZPAY 聚合支付自动入账
+- 目标：用户已选择 ZPAY 聚合支付后，把当前默认购买路径从人工收款改为 ZPAY 收银台，并继续保留人工收款备用。
+- 动作：按 TDD 先补失败测试，覆盖 ZPAY 易支付 MD5 签名、page-pay URL、GET/POST 回调验签、云端 API client、桌面端 controller、渲染契约和 HTTP 端到端入账。
+- 动作：实现 `server/src/services/paymentProviders.js` 的 `signZpayPayload`、`buildZpayPagePayRequest`、`parseZpayNotification`；新增 `/v1/orders/:id/payments/zpay/page-pay` 和 `/v1/payments/zpay/notify`；桌面端新增 `createZpayTopUp`、`cloud:zpay-top-up`、`startZpayTopUp` 并把套餐/额度/账单支付按钮切到 ZPAY。
+- 动作：重新打包 `dist\\Add WhatsApp 0.1.2.exe`，同步到 website latest/release，并更新 `website\\public\\downloads\\latest\\update.json`。
+- 结果：新版客户端点击购买会创建云端订单并打开 `https://zpayz.cn/submit.php?...` 收银台；ZPAY 回调验签成功后进入现有 `payment_events` 和 `purchase:{orderId}` 双层幂等入账；人工收款码仍可作为后台备用入口。
+- 结果：新下载包 `sizeBytes=78742578`，SHA256 `5d5eee9068f228c0cc867b1b0703542812938435f48d82ca97eafa418d227ae5`。
+- 验证：`node --test server\\tests\\payment-providers.test.mjs` 6/6；`node --test tests\\cloudApiClient.test.js` 9/9；`node --test tests\\cloudMainIntegration.test.js` 13/13；`node --test tests\\cloudRendererContract.test.js` 3/3；`node --test server\\tests\\http-api.test.mjs` 9/9；根项目 `npm test` 111/111；`server npm test` 27/27；`admin npm test` 8/8；`website npm test` 6/6；根项目 `npm run build` 成功；`website npm run build` 成功。
+- 下一步：用户从 ZPAY 后台“发送到邮箱”拿 KEY；服务器 `/etc/add-whatsapp-api.env` 写入 ZPAY 变量并重启 API；部署最新代码和下载包；用新版 EXE 生成测试订单，付款后在后台 payment-events 和注册用户余额里确认自动入账。

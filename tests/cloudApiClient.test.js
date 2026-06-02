@@ -261,6 +261,58 @@ test('creates a cloud order and requests manual payment instructions with bearer
   ]);
 });
 
+test('creates a cloud order and requests a ZPAY page-pay link with bearer auth', async () => {
+  const requests = [];
+  const client = new CloudApiClient({
+    baseUrl: 'http://127.0.0.1:4110',
+    fetchImpl: async (url, options = {}) => {
+      requests.push({ url, options });
+      assert.equal(options.headers.authorization, 'Bearer access-1');
+      if (url.endsWith('/v1/orders')) {
+        assert.equal(options.method, 'POST');
+        assert.deepEqual(JSON.parse(options.body), {
+          planId: 'advanced',
+          credits: 2000,
+          amountCents: 80000
+        });
+        return response(201, {
+          id: 'order-zpay-1',
+          orderNo: '2026060213340001',
+          planId: 'advanced',
+          credits: 2000,
+          amountCents: 80000,
+          status: 'created'
+        });
+      }
+      if (url.endsWith('/v1/orders/order-zpay-1/payments/zpay/page-pay')) {
+        assert.equal(options.method, 'POST');
+        return response(200, {
+          provider: 'zpay',
+          orderId: 'order-zpay-1',
+          orderNo: '2026060213340001',
+          amountCents: 80000,
+          paymentUrl: 'https://zpayz.cn/submit.php?pid=2026060213344566'
+        });
+      }
+      throw new Error(`unexpected url: ${url}`);
+    }
+  });
+
+  const order = await client.createOrder('access-1', {
+    planId: 'advanced',
+    credits: 2000,
+    amountCents: 80000
+  });
+  const payment = await client.createZpayPagePay('access-1', order.id);
+
+  assert.equal(payment.provider, 'zpay');
+  assert.equal(payment.paymentUrl, 'https://zpayz.cn/submit.php?pid=2026060213344566');
+  assert.deepEqual(requests.map(item => item.url), [
+    'http://127.0.0.1:4110/v1/orders',
+    'http://127.0.0.1:4110/v1/orders/order-zpay-1/payments/zpay/page-pay'
+  ]);
+});
+
 function response(status, payload) {
   return {
     ok: status >= 200 && status < 300,

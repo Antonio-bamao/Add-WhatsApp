@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld('addWhatsapp', {
   refreshCloudEntitlements: () => ipcRenderer.invoke('cloud:refresh-entitlements'),
   startManualTopUp: payload => ipcRenderer.invoke('cloud:manual-top-up', payload),
   startAlipayTopUp: payload => ipcRenderer.invoke('cloud:alipay-top-up', payload),
+  startZpayTopUp: payload => ipcRenderer.invoke('cloud:zpay-top-up', payload),
   openAnotherWorkspace: payload => ipcRenderer.invoke('workspace:open-another-account', payload),
   getProxySettings: () => ipcRenderer.invoke('proxy:get'),
   testProxySettings: payload => ipcRenderer.invoke('proxy:test', payload),
