@@ -2,7 +2,7 @@ const path = require('path');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const { spawn } = require('node:child_process');
-const { app, BrowserWindow, Tray, Menu, dialog, ipcMain, shell } = require('electron');
+const { app, BrowserWindow, Tray, Menu, dialog, ipcMain, shell, clipboard } = require('electron');
 const QRCode = require('qrcode');
 const XLSX = require('xlsx');
 const { importContacts } = require('../core/tableImporter');
@@ -478,6 +478,15 @@ ipcMain.handle('app:open-external-url', async (_event, url) => {
     const target = new URL(String(url || ''));
     if (!['http:', 'https:', 'weixin:'].includes(target.protocol)) throw new Error('URL_NOT_ALLOWED');
     await shell.openExternal(target.toString());
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: error.message };
+  }
+});
+
+ipcMain.handle('app:copy-text', async (_event, text) => {
+  try {
+    clipboard.writeText(String(text || ''));
     return { ok: true };
   } catch (error) {
     return { ok: false, error: error.message };
