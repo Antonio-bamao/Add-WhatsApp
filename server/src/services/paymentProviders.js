@@ -190,7 +190,15 @@ function signWechatRequest({ method, pathname, body, timestamp, nonce, privateKe
 }
 
 export async function buildWechatNativePayRequest(order, options = {}) {
-  const gatewayUrl = String(options.gatewayUrl || "https://api.mch.weixin.qq.com").trim().replace(/\/+$/, "");
+  const gatewayUrlOption = options.gatewayUrl ? String(options.gatewayUrl).trim().replace(/\/+$/, "") : "";
+  const gateways = gatewayUrlOption 
+    ? [gatewayUrlOption]
+    : [
+        "https://api.mch.weixin.qq.com",
+        "https://apihk.mch.weixin.qq.com",
+        "https://apius.mch.weixin.qq.com",
+        "https://apieu.mch.weixin.qq.com"
+      ];
   const mchId = String(options.mchId || "").trim();
   const appId = String(options.appId || "").trim();
   const apiPath = "/v3/pay/transactions/native";
@@ -238,16 +246,38 @@ export async function buildWechatNativePayRequest(order, options = {}) {
   ].join(",");
   const fetchImpl = options.fetchImpl || globalThis.fetch;
   if (typeof fetchImpl !== "function") throw new Error("WECHAT_FETCH_UNAVAILABLE");
-  const response = await fetchImpl(`${gatewayUrl}${apiPath}`, {
-    method: "POST",
-    headers: {
-      "Accept": "application/json",
-      "Content-Type": "application/json",
-      "Authorization": `WECHATPAY2-SHA256-RSA2048 ${authorization}`
-    },
-    body
-  });
-  const responsePayload = await response.json();
+
+  let lastError;
+  let response;
+  let responsePayload;
+
+  for (const gateway of gateways) {
+    try {
+      response = await fetchImpl(`${gateway}${apiPath}`, {
+        method: "POST",
+        headers: {
+          "Accept": "application/json",
+          "Content-Type": "application/json",
+          "Authorization": `WECHATPAY2-SHA256-RSA2048 ${authorization}`
+        },
+        body
+      });
+      responsePayload = await response.json();
+      lastError = null;
+      break;
+    } catch (err) {
+      if (response) {
+        lastError = null;
+        break;
+      }
+      lastError = err;
+    }
+  }
+
+  if (lastError) {
+    throw lastError;
+  }
+
   if (!response.ok) {
     throw new Error(`WECHAT_NATIVE_PAY_FAILED:${responsePayload.message || responsePayload.code || response.status}`);
   }

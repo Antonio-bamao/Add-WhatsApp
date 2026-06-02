@@ -9,7 +9,13 @@ dns.lookup = function (hostname, options, callback) {
     callback = options;
     options = {};
   }
-  if (hostname === "api.mch.weixin.qq.com") {
+  const wechatDomains = [
+    "api.mch.weixin.qq.com",
+    "apihk.mch.weixin.qq.com",
+    "apius.mch.weixin.qq.com",
+    "apieu.mch.weixin.qq.com"
+  ];
+  if (wechatDomains.includes(hostname)) {
     const opts = Object.assign({}, options, { family: 4 });
     return originalLookup(hostname, opts, callback);
   }
