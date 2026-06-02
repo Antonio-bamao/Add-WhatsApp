@@ -130,6 +130,10 @@ const elements = {
   manualPaymentNote: document.getElementById('manualPaymentNote'),
   manualPaymentQr: document.getElementById('manualPaymentQr'),
   manualPaymentQrFallback: document.getElementById('manualPaymentQrFallback'),
+  zpayPaymentLinkBox: document.getElementById('zpayPaymentLinkBox'),
+  zpayPaymentLink: document.getElementById('zpayPaymentLink'),
+  zpayPaymentOpenButton: document.getElementById('zpayPaymentOpenButton'),
+  zpayPaymentCopyButton: document.getElementById('zpayPaymentCopyButton'),
   billingPlanDescription: document.getElementById('billingPlanDescription'),
   billingPayButton: document.getElementById('billingPayButton'),
   billingIncludedList: document.getElementById('billingIncludedList'),
@@ -545,6 +549,7 @@ function renderManualPayment(paymentResult) {
     elements.manualPaymentQrFallback.hidden = false;
     elements.manualPaymentQrFallback.textContent = '服务器还没配置收款码图片 URL';
   }
+  if (elements.zpayPaymentLinkBox) elements.zpayPaymentLinkBox.hidden = true;
 }
 
 function renderZpayPayment(paymentResult) {
@@ -559,7 +564,11 @@ function renderZpayPayment(paymentResult) {
   elements.manualPaymentQr.hidden = true;
   elements.manualPaymentQr.removeAttribute('src');
   elements.manualPaymentQrFallback.hidden = false;
-  elements.manualPaymentQrFallback.textContent = payment.paymentUrl ? '浏览器没有打开时，请重新点击支付按钮生成收银台。' : '支付链接生成失败';
+  elements.manualPaymentQrFallback.textContent = payment.paymentUrl ? '如果浏览器没有自动弹出，请用左侧链接打开或复制。' : '支付链接生成失败';
+  if (elements.zpayPaymentLinkBox) elements.zpayPaymentLinkBox.hidden = !payment.paymentUrl;
+  if (elements.zpayPaymentLink) elements.zpayPaymentLink.textContent = payment.paymentUrl || '-';
+  if (elements.zpayPaymentOpenButton) elements.zpayPaymentOpenButton.dataset.paymentUrl = payment.paymentUrl || '';
+  if (elements.zpayPaymentCopyButton) elements.zpayPaymentCopyButton.dataset.paymentUrl = payment.paymentUrl || '';
 }
 
 async function startManualTopUp(planId = null, sourceButton = null) {
@@ -1353,6 +1362,22 @@ elements.registerForm.addEventListener('submit', handleRegister);
 elements.refreshEntitlementsButton.addEventListener('click', refreshCloudEntitlements);
 elements.quotaPayButton.addEventListener('click', () => startZpayTopUp());
 elements.billingPayButton.addEventListener('click', () => startZpayTopUp());
+if (elements.zpayPaymentOpenButton) {
+  elements.zpayPaymentOpenButton.addEventListener('click', async () => {
+    const url = elements.zpayPaymentOpenButton.dataset.paymentUrl;
+    if (!url) return;
+    const result = await window.addWhatsapp.openExternalUrl(url);
+    elements.syncState.textContent = result && result.ok ? '已再次请求打开 ZPAY 收银台。' : '打开失败，请复制链接到浏览器。';
+  });
+}
+if (elements.zpayPaymentCopyButton) {
+  elements.zpayPaymentCopyButton.addEventListener('click', () => {
+    const url = elements.zpayPaymentCopyButton.dataset.paymentUrl;
+    if (!url) return;
+    window.addWhatsapp.copyText(url);
+    elements.syncState.textContent = '支付链接已复制，可以粘贴到浏览器打开。';
+  });
+}
 elements.importButton.addEventListener('click', importContacts);
 elements.dropImportButton.addEventListener('click', importContacts);
 elements.exportButton.addEventListener('click', exportReport);

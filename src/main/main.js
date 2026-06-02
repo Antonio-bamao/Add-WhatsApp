@@ -417,7 +417,13 @@ ipcMain.handle('cloud:alipay-top-up', async (_event, payload = {}) => {
   try {
     const result = await cloudController.createAlipayTopUp({ planId: payload.planId });
     if (result.ok && result.payment && result.payment.paymentUrl) {
-      await shell.openExternal(result.payment.paymentUrl);
+      try {
+        await shell.openExternal(result.payment.paymentUrl);
+        result.payment.openedExternal = true;
+      } catch (openError) {
+        result.payment.openedExternal = false;
+        result.payment.openExternalError = openError.message;
+      }
     }
     return result;
   } catch (error) {
@@ -429,9 +435,26 @@ ipcMain.handle('cloud:zpay-top-up', async (_event, payload = {}) => {
   try {
     const result = await cloudController.createZpayTopUp({ planId: payload.planId });
     if (result.ok && result.payment && result.payment.paymentUrl) {
-      await shell.openExternal(result.payment.paymentUrl);
+      try {
+        await shell.openExternal(result.payment.paymentUrl);
+        result.payment.openedExternal = true;
+      } catch (openError) {
+        result.payment.openedExternal = false;
+        result.payment.openExternalError = openError.message;
+      }
     }
     return result;
+  } catch (error) {
+    return { ok: false, error: error.message };
+  }
+});
+
+ipcMain.handle('app:open-external-url', async (_event, url) => {
+  try {
+    const target = new URL(String(url || ''));
+    if (!['http:', 'https:'].includes(target.protocol)) throw new Error('URL_NOT_ALLOWED');
+    await shell.openExternal(target.toString());
+    return { ok: true };
   } catch (error) {
     return { ok: false, error: error.message };
   }

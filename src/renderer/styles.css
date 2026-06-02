@@ -1483,6 +1483,35 @@ td {
   font-size: 15px;
 }
 
+.payment-link-box {
+  display: grid;
+  grid-template-columns: auto auto auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  margin-top: 14px;
+  padding: 10px;
+  background: #f7faf8;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.payment-link-box[hidden] {
+  display: none;
+}
+
+.payment-link-box span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.payment-link-box code {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .manual-payment-qr {
   display: grid;
   place-items: center;
@@ -2202,7 +2231,8 @@ td {
   }
 
   .manual-payment-panel,
-  .manual-payment-facts {
+  .manual-payment-facts,
+  .payment-link-box {
     grid-template-columns: 1fr;
   }
 

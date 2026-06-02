@@ -397,3 +397,12 @@
 - 结果：新下载包 `sizeBytes=78742578`，SHA256 `5d5eee9068f228c0cc867b1b0703542812938435f48d82ca97eafa418d227ae5`。
 - 验证：`node --test server\\tests\\payment-providers.test.mjs` 6/6；`node --test tests\\cloudApiClient.test.js` 9/9；`node --test tests\\cloudMainIntegration.test.js` 13/13；`node --test tests\\cloudRendererContract.test.js` 3/3；`node --test server\\tests\\http-api.test.mjs` 9/9；根项目 `npm test` 111/111；`server npm test` 27/27；`admin npm test` 8/8；`website npm test` 6/6；根项目 `npm run build` 成功；`website npm run build` 成功。
 - 下一步：用户从 ZPAY 后台“发送到邮箱”拿 KEY；服务器 `/etc/add-whatsapp-api.env` 写入 ZPAY 变量并重启 API；部署最新代码和下载包；用新版 EXE 生成测试订单，付款后在后台 payment-events 和注册用户余额里确认自动入账。
+
+## 2026-06-02T17:20:00+08:00｜修复 ZPAY 支付按钮无反应兜底
+- 目标：用户反馈官网下载的新客户端点击右侧深色 `ZPAY 支付` 按钮没有弹出浏览器，需要定位是不是后端、环境变量或桌面端打开外部链接问题。
+- 动作：先用生产 API 直测注册、创建订单和 `/v1/orders/:id/payments/zpay/page-pay`，确认后端返回 200 且 `paymentUrl` 能在浏览器打开 ZPAY 微信收银台二维码；随后把问题收敛为桌面端 `shell.openExternal` 没有可见反馈。
+- 动作：主进程 `cloud:alipay-top-up` 和 `cloud:zpay-top-up` 捕获 `shell.openExternal` 错误并保留订单/支付结果；新增 `app:open-external-url` IPC；preload 暴露 `openExternalUrl` 和 `copyText`；渲染层 ZPAY 结果卡片新增支付链接、再次打开和复制按钮。
+- 结果：即使系统浏览器没自动弹出，用户也会在客户端看到完整支付链接，可点击再次打开或复制到浏览器，不再表现为“按钮没反应”。
+- 结果：重新打包 `dist\\Add WhatsApp 0.1.2.exe`，同步到 website latest/release，并更新 `update.json` 为 `sizeBytes=78741586`、SHA256 `2969c6af5dcac59ab44b6b428baf2e310dffd77402cee2e960ee7b9944988159`。
+- 验证：`node --test tests\\cloudRendererContract.test.js` 3/3；`node --test tests\\cloudMainIntegration.test.js` 13/13；`node --test tests\\cloudApiClient.test.js` 9/9；根项目 `npm test` 111/111；`server npm test` 27/27；`admin npm test` 8/8；`website npm test` 6/6；根项目 `npm run build` 成功；`website npm run build` 成功。
+- 下一步：部署最新 website 下载包和 API 代码后，让用户完全退出旧托盘进程并重新下载安装包；若扫码仍返回 `appid和mch_id不匹配`，继续在 ZPAY/微信渠道侧处理 AppID 与商户号绑定。

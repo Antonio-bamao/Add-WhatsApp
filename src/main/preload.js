@@ -1,4 +1,4 @@
-const { contextBridge, ipcRenderer } = require('electron');
+const { clipboard, contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('addWhatsapp', {
   getAuthState: () => ipcRenderer.invoke('auth:get-state'),
@@ -10,6 +10,8 @@ contextBridge.exposeInMainWorld('addWhatsapp', {
   startManualTopUp: payload => ipcRenderer.invoke('cloud:manual-top-up', payload),
   startAlipayTopUp: payload => ipcRenderer.invoke('cloud:alipay-top-up', payload),
   startZpayTopUp: payload => ipcRenderer.invoke('cloud:zpay-top-up', payload),
+  openExternalUrl: url => ipcRenderer.invoke('app:open-external-url', url),
+  copyText: text => clipboard.writeText(String(text || '')),
   openAnotherWorkspace: payload => ipcRenderer.invoke('workspace:open-another-account', payload),
   getProxySettings: () => ipcRenderer.invoke('proxy:get'),
   testProxySettings: payload => ipcRenderer.invoke('proxy:test', payload),
