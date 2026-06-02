@@ -49,6 +49,8 @@ test('pricing page exposes official WeChat Native payment actions instead of mai
   assert.match(renderer, /payment\.codeUrl/);
   assert.match(renderer, /openExternalUrl/);
   assert.match(renderer, /copyText/);
+  assert.match(renderer, /response\.authRequired \|\| response\.error === 'UNAUTHORIZED'/);
+  assert.match(renderer, /finally\s*{\s*updateActionLocks\(\);/);
   assert.match(preload, /startWechatTopUp/);
   assert.match(preload, /openExternalUrl/);
   assert.match(preload, /copyText/);

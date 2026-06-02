@@ -144,11 +144,16 @@ const elements = {
 const PAGE_ACTIONS = new Set(['importPage']);
 const IMPORT_OPTIONS_STORAGE_KEY = 'addWhatsapp.importOptions';
 const DEFAULT_MANUAL_ALIPAY_QR = '../../assets/pay/alipay-qr.png';
+const PAYMENT_DEBUG_PREFIX = '[payment-debug]';
 const TEMPLATE_META = {
   en: { title: '英语模板', description: '英语区号码随机选择这些文案。', badge: 'EN' },
   es: { title: '西班牙语模板', description: '西班牙、墨西哥和拉美号码随机选择这些文案。', badge: 'ES' },
   fr: { title: '法语模板', description: '法国和法语区号码随机选择这些文案。', badge: 'FR' }
 };
+
+function debugPayment(step, payload = {}) {
+  console.log(PAYMENT_DEBUG_PREFIX, step, payload);
+}
 
 function switchAuthMode(mode) {
   for (const tab of elements.authTabs) {
@@ -211,8 +216,9 @@ function renderPlanCards(subscription) {
       : '无需充值';
     const templateLimit = plan.templateLimit ? `自定义文案模板 X${plan.templateLimit}` : '自定义文案模板不限';
     const lockedItems = lockedFeatureList(plan);
-    const actionText = isActive ? '当前套餐' : '微信支付';
-    const disabled = isActive || !plan.capabilities || !plan.capabilities.onlinePayment;
+    const canTopUp = Boolean(!isActive && plan.capabilities && plan.capabilities.onlinePayment && Number(plan.minimumTopUpCredits || 0) > 0);
+    const actionText = isActive ? '当前套餐' : (canTopUp ? '微信支付' : '暂不支持');
+    const disabled = !canTopUp;
     card.innerHTML = `
       <div class="plan-card-head">
         <div>
@@ -241,8 +247,24 @@ function renderPlanCards(subscription) {
       <button class="button ${isActive ? 'secondary' : 'ghost'}" type="button" data-plan-pay="${escapeHtml(plan.id)}" ${disabled ? 'disabled' : ''}>${actionText}</button>
     `;
     const payButton = card.querySelector('[data-plan-pay]');
+    debugPayment('render plan card', {
+      planId: plan.id,
+      activePlanId,
+      isActive,
+      canTopUp,
+      disabled,
+      actionText
+    });
     if (payButton && !disabled) {
-      payButton.addEventListener('click', () => startWechatTopUp(plan.id, payButton));
+      payButton.addEventListener('click', () => {
+        debugPayment('plan card button clicked', {
+          planId: plan.id,
+          activePlanId: state.subscription && state.subscription.plan && state.subscription.plan.id,
+          disabled: payButton.disabled,
+          text: payButton.textContent
+        });
+        startWechatTopUp(plan.id, payButton);
+      });
     }
     elements.planCards.appendChild(card);
   }
@@ -436,12 +458,21 @@ function updateActionLocks() {
   const catalog = state.subscription && state.subscription.catalog ? state.subscription.catalog : [];
   for (const button of document.querySelectorAll('[data-plan-pay]')) {
     const plan = catalog.find(item => item.id === button.dataset.planPay);
-    const planCanPay = Boolean(plan && plan.capabilities && plan.capabilities.onlinePayment);
     const isActivePlan = button.dataset.planPay === activePlanId;
-    button.disabled = isActivePlan || !planCanPay || !canPay;
+    const planCanPay = Boolean(plan && !isActivePlan && plan.capabilities && plan.capabilities.onlinePayment && Number(plan.minimumTopUpCredits || 0) > 0);
+    button.disabled = !planCanPay || !canPay;
     button.title = isActivePlan
       ? ''
-      : (canPay ? '' : '请先登录账号。');
+      : (planCanPay ? (canPay ? '' : '请先登录账号。') : '该套餐无需线上充值。');
+    debugPayment('plan button lock state', {
+      planId: button.dataset.planPay,
+      activePlanId,
+      isActivePlan,
+      planCanPay,
+      canPay,
+      disabled: button.disabled,
+      title: button.title
+    });
   }
 }
 
@@ -512,7 +543,7 @@ async function logoutAccount() {
 }
 
 async function handleApiError(response) {
-  if (response && !response.ok && response.error === 'UNAUTHORIZED') {
+  if (response && !response.ok && (response.authRequired || response.error === 'UNAUTHORIZED')) {
     alert('您的登录会话已失效（由于服务器重启或 Token 过期），已自动为您退出，请重新登录。');
     await window.addWhatsapp.logoutAccount();
     applyAuthState({ authenticated: false, user: null });
@@ -632,7 +663,6 @@ async function startManualTopUp(planId = null, sourceButton = null) {
     }
     if (!response.ok) {
       setPaymentState(response.error || '付款订单创建失败。');
-      updateActionLocks();
       return;
     }
 
@@ -640,8 +670,9 @@ async function startManualTopUp(planId = null, sourceButton = null) {
     setPaymentState(`订单 ${response.order.orderNo} 已生成，付款后等管理员确认入账。`);
   } catch (error) {
     setPaymentState(error.message || '付款订单创建失败，请稍后重试。');
+  } finally {
+    updateActionLocks();
   }
-  updateActionLocks();
 }
 
 async function startZpayTopUp(planId = null, sourceButton = null) {
@@ -660,7 +691,6 @@ async function startZpayTopUp(planId = null, sourceButton = null) {
     }
     if (!response.ok) {
       setPaymentState(response.error || 'ZPAY 付款订单创建失败。');
-      updateActionLocks();
       return;
     }
 
@@ -668,8 +698,9 @@ async function startZpayTopUp(planId = null, sourceButton = null) {
     setPaymentState(`订单 ${response.order.orderNo} 已生成，ZPAY 收银台已打开，付款后会自动入账。`);
   } catch (error) {
     setPaymentState(error.message || 'ZPAY 付款订单创建失败，请稍后重试。');
+  } finally {
+    updateActionLocks();
   }
-  updateActionLocks();
 }
 
 async function startWechatTopUp(planId = null, sourceButton = null) {
@@ -678,26 +709,49 @@ async function startWechatTopUp(planId = null, sourceButton = null) {
     : state.subscription && state.subscription.plan;
   const targetPlanId = plan && plan.id ? plan.id : (state.subscription && state.subscription.plan && state.subscription.plan.id);
   const buttons = [sourceButton, elements.quotaPayButton, elements.billingPayButton].filter(Boolean);
+  debugPayment('startWechatTopUp entered', {
+    requestedPlanId: planId,
+    targetPlanId,
+    sourceButtonText: sourceButton ? sourceButton.textContent : null,
+    sourceButtonDisabled: sourceButton ? sourceButton.disabled : null,
+    authenticated: Boolean(state.auth && state.auth.authenticated),
+    activePlanId: state.subscription && state.subscription.plan && state.subscription.plan.id
+  });
   for (const button of buttons) button.disabled = true;
   setPaymentState('正在生成微信支付订单...');
 
   try {
     const response = await window.addWhatsapp.startWechatTopUp({ planId: targetPlanId });
+    debugPayment('startWechatTopUp ipc response', {
+      targetPlanId,
+      ok: response && response.ok,
+      error: response && response.error,
+      authRequired: response && response.authRequired,
+      orderNo: response && response.order && response.order.orderNo,
+      provider: response && response.payment && response.payment.provider,
+      hasCodeUrl: Boolean(response && response.payment && response.payment.codeUrl),
+      hasQrImage: Boolean(response && response.payment && response.payment.qrImageDataUrl)
+    });
     if (await handleApiError(response)) {
       return;
     }
     if (!response.ok) {
       setPaymentState(response.error || '微信支付订单创建失败。');
-      updateActionLocks();
       return;
     }
 
     renderWechatPayment(response);
     setPaymentState(`订单 ${response.order.orderNo} 已生成，请扫码付款，付款后会自动入账。`);
   } catch (error) {
+    debugPayment('startWechatTopUp exception', {
+      targetPlanId,
+      message: error && error.message
+    });
     setPaymentState(error.message || '微信支付订单创建失败，请稍后重试。');
+  } finally {
+    debugPayment('startWechatTopUp finally update locks', { targetPlanId });
+    updateActionLocks();
   }
-  updateActionLocks();
 }
 
 function showWorkspaceRiskModal() {

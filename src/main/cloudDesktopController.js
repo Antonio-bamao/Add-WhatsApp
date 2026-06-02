@@ -3,6 +3,23 @@ const { mapCloudEntitlements } = require('../core/cloudApiClient');
 const crypto = require('node:crypto');
 
 function createCloudDesktopController({ client, sessionStore, deviceId = 'desktop' }) {
+  function clearExpiredSession(error) {
+    sessionStore.clear();
+    return {
+      ok: false,
+      authRequired: true,
+      error: error && error.message ? error.message : 'UNAUTHORIZED',
+      cloud: publicCloudState(sessionStore.load())
+    };
+  }
+
+  function handleCloudError(error) {
+    if (error && (error.status === 401 || error.message === 'UNAUTHORIZED')) {
+      return clearExpiredSession(error);
+    }
+    throw error;
+  }
+
   async function register({ username, password, planId = 'advanced' }) {
     const session = await client.register({ username, password, deviceId, planId });
     const entitlements = await client.getEntitlements(session.accessToken);
@@ -42,14 +59,18 @@ function createCloudDesktopController({ client, sessionStore, deviceId = 'deskto
     if (!session.authenticated || !session.accessToken) {
       return { ok: false, authRequired: true, error: '请先登录账号。' };
     }
-    const entitlements = await client.getEntitlements(session.accessToken);
-    const subscription = mapCloudEntitlements(entitlements);
-    sessionStore.save({ ...session, entitlements });
-    return {
-      ok: true,
-      cloud: publicCloudState({ ...session, entitlements }),
-      subscription
-    };
+    try {
+      const entitlements = await client.getEntitlements(session.accessToken);
+      const subscription = mapCloudEntitlements(entitlements);
+      sessionStore.save({ ...session, entitlements });
+      return {
+        ok: true,
+        cloud: publicCloudState({ ...session, entitlements }),
+        subscription
+      };
+    } catch (error) {
+      return handleCloudError(error);
+    }
   }
 
   async function consumeSuccessfulAdds({ taskId, sentRows = [], workspaceId = 'main', sentAt }) {
@@ -59,25 +80,29 @@ function createCloudDesktopController({ client, sessionStore, deviceId = 'deskto
     }
     const rows = Array.isArray(sentRows) ? sentRows : [];
     let entitlements = session.entitlements;
-    for (const row of rows) {
-      const rowKey = row && row.rowNumber ? row.rowNumber : rows.indexOf(row) + 1;
-      const contactHash = hashContact(row && row.whatsappId ? row.whatsappId : `${taskId}:${rowKey}`);
-      entitlements = await client.consumeCredit(session.accessToken, {
-        idempotencyKey: `desktop-send:${taskId}:${rowKey}:${contactHash.slice(0, 16)}`,
-        taskId,
-        contactHash,
-        workspaceId,
-        sentAt
-      });
+    try {
+      for (const row of rows) {
+        const rowKey = row && row.rowNumber ? row.rowNumber : rows.indexOf(row) + 1;
+        const contactHash = hashContact(row && row.whatsappId ? row.whatsappId : `${taskId}:${rowKey}`);
+        entitlements = await client.consumeCredit(session.accessToken, {
+          idempotencyKey: `desktop-send:${taskId}:${rowKey}:${contactHash.slice(0, 16)}`,
+          taskId,
+          contactHash,
+          workspaceId,
+          sentAt
+        });
+      }
+      const subscription = mapCloudEntitlements(entitlements);
+      sessionStore.save({ ...session, entitlements });
+      return {
+        ok: true,
+        consumed: rows.length,
+        cloud: publicCloudState({ ...session, entitlements }),
+        subscription
+      };
+    } catch (error) {
+      return handleCloudError(error);
     }
-    const subscription = mapCloudEntitlements(entitlements);
-    sessionStore.save({ ...session, entitlements });
-    return {
-      ok: true,
-      consumed: rows.length,
-      cloud: publicCloudState({ ...session, entitlements }),
-      subscription
-    };
   }
 
   async function issueWorkspaceLease({ workspaceKind = 'secondary', processNonce }) {
@@ -85,12 +110,16 @@ function createCloudDesktopController({ client, sessionStore, deviceId = 'deskto
     if (!session.authenticated || !session.accessToken) {
       return { ok: true, skipped: true, authRequired: true };
     }
-    const lease = await client.issueWorkspaceLease(session.accessToken, {
-      deviceId,
-      workspaceKind,
-      processNonce
-    });
-    return { ok: true, lease };
+    try {
+      const lease = await client.issueWorkspaceLease(session.accessToken, {
+        deviceId,
+        workspaceKind,
+        processNonce
+      });
+      return { ok: true, lease };
+    } catch (error) {
+      return handleCloudError(error);
+    }
   }
 
   async function renewWorkspaceLease({ leaseId }) {
@@ -98,8 +127,12 @@ function createCloudDesktopController({ client, sessionStore, deviceId = 'deskto
     if (!session.authenticated || !session.accessToken) {
       return { ok: true, skipped: true, authRequired: true };
     }
-    const lease = await client.renewWorkspaceLease(session.accessToken, leaseId);
-    return { ok: true, lease };
+    try {
+      const lease = await client.renewWorkspaceLease(session.accessToken, leaseId);
+      return { ok: true, lease };
+    } catch (error) {
+      return handleCloudError(error);
+    }
   }
 
   async function releaseWorkspaceLease({ leaseId }) {
@@ -107,8 +140,12 @@ function createCloudDesktopController({ client, sessionStore, deviceId = 'deskto
     if (!session.authenticated || !session.accessToken) {
       return { ok: true, skipped: true, authRequired: true };
     }
-    const lease = await client.releaseWorkspaceLease(session.accessToken, leaseId);
-    return { ok: true, lease };
+    try {
+      const lease = await client.releaseWorkspaceLease(session.accessToken, leaseId);
+      return { ok: true, lease };
+    } catch (error) {
+      return handleCloudError(error);
+    }
   }
 
   async function createAlipayTopUp({ planId }) {
@@ -122,23 +159,27 @@ function createCloudDesktopController({ client, sessionStore, deviceId = 'deskto
     if (!credits || !amountCents) {
       return { ok: false, error: '当前套餐不需要线上充值。' };
     }
-    const order = await client.createOrder(session.accessToken, {
-      planId: plan.id,
-      credits,
-      amountCents
-    });
-    const payment = await client.createAlipayPagePay(session.accessToken, order.id);
-    return {
-      ok: true,
-      order,
-      payment,
-      plan: {
-        id: plan.id,
-        name: plan.name,
+    try {
+      const order = await client.createOrder(session.accessToken, {
+        planId: plan.id,
         credits,
         amountCents
-      }
-    };
+      });
+      const payment = await client.createAlipayPagePay(session.accessToken, order.id);
+      return {
+        ok: true,
+        order,
+        payment,
+        plan: {
+          id: plan.id,
+          name: plan.name,
+          credits,
+          amountCents
+        }
+      };
+    } catch (error) {
+      return handleCloudError(error);
+    }
   }
 
   async function createZpayTopUp({ planId }) {
@@ -152,23 +193,27 @@ function createCloudDesktopController({ client, sessionStore, deviceId = 'deskto
     if (!credits || !amountCents) {
       return { ok: false, error: '当前套餐不需要线上充值。' };
     }
-    const order = await client.createOrder(session.accessToken, {
-      planId: plan.id,
-      credits,
-      amountCents
-    });
-    const payment = await client.createZpayPagePay(session.accessToken, order.id);
-    return {
-      ok: true,
-      order,
-      payment,
-      plan: {
-        id: plan.id,
-        name: plan.name,
+    try {
+      const order = await client.createOrder(session.accessToken, {
+        planId: plan.id,
         credits,
         amountCents
-      }
-    };
+      });
+      const payment = await client.createZpayPagePay(session.accessToken, order.id);
+      return {
+        ok: true,
+        order,
+        payment,
+        plan: {
+          id: plan.id,
+          name: plan.name,
+          credits,
+          amountCents
+        }
+      };
+    } catch (error) {
+      return handleCloudError(error);
+    }
   }
 
   async function createWechatTopUp({ planId }) {
@@ -182,23 +227,47 @@ function createCloudDesktopController({ client, sessionStore, deviceId = 'deskto
     if (!credits || !amountCents) {
       return { ok: false, error: '当前套餐不需要线上充值。' };
     }
-    const order = await client.createOrder(session.accessToken, {
-      planId: plan.id,
-      credits,
-      amountCents
-    });
-    const payment = await client.createWechatNativePay(session.accessToken, order.id);
-    return {
-      ok: true,
-      order,
-      payment,
-      plan: {
-        id: plan.id,
-        name: plan.name,
+    try {
+      const order = await client.createOrder(session.accessToken, {
+        planId: plan.id,
         credits,
         amountCents
+      });
+      let payment;
+      try {
+        payment = await client.createWechatNativePay(session.accessToken, order.id);
+      } catch (paymentError) {
+        if (paymentError && paymentError.status === 404 && paymentError.message === 'NOT_FOUND') {
+          return {
+            ok: false,
+            error: '线上 API 还没有部署微信支付接口，请先更新服务器后再生成微信支付订单。',
+            serverError: paymentError.message,
+            paymentProvider: 'wechat',
+            order,
+            plan: {
+              id: plan.id,
+              name: plan.name,
+              credits,
+              amountCents
+            }
+          };
+        }
+        throw paymentError;
       }
-    };
+      return {
+        ok: true,
+        order,
+        payment,
+        plan: {
+          id: plan.id,
+          name: plan.name,
+          credits,
+          amountCents
+        }
+      };
+    } catch (error) {
+      return handleCloudError(error);
+    }
   }
 
   async function createManualTopUp({ planId }) {
@@ -212,23 +281,27 @@ function createCloudDesktopController({ client, sessionStore, deviceId = 'deskto
     if (!credits || !amountCents) {
       return { ok: false, error: '当前套餐不需要充值。' };
     }
-    const order = await client.createOrder(session.accessToken, {
-      planId: plan.id,
-      credits,
-      amountCents
-    });
-    const payment = await client.createManualPayment(session.accessToken, order.id);
-    return {
-      ok: true,
-      order,
-      payment,
-      plan: {
-        id: plan.id,
-        name: plan.name,
+    try {
+      const order = await client.createOrder(session.accessToken, {
+        planId: plan.id,
         credits,
         amountCents
-      }
-    };
+      });
+      const payment = await client.createManualPayment(session.accessToken, order.id);
+      return {
+        ok: true,
+        order,
+        payment,
+        plan: {
+          id: plan.id,
+          name: plan.name,
+          credits,
+          amountCents
+        }
+      };
+    } catch (error) {
+      return handleCloudError(error);
+    }
   }
 
   function logout() {
