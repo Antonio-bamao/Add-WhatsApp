@@ -113,7 +113,9 @@ class CloudApiClient {
     });
     const payload = await response.json();
     if (!response.ok) {
-      const error = new Error(payload && payload.error ? payload.error : `CLOUD_API_${response.status}`);
+      const msg = payload && payload.error ? payload.error : `CLOUD_API_${response.status}`;
+      const detail = payload && payload.cause ? ` (cause: ${payload.cause})` : '';
+      const error = new Error(`${msg}${detail}`);
       error.status = response.status;
       throw error;
     }

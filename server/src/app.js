@@ -1,6 +1,9 @@
 import http from "node:http";
 import fs from "node:fs";
 import { pathToFileURL } from "node:url";
+import dns from "node:dns";
+
+dns.setDefaultResultOrder("ipv4first");
 import { createPostgresRuntime } from "./db/postgresRuntime.js";
 import { createMemoryRuntime } from "./services/billingService.js";
 import { buildAlipayPagePayRequest, buildWechatNativePayRequest, buildZpayPagePayRequest, parseAlipayNotification, parseMockAlipayNotification, parseWechatNotification, parseZpayNotification, queryAlipayTrade } from "./services/paymentProviders.js";
@@ -352,7 +355,11 @@ export function createAppServer(options = {}) {
 
       jsonResponse(response, 404, { error: "NOT_FOUND" });
     } catch (error) {
-      jsonResponse(response, errorStatus(error), { error: error.message });
+      console.error("API error details:", error, "cause:", error.cause);
+      jsonResponse(response, errorStatus(error), {
+        error: error.message,
+        cause: error.cause ? (error.cause.message || String(error.cause)) : undefined
+      });
     }
   });
 }
