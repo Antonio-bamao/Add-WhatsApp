@@ -3,7 +3,18 @@ import fs from "node:fs";
 import { pathToFileURL } from "node:url";
 import dns from "node:dns";
 
-dns.setDefaultResultOrder("ipv4first");
+const originalLookup = dns.lookup;
+dns.lookup = function (hostname, options, callback) {
+  if (typeof options === "function") {
+    callback = options;
+    options = {};
+  }
+  if (hostname === "api.mch.weixin.qq.com") {
+    const opts = Object.assign({}, options, { family: 4 });
+    return originalLookup(hostname, opts, callback);
+  }
+  return originalLookup(hostname, options, callback);
+};
 import { createPostgresRuntime } from "./db/postgresRuntime.js";
 import { createMemoryRuntime } from "./services/billingService.js";
 import { buildAlipayPagePayRequest, buildWechatNativePayRequest, buildZpayPagePayRequest, parseAlipayNotification, parseMockAlipayNotification, parseWechatNotification, parseZpayNotification, queryAlipayTrade } from "./services/paymentProviders.js";
