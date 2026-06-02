@@ -20,6 +20,11 @@ describe("admin console structure", () => {
     assert.equal(packageJson.scripts.dev, "python -m http.server 3220 -d public");
     assert.equal(packageJson.scripts.test, "node --test tests/*.test.mjs");
     assert.match(html, /admin\.addwhatsapp\.com/);
+    assert.match(html, /src="\.\/logo\.png"/);
+    assert.match(html, /href="\.\/favicon\.ico"/);
+    assert.ok(fs.existsSync(path.join(adminRoot, "public/logo.png")));
+    assert.ok(fs.existsSync(path.join(adminRoot, "public/favicon.ico")));
+    assert.ok(fs.existsSync(path.join(adminRoot, "public/favicon.png")));
     assert.doesNotMatch(html, /DATABASE_URL|ADMIN_KEY|SERVICE_ROLE|WhatsApp session/i);
   });
 

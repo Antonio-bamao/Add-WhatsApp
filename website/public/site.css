@@ -83,16 +83,12 @@ a {
   place-items: center;
   width: 34px;
   height: 34px;
-  border: 1px solid var(--line-strong);
-  border-radius: 8px;
-  color: var(--primary-strong);
-  background: linear-gradient(140deg, rgba(85, 244, 206, 0.18), rgba(255, 255, 255, 0.04));
-  box-shadow: 0 0 24px rgba(85, 244, 206, 0.16);
+  flex: 0 0 auto;
 }
 
 .brand-mark img {
-  width: 25px;
-  height: 25px;
+  width: 34px;
+  height: 34px;
   object-fit: contain;
   display: block;
 }

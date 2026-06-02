@@ -379,3 +379,11 @@
 - 结果：重新打包 `dist\\Add WhatsApp 0.1.2.exe`，同步到 website latest/release，并更新 `update.json` 为 `sizeBytes=78645319`、SHA256 `ab6b513ccc82f5a2487ffd36854eb1c618d1b3ccb313b4313e87a345a8fc8860`。
 - 验证：`node --test tests\\cloudRendererContract.test.js` 3/3 通过；`npm test` 108/108 通过；`server npm test` 25/25 通过；`admin npm test` 8/8 通过；`website npm test` 6/6 通过；`website npm run build` 成功；根项目 `npm run build` 成功；透明图标左上角 alpha 为 0；`.context` 校验通过。
 - 下一步：部署最新 website，让官网下载链接指向新 EXE；用户重新下载后生成付款订单即可看到内置支付宝收款码，付款后后台按账号或订单号充值。
+
+## 2026-06-02T02:45:00+08:00｜修正后台 logo 与图标白底
+- 目标：修正上一版图标替换不完整的问题：后台管理台仍显示 `AW`，官网/标签页/桌面端展示仍带白底或图标容器底色。
+- 动作：重新从 `assets/iconn.png` 生成透明底图标，这次按“边缘连通非绿色区域”移除背景，保留绿色主体和内部白色电话；输出 `assets/icon.png`、`assets/icon.ico`、官网 logo/icon/favicon、后台 logo/favicon。
+- 动作：后台 `admin/public/index.html` 左侧品牌从 `AW` 改为 `<img src="./logo.png">`；后台、官网、桌面端普通品牌图标 CSS 去掉白色背景/边框/圆底；官网 metadata 改为优先 `/favicon.ico`，并保留 `/icon.png`。
+- 结果：后台管理台、官网落地页导航 logo、页脚 logo、官网标签页、后台标签页和桌面端品牌图标都使用透明底新图；新 EXE 已同步到 website latest/release，`update.json` 为 `sizeBytes=78742200`、SHA256 `0757ba33927f74564e23aa88647bbc851a4cd20f303c9490a67b14b0b60d9d04`。
+- 验证：`admin npm test` 8/8 通过；`website npm test` 6/6 通过；`node --test tests\\cloudRendererContract.test.js` 3/3 通过；根项目 `npm test` 108/108 通过；`website npm run build` 成功；根项目 `npm run build` 成功；图标文件左上角 alpha 均为 0；`.context` 校验通过。
+- 下一步：部署最新 admin/website 后，强制刷新浏览器缓存或用无痕窗口确认后台 logo、官网 logo 和标签页 favicon 已更新。

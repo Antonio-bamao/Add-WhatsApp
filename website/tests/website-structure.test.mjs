@@ -58,7 +58,8 @@ describe("public website structure", () => {
     const releasesPage = readText("app/releases/page.js");
 
     assert.match(layout, /href="\/site\.css"/);
-    assert.match(layout, /icon: "\/icon\.png"/);
+    assert.match(layout, /\/favicon\.ico/);
+    assert.match(layout, /\/icon\.png/);
     assert.match(homePage, /LandingExperience/);
     assert.match(landingExperience, /Add WhatsApp/);
     assert.match(landingExperience, /src="\/logo\.png"/);
@@ -122,7 +123,9 @@ describe("public website structure", () => {
     assert.ok(fs.existsSync(path.join(websiteRoot, "public/site.css")));
     assert.ok(fs.existsSync(path.join(websiteRoot, "public/logo.png")));
     assert.ok(fs.existsSync(path.join(websiteRoot, "public/icon.png")));
+    assert.ok(fs.existsSync(path.join(websiteRoot, "public/favicon.ico")));
     assert.ok(fs.existsSync(path.join(websiteRoot, "app/icon.png")));
+    assert.ok(fs.existsSync(path.join(websiteRoot, "app/favicon.ico")));
   });
 
   it("does not publish placeholder support contact details", () => {

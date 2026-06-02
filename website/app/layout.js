@@ -3,8 +3,11 @@ export const metadata = {
   description: "Add WhatsApp 是面向外贸、销售和增长团队的 Windows 桌面软件，支持号码导入、模板跟进、工作台隔离和官方下载。",
   metadataBase: new URL("https://addwhatsapp.com"),
   icons: {
-    icon: "/icon.png",
-    shortcut: "/icon.png",
+    icon: [
+      { url: "/favicon.ico" },
+      { url: "/icon.png", type: "image/png" }
+    ],
+    shortcut: "/favicon.ico",
     apple: "/icon.png"
   }
 };

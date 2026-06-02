@@ -71,10 +71,14 @@ button {
   width: 40px;
   height: 40px;
   place-items: center;
-  border-radius: 8px;
-  background: var(--brand);
-  color: white;
-  font-weight: 800;
+  flex: 0 0 auto;
+}
+
+.brand-mark img {
+  display: block;
+  width: 40px;
+  height: 40px;
+  object-fit: contain;
 }
 
 .brand-lockup strong {

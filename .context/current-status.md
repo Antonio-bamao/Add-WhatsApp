@@ -43,8 +43,9 @@
 - 已完成：支付入口从支付宝官方 page-pay 默认路径切换为“人工收款码 + 后台确认充值”；桌面端购买按钮生成云端订单并显示订单号、金额和付款备注，后端新增 `/v1/orders/:id/payments/manual` 返回人工收款指引，后台额度调账支持直接填注册账号用户名，订单人工入账支持填订单号或订单 ID。
 - 已完成：重新打包 `dist\Add WhatsApp 0.1.2.exe` 并同步到 `website\public\downloads\latest\Add-WhatsApp.exe` 和 `website\public\downloads\releases\0.1.2\Add-WhatsApp-0.1.2.exe`；`update.json` 当前 `releaseDate=2026-06-02`、`sizeBytes=77063741`、SHA256 `2edf0e6cc87396ad1f60d25c43aad772545a26e76dd366eab3586f2ef544cb46`。
 - 已完成：人工收款码已改为随桌面端安装包本地携带；`assets/pay/alipay-qr.jpg` 已转换为 `assets/pay/alipay-qr.png`，桌面端在服务端未返回二维码 URL 时默认显示本地 `../../assets/pay/alipay-qr.png`，不再必须配置公网收款码图片地址。
-- 已完成：应用图标已替换为用户提供的 `assets/iconn.png` 处理版；已生成透明底 `assets/icon.png`、Windows `assets/icon.ico`、官网 `/logo.png`、官网 `/icon.png` 和 Next `app/icon.png`，桌面端品牌图标、关闭弹窗图标、官网导航 logo、页脚 logo 和浏览器标签页图标均已切换到新图。
-- 已完成：重新打包 `dist\Add WhatsApp 0.1.2.exe` 并同步到 `website\public\downloads\latest\Add-WhatsApp.exe` 和 `website\public\downloads\releases\0.1.2\Add-WhatsApp-0.1.2.exe`；`update.json` 当前 `releaseDate=2026-06-02`、`sizeBytes=78645319`、SHA256 `ab6b513ccc82f5a2487ffd36854eb1c618d1b3ccb313b4313e87a345a8fc8860`。
+- 已完成：应用图标已重新从 `assets/iconn.png` 抠图，边缘连通非绿色背景全部透明化，`assets/icon.png`、`assets/icon.ico`、官网 `website/public/logo.png`、`website/public/icon.png`、`website/app/icon.png`、`website/app/favicon.ico`、后台 `admin/public/logo.png`、`admin/public/favicon.png` 和 `admin/public/favicon.ico` 均已替换为透明底版本。
+- 已完成：桌面端品牌图标/关闭弹窗、官网导航 logo/页脚 logo/浏览器标签页图标、后台管理台左侧 logo/标签页图标均已切换到新图；官网、后台和桌面端普通品牌图标容器已去掉白色背景和方形/圆形底。
+- 已完成：重新打包 `dist\Add WhatsApp 0.1.2.exe` 并同步到 `website\public\downloads\latest\Add-WhatsApp.exe` 和 `website\public\downloads\releases\0.1.2\Add-WhatsApp-0.1.2.exe`；`update.json` 当前 `releaseDate=2026-06-02`、`sizeBytes=78742200`、SHA256 `0757ba33927f74564e23aa88647bbc851a4cd20f303c9490a67b14b0b60d9d04`。
 - 进行中：等待部署最新 website/下载包，并由用户下载新版 EXE 验证内置收款码和新图标。
 - 验证：`website\npm test` 通过 6/6；`website\npm run build` 成功；根项目 `npm test` 通过 77/77；本地 `http://localhost:3100` 桌面/移动端 Chrome headless 截图已复查，样式不再退化为裸 HTML；浏览器插件调试确认首屏只剩 1 个 WebGL canvas、无旧 `.globe-static` SVG 叠加、无 Server Error，地球 HUD 文案已删除，路线扩展到 20 条；下载页返回 200，`/downloads/latest/Add-WhatsApp.exe` HEAD 长度为 `77060652`。
 - 验证：`admin\npm test` 通过 5/5；本地 `http://127.0.0.1:3220/` 返回 200；管理台 JS 已包含 `ADD_WHATSAPP_API_URL`、`/v1/admin/console`、API 回退逻辑和运行时快照合并逻辑。
