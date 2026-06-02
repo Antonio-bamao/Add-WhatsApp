@@ -356,9 +356,16 @@ export function createAppServer(options = {}) {
       jsonResponse(response, 404, { error: "NOT_FOUND" });
     } catch (error) {
       console.error("API error details:", error, "cause:", error.cause);
+      let causeText = undefined;
+      const primaryCause = error.cause || error;
+      if (primaryCause && (primaryCause instanceof AggregateError || Array.isArray(primaryCause.errors))) {
+        causeText = `AggregateError: [${primaryCause.errors.map(e => e.message || String(e)).join(", ")}]`;
+      } else if (error.cause) {
+        causeText = error.cause.message || String(error.cause);
+      }
       jsonResponse(response, errorStatus(error), {
         error: error.message,
-        cause: error.cause ? (error.cause.message || String(error.cause)) : undefined
+        cause: causeText
       });
     }
   });
