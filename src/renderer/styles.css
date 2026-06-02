@@ -1424,6 +1424,18 @@ td {
   line-height: 1.55;
 }
 
+.plan-payment-state {
+  margin: 0;
+  color: #5d3f12;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.55;
+}
+
+.plan-payment-state:empty {
+  display: none;
+}
+
 .manual-payment-panel {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 220px;

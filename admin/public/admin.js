@@ -178,6 +178,8 @@ function renderPaymentEvents(module) {
             <select data-payment-event-provider>
               <option value="" ${paymentEventsQuery.provider === "" ? "selected" : ""}>全部</option>
               <option value="alipay" ${paymentEventsQuery.provider === "alipay" ? "selected" : ""}>alipay</option>
+              <option value="wechat" ${paymentEventsQuery.provider === "wechat" ? "selected" : ""}>wechat</option>
+              <option value="zpay" ${paymentEventsQuery.provider === "zpay" ? "selected" : ""}>zpay</option>
               <option value="mock_alipay" ${paymentEventsQuery.provider === "mock_alipay" ? "selected" : ""}>mock_alipay</option>
               <option value="manual" ${paymentEventsQuery.provider === "manual" ? "selected" : ""}>manual</option>
             </select>

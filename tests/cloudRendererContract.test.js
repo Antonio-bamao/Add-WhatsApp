@@ -31,7 +31,7 @@ test('auth surface uses one database account and removes the secondary cloud log
   assert.match(main, /cloudController\.register/);
 });
 
-test('pricing page exposes ZPAY payment actions instead of maintenance copy', () => {
+test('pricing page exposes official WeChat Native payment actions instead of maintenance copy', () => {
   const html = fs.readFileSync(path.join(root, 'src', 'renderer', 'index.html'), 'utf-8');
   const renderer = fs.readFileSync(path.join(root, 'src', 'renderer', 'renderer.js'), 'utf-8');
   const preload = fs.readFileSync(path.join(root, 'src', 'main', 'preload.js'), 'utf-8');
@@ -39,22 +39,22 @@ test('pricing page exposes ZPAY payment actions instead of maintenance copy', ()
 
   assert.match(html, /id="quotaPayButton"/);
   assert.match(html, /id="manualPaymentPanel"/);
-  assert.match(html, /ZPAY 聚合支付/);
-  assert.match(html, /ZPAY 支付/);
-  assert.match(html, /id="zpayPaymentLinkBox"/);
-  assert.match(html, /id="zpayPaymentCopyButton"/);
-  assert.match(html, /id="zpayPaymentOpenButton"/);
-  assert.match(renderer, /startZpayTopUp/);
-  assert.match(renderer, /renderZpayPayment/);
-  assert.match(renderer, /payment\.paymentUrl/);
+  assert.match(html, /微信 Native 扫码支付/);
+  assert.match(html, /微信支付/);
+  assert.match(html, /id="paymentLinkBox"/);
+  assert.match(html, /id="paymentCopyButton"/);
+  assert.match(html, /id="paymentOpenButton"/);
+  assert.match(renderer, /startWechatTopUp/);
+  assert.match(renderer, /renderWechatPayment/);
+  assert.match(renderer, /payment\.codeUrl/);
   assert.match(renderer, /openExternalUrl/);
   assert.match(renderer, /copyText/);
-  assert.match(preload, /startZpayTopUp/);
+  assert.match(preload, /startWechatTopUp/);
   assert.match(preload, /openExternalUrl/);
   assert.match(preload, /copyText/);
-  assert.match(main, /cloud:zpay-top-up/);
+  assert.match(main, /cloud:wechat-top-up/);
   assert.match(main, /app:open-external-url/);
-  assert.match(main, /openedExternal/);
+  assert.match(main, /qrImageDataUrl/);
   assert.match(renderer, /startManualTopUp/);
   assert.match(renderer, /assets\/pay\/alipay-qr\.png/);
   assert.match(renderer, /manualPaymentQr\.onerror/);

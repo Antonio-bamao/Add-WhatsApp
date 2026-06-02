@@ -55,6 +55,14 @@ POST http://127.0.0.1:4110/v1/orders/:id/payments/alipay/page-pay
 
 This endpoint requires the order owner's bearer token. It reads the existing order, verifies ownership and payable status, then returns server-signed Alipay `alipay.trade.page.pay` request parameters plus a `paymentUrl`. The server never returns or stores the app private key.
 
+WeChat Native payment request creation:
+
+```text
+POST http://127.0.0.1:4110/v1/orders/:id/payments/wechat/native-pay
+```
+
+This endpoint requires the order owner's bearer token. It reads the existing order, verifies ownership and payable status, calls WeChat Pay APIv3 `POST /v3/pay/transactions/native`, and returns the `codeUrl` / `paymentUrl` that the desktop client renders as a WeChat scan-to-pay QR code. The server never returns the merchant private key or APIv3 key.
+
 Local admin login endpoint:
 
 ```text
@@ -68,6 +76,7 @@ Payment callback endpoints:
 ```text
 POST http://127.0.0.1:4110/v1/payments/mock-alipay/notify
 POST http://127.0.0.1:4110/v1/payments/alipay/notify
+POST http://127.0.0.1:4110/v1/payments/wechat/notify
 ```
 
 `mock_alipay` is only for local preview and uses `MOCK_ALIPAY_WEBHOOK_SECRET`.
@@ -86,6 +95,19 @@ ALIPAY_GATEWAY_URL=https://openapi.alipay.com/gateway.do
 `ALIPAY_APP_PRIVATE_KEY`, `ALIPAY_NOTIFY_URL`, `ALIPAY_RETURN_URL`, and `ALIPAY_GATEWAY_URL` are used only when creating a signed page-pay request. Use the sandbox gateway only for sandbox app credentials.
 
 The real Alipay notify endpoint accepts form POST payloads, verifies RSA2 signatures, maps successful `TRADE_SUCCESS` / `TRADE_FINISHED` notifications into the common payment event contract, and returns plain text `success` only after the notification has been accepted by the idempotent payment-event flow.
+
+Real WeChat Native payment expects:
+
+```text
+WECHAT_MCH_ID=1113492162
+WECHAT_APP_ID=wx92f39a8b81948f51
+WECHAT_API_V3_KEY=32-character-api-v3-key
+WECHAT_MERCHANT_SERIAL_NO=merchant-api-certificate-serial-number
+WECHAT_MERCHANT_PRIVATE_KEY_PATH=/etc/add-whatsapp/wechat/apiclient_key.pem
+WECHAT_NOTIFY_URL=https://api.addwhatsapp.com/v1/payments/wechat/notify
+```
+
+The WeChat notify endpoint decrypts APIv3 `AEAD_AES_256_GCM` resources with `WECHAT_API_V3_KEY`, checks the expected merchant ID and AppID, maps `TRANSACTION.SUCCESS` / `trade_state=SUCCESS` into the common payment event contract, and returns plain text `success` after idempotent processing.
 
 See `docs/payment-production-checklist.md` before using a production payment channel.
 

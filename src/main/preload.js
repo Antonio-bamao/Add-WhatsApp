@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld('addWhatsapp', {
   startManualTopUp: payload => ipcRenderer.invoke('cloud:manual-top-up', payload),
   startAlipayTopUp: payload => ipcRenderer.invoke('cloud:alipay-top-up', payload),
   startZpayTopUp: payload => ipcRenderer.invoke('cloud:zpay-top-up', payload),
+  startWechatTopUp: payload => ipcRenderer.invoke('cloud:wechat-top-up', payload),
   openExternalUrl: url => ipcRenderer.invoke('app:open-external-url', url),
   copyText: text => clipboard.writeText(String(text || '')),
   openAnotherWorkspace: payload => ipcRenderer.invoke('workspace:open-another-account', payload),

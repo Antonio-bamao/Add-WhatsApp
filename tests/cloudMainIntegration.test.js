@@ -366,6 +366,79 @@ test('cloud controller creates a ZPAY top-up payment for the selected package', 
   ]);
 });
 
+test('cloud controller creates a WeChat Native top-up payment for the selected package', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'add-whatsapp-cloud-wechat-'));
+  const sessionStore = new CloudSessionStore(path.join(dir, 'cloud-session.json'));
+  sessionStore.save({
+    user: { id: 'user-1', username: 'cloud-user' },
+    accessToken: 'access-1',
+    refreshToken: 'refresh-1',
+    entitlements: { userId: 'user-1', planId: 'advanced', balanceCredits: 0 }
+  });
+  const calls = [];
+  const client = new CloudApiClient({
+    baseUrl: 'http://api.test',
+    fetchImpl: async (url, options = {}) => {
+      calls.push({ url, options });
+      assert.equal(options.headers.authorization, 'Bearer access-1');
+      if (url.endsWith('/v1/orders')) {
+        assert.deepEqual(JSON.parse(options.body), {
+          planId: 'professional',
+          credits: 5000,
+          amountCents: 150000
+        });
+        return response(201, {
+          id: 'order-wechat-1',
+          orderNo: '202606030001',
+          planId: 'professional',
+          credits: 5000,
+          amountCents: 150000,
+          status: 'created'
+        });
+      }
+      if (url.endsWith('/v1/orders/order-wechat-1/payments/wechat/native-pay')) {
+        return response(200, {
+          provider: 'wechat',
+          orderId: 'order-wechat-1',
+          orderNo: '202606030001',
+          amountCents: 150000,
+          paymentUrl: 'weixin://wxpay/bizpayurl?pr=test-token',
+          codeUrl: 'weixin://wxpay/bizpayurl?pr=test-token'
+        });
+      }
+      throw new Error(`unexpected ${url}`);
+    }
+  });
+  const { createCloudDesktopController } = require('../src/main/cloudDesktopController');
+  const controller = createCloudDesktopController({ client, sessionStore, deviceId: 'desktop-1' });
+
+  const result = await controller.createWechatTopUp({ planId: 'professional' });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.order.orderNo, '202606030001');
+  assert.equal(result.payment.provider, 'wechat');
+  assert.equal(result.payment.codeUrl, 'weixin://wxpay/bizpayurl?pr=test-token');
+  assert.deepEqual(calls.map(call => call.url), [
+    'http://api.test/v1/orders',
+    'http://api.test/v1/orders/order-wechat-1/payments/wechat/native-pay'
+  ]);
+});
+
+test('cloud controller requires a cloud session before creating WeChat payments', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'add-whatsapp-cloud-wechat-empty-'));
+  const sessionStore = new CloudSessionStore(path.join(dir, 'cloud-session.json'));
+  const { createCloudDesktopController } = require('../src/main/cloudDesktopController');
+  const controller = createCloudDesktopController({
+    sessionStore,
+    client: new CloudApiClient({ baseUrl: 'http://api.test', fetchImpl: async () => response(500, {}) })
+  });
+
+  const result = await controller.createWechatTopUp({ planId: 'advanced' });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.authRequired, true);
+});
+
 test('cloud controller creates a manual top-up order and payment instructions', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'add-whatsapp-cloud-manual-pay-'));
   const sessionStore = new CloudSessionStore(path.join(dir, 'cloud-session.json'));

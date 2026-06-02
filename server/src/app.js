@@ -1,8 +1,9 @@
 import http from "node:http";
+import fs from "node:fs";
 import { pathToFileURL } from "node:url";
 import { createPostgresRuntime } from "./db/postgresRuntime.js";
 import { createMemoryRuntime } from "./services/billingService.js";
-import { buildAlipayPagePayRequest, buildZpayPagePayRequest, parseAlipayNotification, parseMockAlipayNotification, parseZpayNotification, queryAlipayTrade } from "./services/paymentProviders.js";
+import { buildAlipayPagePayRequest, buildWechatNativePayRequest, buildZpayPagePayRequest, parseAlipayNotification, parseMockAlipayNotification, parseWechatNotification, parseZpayNotification, queryAlipayTrade } from "./services/paymentProviders.js";
 
 function jsonResponse(response, statusCode, payload) {
   response.writeHead(statusCode, {
@@ -78,6 +79,12 @@ function manualPaymentInstructions(order, env = {}) {
   };
 }
 
+function readEnvFileValue(value, filePath) {
+  if (value) return value;
+  if (!filePath) return "";
+  return fs.readFileSync(filePath, "utf8");
+}
+
 function errorStatus(error) {
   if (/ADMIN_FORBIDDEN/.test(error.message)) return 403;
   if (/SIGNATURE/.test(error.message)) return 401;
@@ -91,6 +98,7 @@ function errorStatus(error) {
 export function createAppServer(options = {}) {
   const runtime = options.runtime || createMemoryRuntime(options);
   const env = options.env || process.env;
+  const fetchImpl = options.fetchImpl || globalThis.fetch;
 
   return http.createServer(async (request, response) => {
     try {
@@ -202,6 +210,23 @@ export function createAppServer(options = {}) {
         return;
       }
 
+      if (request.method === "POST" && /^\/v1\/orders\/[^/]+\/payments\/wechat\/native-pay$/.test(url.pathname)) {
+        const userId = await authUserId(runtime, request);
+        const orderId = url.pathname.split("/")[3];
+        const order = await runtime.getOrderForPayment({ userId, orderId });
+        jsonResponse(response, 200, await buildWechatNativePayRequest(order, {
+          gatewayUrl: env.WECHAT_GATEWAY_URL,
+          mchId: env.WECHAT_MCH_ID,
+          appId: env.WECHAT_APP_ID,
+          apiV3Key: env.WECHAT_API_V3_KEY,
+          merchantSerialNo: env.WECHAT_MERCHANT_SERIAL_NO,
+          merchantPrivateKey: readEnvFileValue(env.WECHAT_MERCHANT_PRIVATE_KEY, env.WECHAT_MERCHANT_PRIVATE_KEY_PATH),
+          notifyUrl: env.WECHAT_NOTIFY_URL,
+          fetchImpl
+        }));
+        return;
+      }
+
       if (request.method === "POST" && /^\/v1\/orders\/[^/]+\/payments\/manual$/.test(url.pathname)) {
         const userId = await authUserId(runtime, request);
         const orderId = url.pathname.split("/")[3];
@@ -242,6 +267,18 @@ export function createAppServer(options = {}) {
         const event = parseZpayNotification(body, {
           key: env.ZPAY_KEY,
           expectedPid: env.ZPAY_PID
+        });
+        await runtime.processPaymentEvent(event);
+        textResponse(response, 200, "success");
+        return;
+      }
+
+      if (request.method === "POST" && url.pathname === "/v1/payments/wechat/notify") {
+        const body = await readJson(request);
+        const event = parseWechatNotification(body, {
+          apiV3Key: env.WECHAT_API_V3_KEY,
+          expectedMchId: env.WECHAT_MCH_ID,
+          expectedAppId: env.WECHAT_APP_ID
         });
         await runtime.processPaymentEvent(event);
         textResponse(response, 200, "success");

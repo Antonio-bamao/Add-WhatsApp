@@ -18,6 +18,9 @@
 | ZPAY 聚合支付 KEY 泄露 | 把 ZPAY KEY 填入前端、官网、后台静态文件或提交到 Git | 攻击者可伪造支付请求或回调，造成资金/额度风险 | `ZPAY_KEY` 只写服务器 `/etc/add-whatsapp-api.env`；代码和文档只记录变量名；ZPAY 回调必须校验 PID、MD5 签名和订单归属 |
 | ZPAY 回调未到或被拦截 | 服务器 notify URL 配错、HTTPS/Nginx 转发失败、ZPAY 平台重试失败 | 用户付款后订单未自动入账 | ZPAY notify URL 固定为 `https://api.addwhatsapp.com/v1/payments/zpay/notify`；后台保留人工按订单号入账和补偿队列；联调用 0.01 元测试支付检查 payment-events |
 | ZPAY 收银台未自动弹出 | Electron `shell.openExternal` 被系统默认浏览器、权限、杀软或协议处理阻断 | 用户点击支付按钮后误以为没有反应，无法继续付款 | 主进程捕获打开失败并返回订单；客户端显示支付链接、再次打开和复制按钮；用户可复制链接到浏览器手动打开 |
+| 微信支付密钥或私钥误提交 | 把 `WECHAT_API_V3_KEY`、`apiclient_key.pem`、商户私钥或商户证书内容放入代码、官网、后台静态文件或 Git | 资金接口被伪造调用，用户余额和订单入账存在严重风险 | 微信支付凭据只写生产服务器 `/etc/add-whatsapp-api.env` 和 `/etc/add-whatsapp/wechat/apiclient_key.pem`；代码只记录变量名；部署前用 `grep` 检查仓库不包含真实 key 或 PEM |
+| 微信 Native 回调未自动入账 | notify URL 未配置到公网 HTTPS、Nginx 未转发、APIv3 key 错误、私钥路径权限错误、商户号和 AppID 绑定错误 | 用户付款后订单停留未支付，余额不增加 | notify URL 固定为 `https://api.addwhatsapp.com/v1/payments/wechat/notify`；小额实付后检查 API 日志、后台 payment-events、订单状态和用户余额；后台保留人工按订单号入账和补偿队列 |
+| 微信平台回调签名未做完整平台证书校验 | 当前实现先解密 APIv3 resource 并校验 `mchid/appid`，但尚未引入微信平台证书或公钥验证 `WECHATPAY-SIGNATURE` 请求头 | 极端情况下回调来源验证不完整，资金边界审计强度低于官方最佳实践 | 当前依赖 APIv3 key 解密和商户/AppID 校验作为上线最小闭环；后续补 `WECHATPAY-SERIAL` 平台证书轮换和请求头签名验签后再关闭该风险 |
 | 旧本地账号数据切换为数据库账号后看不到 | 老版本用户的历史、模板或 WhatsApp 缓存曾挂在旧本地 accountId 下，新版本用云端 `user.id` 作为账号目录 | 老用户首次升级后可能误以为原本机历史或扫码缓存丢失，需要重新扫码或迁移数据 | 新产品文案不再暴露本地账号；如要保留旧数据，需要后续做按用户名或手动同步包的迁移工具，把旧账号目录迁到数据库账号目录 |
 | 官网下载包过期 | 桌面端重新打包后未同步 `website/public/downloads` 和 `update.json` | 用户下载旧版本或校验信息不一致 | 每次发布执行复制 EXE、计算 SHA256、更新 latest/release 目录和版本页，再跑 website 测试与 build |
 | 公开官网误放敏感配置 | 官网后续接后台/API 时混入密钥、数据库 URL 或客户数据 | 公开站点泄露管理能力或用户数据 | 官网目录只放公开内容和下载元数据；后台走 `admin.addwhatsapp.com`，API 走 `api.addwhatsapp.com`，结构测试扫描敏感导入和密钥字样 |

@@ -5,6 +5,18 @@ import crypto from "node:crypto";
 import { createAppServer, createRuntimeFromEnv } from "../src/app.js";
 import { signMockAlipayPayload, signZpayPayload } from "../src/services/paymentProviders.js";
 
+function encryptWechatResource(payload, apiV3Key, { nonce = "notify-nonce", associatedData = "transaction" } = {}) {
+  const cipher = crypto.createCipheriv("aes-256-gcm", Buffer.from(apiV3Key), Buffer.from(nonce));
+  cipher.setAAD(Buffer.from(associatedData));
+  const encrypted = Buffer.concat([cipher.update(JSON.stringify(payload), "utf8"), cipher.final()]);
+  return {
+    algorithm: "AEAD_AES_256_GCM",
+    ciphertext: Buffer.concat([encrypted, cipher.getAuthTag()]).toString("base64"),
+    associated_data: associatedData,
+    nonce
+  };
+}
+
 async function withServer(testFn, options = {}) {
   const server = createAppServer(options);
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -478,6 +490,79 @@ describe("cloud API skeleton", () => {
         ZPAY_RETURN_URL: "https://addwhatsapp.com",
         ZPAY_TYPE: "wxpay",
         ZPAY_SITE_NAME: "Add WhatsApp"
+      }
+    });
+  });
+
+  it("creates WeChat Native payment requests and accepts encrypted APIv3 callbacks", async () => {
+    const { privateKey } = crypto.generateKeyPairSync("rsa", {
+      modulusLength: 2048,
+      publicKeyEncoding: { type: "spki", format: "pem" },
+      privateKeyEncoding: { type: "pkcs8", format: "pem" }
+    });
+    const apiV3Key = "0123456789abcdef0123456789abcdef";
+    let capturedWechatRequest;
+    await withServer(async (baseUrl) => {
+      const registered = await request(baseUrl, "/v1/auth/register", {
+        method: "POST",
+        body: { username: "wechat-link-user", password: "StrongPass123", planId: "advanced" }
+      });
+      const auth = { authorization: `Bearer ${registered.payload.accessToken}` };
+      const order = await request(baseUrl, "/v1/orders", {
+        method: "POST",
+        headers: auth,
+        body: { planId: "professional", credits: 5000, amountCents: 150000 }
+      });
+
+      const payment = await request(baseUrl, `/v1/orders/${order.payload.id}/payments/wechat/native-pay`, {
+        method: "POST",
+        headers: auth,
+        body: {}
+      });
+      assert.equal(payment.response.status, 200);
+      assert.equal(payment.payload.provider, "wechat");
+      assert.equal(payment.payload.orderId, order.payload.id);
+      assert.equal(payment.payload.orderNo, order.payload.orderNo);
+      assert.equal(payment.payload.codeUrl, "weixin://wxpay/bizpayurl?pr=http-test-token");
+      assert.equal(JSON.parse(capturedWechatRequest.options.body).out_trade_no, order.payload.orderNo);
+
+      const callback = await requestText(baseUrl, "/v1/payments/wechat/notify", {
+        method: "POST",
+        body: JSON.stringify({
+          id: "wechat-http-notify-001",
+          event_type: "TRANSACTION.SUCCESS",
+          resource_type: "encrypt-resource",
+          resource: encryptWechatResource({
+            appid: "wx92f39a8b81948f51",
+            mchid: "1113492162",
+            out_trade_no: order.payload.orderNo,
+            transaction_id: "420000000020260603000001",
+            trade_state: "SUCCESS",
+            amount: { total: 150000, payer_total: 150000, currency: "CNY" }
+          }, apiV3Key)
+        })
+      });
+      assert.equal(callback.response.status, 200);
+      assert.equal(callback.text, "success");
+
+      const balance = await request(baseUrl, "/v1/me/entitlements", { headers: auth });
+      assert.equal(balance.payload.balanceCredits, 5000);
+    }, {
+      env: {
+        WECHAT_MCH_ID: "1113492162",
+        WECHAT_APP_ID: "wx92f39a8b81948f51",
+        WECHAT_API_V3_KEY: apiV3Key,
+        WECHAT_MERCHANT_SERIAL_NO: "6E44BE6FB4CE6CBF496988E993FFE93BD3D692E7",
+        WECHAT_MERCHANT_PRIVATE_KEY: privateKey,
+        WECHAT_NOTIFY_URL: "https://api.addwhatsapp.com/v1/payments/wechat/notify"
+      },
+      fetchImpl: async (url, options) => {
+        capturedWechatRequest = { url, options };
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ code_url: "weixin://wxpay/bizpayurl?pr=http-test-token" })
+        };
       }
     });
   });

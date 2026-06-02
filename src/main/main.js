@@ -3,6 +3,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const { spawn } = require('node:child_process');
 const { app, BrowserWindow, Tray, Menu, dialog, ipcMain, shell } = require('electron');
+const QRCode = require('qrcode');
 const XLSX = require('xlsx');
 const { importContacts } = require('../core/tableImporter');
 const { JsonProgressStore } = require('../core/progressStore');
@@ -122,6 +123,14 @@ function createWindow() {
   });
 
   mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'));
+  mainWindow.webContents.openDevTools();
+
+  mainWindow.webContents.on('before-input-event', (event, input) => {
+    if ((input.control && input.shift && input.key.toLowerCase() === 'i') || input.key === 'F12') {
+      mainWindow.webContents.toggleDevTools();
+      event.preventDefault();
+    }
+  });
 }
 
 app.whenReady().then(() => {
@@ -449,10 +458,25 @@ ipcMain.handle('cloud:zpay-top-up', async (_event, payload = {}) => {
   }
 });
 
+ipcMain.handle('cloud:wechat-top-up', async (_event, payload = {}) => {
+  try {
+    const result = await cloudController.createWechatTopUp({ planId: payload.planId });
+    if (result.ok && result.payment && (result.payment.codeUrl || result.payment.paymentUrl)) {
+      result.payment.qrImageDataUrl = await QRCode.toDataURL(result.payment.codeUrl || result.payment.paymentUrl, {
+        margin: 1,
+        width: 320
+      });
+    }
+    return result;
+  } catch (error) {
+    return { ok: false, error: error.message };
+  }
+});
+
 ipcMain.handle('app:open-external-url', async (_event, url) => {
   try {
     const target = new URL(String(url || ''));
-    if (!['http:', 'https:'].includes(target.protocol)) throw new Error('URL_NOT_ALLOWED');
+    if (!['http:', 'https:', 'weixin:'].includes(target.protocol)) throw new Error('URL_NOT_ALLOWED');
     await shell.openExternal(target.toString());
     return { ok: true };
   } catch (error) {

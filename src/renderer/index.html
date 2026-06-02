@@ -402,24 +402,25 @@
             <span id="activePlanBadge" class="table-state">当前套餐</span>
           </section>
           <section id="planPaymentNotice" class="plan-notice" aria-label="支付维护提示">
-            <strong>当前使用 ZPAY 聚合支付。</strong>
-          <span>生成订单后会打开 ZPAY 收银台，付款成功后系统自动给账号入账。</span>
+            <strong>当前使用微信 Native 扫码支付。</strong>
+          <span>生成订单后会显示微信支付二维码，付款成功后系统自动给账号入账。</span>
+          <p id="planPaymentState" class="plan-payment-state" role="status"></p>
           </section>
           <section id="manualPaymentPanel" class="panel manual-payment-panel" hidden aria-label="支付订单">
             <div class="manual-payment-copy">
-              <p class="eyebrow">ZPAY 收银台</p>
+              <p class="eyebrow">微信扫码支付</p>
               <h3 id="manualPaymentTitle">等待生成订单</h3>
-              <p id="manualPaymentDescription">点击购买后这里会显示金额和订单号，并自动打开支付页面。</p>
+              <p id="manualPaymentDescription">点击购买后这里会显示金额、订单号和微信支付二维码。</p>
               <div class="manual-payment-facts">
                 <div><span>订单号</span><strong id="manualPaymentOrderNo">-</strong></div>
                 <div><span>付款金额</span><strong id="manualPaymentAmount">-</strong></div>
                 <div><span>支付状态</span><strong id="manualPaymentNote">-</strong></div>
               </div>
-              <div id="zpayPaymentLinkBox" class="payment-link-box" hidden>
+              <div id="paymentLinkBox" class="payment-link-box" hidden>
                 <span>支付链接</span>
-                <button id="zpayPaymentOpenButton" class="text-button" type="button">打开支付页</button>
-                <button id="zpayPaymentCopyButton" class="text-button" type="button">复制链接</button>
-                <code id="zpayPaymentLink">-</code>
+                <button id="paymentOpenButton" class="text-button" type="button">打开支付链接</button>
+                <button id="paymentCopyButton" class="text-button" type="button">复制链接</button>
+                <code id="paymentLink">-</code>
               </div>
             </div>
             <div class="manual-payment-qr">
@@ -560,7 +561,7 @@
             <div class="purchase-total">
               <span>预计金额按当前套餐单价计算</span>
               <strong id="quotaEstimate">¥600.00</strong>
-              <button id="quotaPayButton" class="button primary" type="button">ZPAY 支付</button>
+              <button id="quotaPayButton" class="button primary" type="button">微信支付</button>
             </div>
           </section>
 
@@ -584,7 +585,7 @@
             <div>
               <span>您的下次付款</span>
               <strong>¥0.00</strong>
-              <p>ZPAY 回调成功后，系统自动写入额度账本。</p>
+              <p>微信支付回调成功后，系统自动写入额度账本。</p>
             </div>
             <div>
               <span>账单信息</span>
@@ -597,7 +598,7 @@
                 <h3>当前套餐</h3>
                 <p id="billingPlanDescription">当前使用本地套餐规则。</p>
               </div>
-              <button id="billingPayButton" class="button primary" type="button">ZPAY 支付</button>
+              <button id="billingPayButton" class="button primary" type="button">微信支付</button>
             </div>
             <div class="billing-feature-grid">
               <div id="billingIncludedList"></div>

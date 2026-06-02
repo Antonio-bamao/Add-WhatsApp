@@ -34,6 +34,12 @@ function normalizePem(value) {
   return String(value || "").replaceAll("\\n", "\n");
 }
 
+function normalizeWechatPrivateKey(value) {
+  const privateKey = normalizePem(value).trim();
+  if (!privateKey) throw new Error("WECHAT_MERCHANT_PRIVATE_KEY_REQUIRED");
+  return privateKey;
+}
+
 function alipayKeyType(privateKey) {
   return privateKey.includes("BEGIN PRIVATE KEY") && !privateKey.includes("BEGIN RSA PRIVATE KEY")
     ? "PKCS8"
@@ -143,6 +149,119 @@ export function parseZpayNotification(payload, { key, expectedPid } = {}) {
     eventType: successful ? "payment_succeeded" : "payment_ignored",
     providerTradeNo: payload.trade_no,
     payload: publicPayload
+  };
+}
+
+function decryptWechatResource(resource, apiV3Key) {
+  const key = String(apiV3Key || "");
+  if (Buffer.byteLength(key) !== 32) throw new Error("WECHAT_API_V3_KEY_REQUIRED");
+  if (!resource || resource.algorithm !== "AEAD_AES_256_GCM") throw new Error("WECHAT_RESOURCE_UNSUPPORTED");
+  const encrypted = Buffer.from(String(resource.ciphertext || ""), "base64");
+  if (encrypted.length <= 16) throw new Error("WECHAT_RESOURCE_INVALID");
+  const authTag = encrypted.subarray(encrypted.length - 16);
+  const ciphertext = encrypted.subarray(0, encrypted.length - 16);
+  const decipher = crypto.createDecipheriv("aes-256-gcm", Buffer.from(key), Buffer.from(String(resource.nonce || "")));
+  decipher.setAuthTag(authTag);
+  if (resource.associated_data) decipher.setAAD(Buffer.from(String(resource.associated_data)));
+  const decrypted = Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString("utf8");
+  return JSON.parse(decrypted);
+}
+
+export function parseWechatNotification(payload, { apiV3Key, expectedMchId, expectedAppId } = {}) {
+  const decrypted = decryptWechatResource(payload.resource, apiV3Key);
+  if (expectedMchId && String(decrypted.mchid) !== String(expectedMchId)) throw new Error("WECHAT_MCH_ID_MISMATCH");
+  if (expectedAppId && String(decrypted.appid) !== String(expectedAppId)) throw new Error("WECHAT_APP_ID_MISMATCH");
+  const eventType = String(payload.event_type || decrypted.trade_state || "UNKNOWN");
+  const successful = eventType === "TRANSACTION.SUCCESS" && String(decrypted.trade_state || "") === "SUCCESS";
+
+  return {
+    provider: "wechat",
+    providerEventId: `wechat:${payload.id || decrypted.transaction_id || decrypted.out_trade_no}:${eventType}`,
+    orderNo: decrypted.out_trade_no,
+    eventType: successful ? "payment_succeeded" : "payment_ignored",
+    providerTradeNo: decrypted.transaction_id,
+    payload: decrypted
+  };
+}
+
+function signWechatRequest({ method, pathname, body, timestamp, nonce, privateKey }) {
+  const signingText = `${method}\n${pathname}\n${timestamp}\n${nonce}\n${body}\n`;
+  return crypto.sign("RSA-SHA256", Buffer.from(signingText), normalizeWechatPrivateKey(privateKey)).toString("base64");
+}
+
+export async function buildWechatNativePayRequest(order, options = {}) {
+  const gatewayUrl = String(options.gatewayUrl || "https://api.mch.weixin.qq.com").trim().replace(/\/+$/, "");
+  const mchId = String(options.mchId || "").trim();
+  const appId = String(options.appId || "").trim();
+  const apiPath = "/v3/pay/transactions/native";
+  const merchantSerialNo = String(options.merchantSerialNo || "").trim();
+  const merchantPrivateKey = normalizeWechatPrivateKey(options.merchantPrivateKey);
+  const notifyUrl = String(options.notifyUrl || "").trim();
+  if (!mchId) throw new Error("WECHAT_MCH_ID_REQUIRED");
+  if (!appId) throw new Error("WECHAT_APP_ID_REQUIRED");
+  if (!merchantSerialNo) throw new Error("WECHAT_MERCHANT_SERIAL_NO_REQUIRED");
+  if (!notifyUrl) throw new Error("WECHAT_NOTIFY_URL_REQUIRED");
+
+  const amountCents = Number(order.amountCents);
+  if (!Number.isInteger(amountCents) || amountCents <= 0) throw new Error("ORDER_AMOUNT_INVALID");
+  const credits = Number(order.credits);
+  if (!Number.isInteger(credits) || credits <= 0) throw new Error("ORDER_CREDITS_INVALID");
+
+  const payload = {
+    appid: appId,
+    mchid: mchId,
+    description: String(options.description || `Add WhatsApp ${credits} credits`).slice(0, 127),
+    out_trade_no: String(order.orderNo),
+    notify_url: notifyUrl,
+    amount: {
+      total: amountCents,
+      currency: "CNY"
+    }
+  };
+  const body = JSON.stringify(payload);
+  const timestamp = String(options.now || Math.floor(Date.now() / 1000));
+  const nonce = String(options.nonce || crypto.randomBytes(16).toString("hex"));
+  const signature = signWechatRequest({
+    method: "POST",
+    pathname: apiPath,
+    body,
+    timestamp,
+    nonce,
+    privateKey: merchantPrivateKey
+  });
+  const authorization = [
+    `mchid="${mchId}"`,
+    `nonce_str="${nonce}"`,
+    `timestamp="${timestamp}"`,
+    `serial_no="${merchantSerialNo}"`,
+    `signature="${signature}"`
+  ].join(",");
+  const fetchImpl = options.fetchImpl || globalThis.fetch;
+  if (typeof fetchImpl !== "function") throw new Error("WECHAT_FETCH_UNAVAILABLE");
+  const response = await fetchImpl(`${gatewayUrl}${apiPath}`, {
+    method: "POST",
+    headers: {
+      "Accept": "application/json",
+      "Content-Type": "application/json",
+      "Authorization": `WECHATPAY2-SHA256-RSA2048 ${authorization}`
+    },
+    body
+  });
+  const responsePayload = await response.json();
+  if (!response.ok) {
+    throw new Error(`WECHAT_NATIVE_PAY_FAILED:${responsePayload.message || responsePayload.code || response.status}`);
+  }
+  const codeUrl = String(responsePayload.code_url || "").trim();
+  if (!codeUrl) throw new Error("WECHAT_CODE_URL_MISSING");
+
+  return {
+    provider: "wechat",
+    orderId: order.id,
+    orderNo: order.orderNo,
+    amountCents,
+    codeUrl,
+    paymentUrl: codeUrl,
+    params: payload
   };
 }
 

@@ -162,3 +162,10 @@
 - 背景：用户已在 ZPAY 后台拿到 PID，并通过微信支付渠道审核；ZPAY 后台提供兼容易支付网关、PID 和 KEY，能绕开当前官方直连产品的复杂审核链路。
 - 理由：现有订单、支付事件、账本幂等和后台补偿队列已经能支撑自动回调入账；ZPAY 只需要在 provider adapter 中实现 MD5 签名、下单 URL 和通知验签，不需要改变资金账本模型。
 - 约束：`ZPAY_KEY` 只能放在 `server/` 生产环境变量中；客户端只能拿服务端生成的 `paymentUrl`，不能传金额、订单号或 KEY；回调必须验签、校验 PID、按 `payment_events.provider_event_id` 和 `credit_ledger.purchase:{orderId}` 双层幂等处理。
+
+## 2026-06-03: 官方微信 Native 支付作为当前默认自动入账路径
+
+- 决策：用户完成微信商户号与已认证小程序 AppID 绑定后，默认购买路径从 ZPAY 切换为官方微信支付 Native 扫码；Electron 只请求服务端生成订单和 Native `code_url`，不保存或生成任何微信支付密钥。
+- 背景：ZPAY 通道存在余额、费率、JSAPI 页面注册和第三方稳定性问题；用户已具备微信商户号、APIv3 key、商户 API 证书序列号、`apiclient_key.pem` 和公网 HTTPS notify URL，可以直连官方微信 Native。
+- 理由：官方微信 Native 减少第三方手续费和通道限制；服务端统一负责订单归属、金额派生、商户私钥签名、APIv3 通知解密和幂等入账，客户端只显示二维码和链接兜底，继续复用现有订单/账本模型。
+- 约束：`WECHAT_API_V3_KEY`、`WECHAT_MERCHANT_PRIVATE_KEY` 或 `WECHAT_MERCHANT_PRIVATE_KEY_PATH` 只能在 `server/` 生产环境变量中；微信 notify 必须走 `https://api.addwhatsapp.com/v1/payments/wechat/notify`；付款成功仍以微信异步通知和后台 payment-events 为准，前端显示二维码或用户扫码不能视为已支付。

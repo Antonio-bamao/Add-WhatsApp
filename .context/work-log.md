@@ -406,3 +406,14 @@
 - 结果：重新打包 `dist\\Add WhatsApp 0.1.2.exe`，同步到 website latest/release，并更新 `update.json` 为 `sizeBytes=78741586`、SHA256 `2969c6af5dcac59ab44b6b428baf2e310dffd77402cee2e960ee7b9944988159`。
 - 验证：`node --test tests\\cloudRendererContract.test.js` 3/3；`node --test tests\\cloudMainIntegration.test.js` 13/13；`node --test tests\\cloudApiClient.test.js` 9/9；根项目 `npm test` 111/111；`server npm test` 27/27；`admin npm test` 8/8；`website npm test` 6/6；根项目 `npm run build` 成功；`website npm run build` 成功。
 - 下一步：部署最新 website 下载包和 API 代码后，让用户完全退出旧托盘进程并重新下载安装包；若扫码仍返回 `appid和mch_id不匹配`，继续在 ZPAY/微信渠道侧处理 AppID 与商户号绑定。
+
+## 2026-06-03T01:40:00+08:00｜切换为官方微信 Native 扫码支付
+- 目标：用户已完成微信商户号、已认证小程序 AppID 绑定、APIv3 key、商户 API 证书和 notify URL 配置后，放弃 ZPAY 默认路径，改为官方微信 Native 自动支付入账。
+- 动作：按 TDD 先补失败测试，覆盖微信 Native 下单签名、APIv3 通知 AES-256-GCM 解密、HTTP 端到端回调、云端 API client、桌面端 controller、IPC/preload 和渲染契约。
+- 动作：实现 `buildWechatNativePayRequest` 和 `parseWechatNotification`；新增 `/v1/orders/:id/payments/wechat/native-pay` 与 `/v1/payments/wechat/notify`；服务端支持从 `WECHAT_MERCHANT_PRIVATE_KEY_PATH` 读取 `apiclient_key.pem`，用微信商户私钥生成 `WECHATPAY2-SHA256-RSA2048` 请求签名。
+- 动作：桌面端新增 `cloud:wechat-top-up`、`startWechatTopUp` 和二维码渲染；安装 `qrcode` 依赖，把套餐卡、额度页、账单页购买按钮切到微信支付，客户端显示 Native `code_url` 的二维码和链接兜底。
+- 动作：后台 payment-events 渠道筛选新增 `wechat`；更新 `server/README.md` 和 `docs/payment-production-checklist.md` 记录微信 Native 生产变量、notify 地址和密钥只能放 server 的边界；重新打包 EXE 并同步到 website latest/release。
+- 结果：新版客户端点击“微信支付”会创建云端订单、调用官方微信 Native 下单接口并显示微信扫码二维码；微信支付通知解密成功后走现有 `payment_events` 和 `purchase:{orderId}` 双层幂等入账；ZPAY 代码仍保留为备用，但生产 env 可注释 ZPAY 变量。
+- 结果：新下载包 `sizeBytes=78880538`，SHA256 `0d09e629b73034aa634fb4161aef0985b00262d093a21238adc0c34e9b271742`，`releaseDate=2026-06-03`。
+- 验证：`npm test` 114/114；`server npm test` 30/30；`admin npm test` 8/8；`website npm test` 6/6；根项目 `npm run build` 成功；`website npm run build` 成功；latest/release 两个 EXE SHA256 一致。
+- 下一步：服务器 `git pull --ff-only` 后重启 API 并部署 website/admin；确认 `/etc/add-whatsapp/wechat/apiclient_key.pem` 权限可读；用新版 EXE 创建一笔小额订单，付款后检查微信 notify、后台 payment-events、订单状态和用户余额。

@@ -130,10 +130,10 @@ const elements = {
   manualPaymentNote: document.getElementById('manualPaymentNote'),
   manualPaymentQr: document.getElementById('manualPaymentQr'),
   manualPaymentQrFallback: document.getElementById('manualPaymentQrFallback'),
-  zpayPaymentLinkBox: document.getElementById('zpayPaymentLinkBox'),
-  zpayPaymentLink: document.getElementById('zpayPaymentLink'),
-  zpayPaymentOpenButton: document.getElementById('zpayPaymentOpenButton'),
-  zpayPaymentCopyButton: document.getElementById('zpayPaymentCopyButton'),
+  paymentLinkBox: document.getElementById('paymentLinkBox'),
+  paymentLink: document.getElementById('paymentLink'),
+  paymentOpenButton: document.getElementById('paymentOpenButton'),
+  paymentCopyButton: document.getElementById('paymentCopyButton'),
   billingPlanDescription: document.getElementById('billingPlanDescription'),
   billingPayButton: document.getElementById('billingPayButton'),
   billingIncludedList: document.getElementById('billingIncludedList'),
@@ -211,7 +211,7 @@ function renderPlanCards(subscription) {
       : '无需充值';
     const templateLimit = plan.templateLimit ? `自定义文案模板 X${plan.templateLimit}` : '自定义文案模板不限';
     const lockedItems = lockedFeatureList(plan);
-    const actionText = isActive ? '当前套餐' : 'ZPAY 支付';
+    const actionText = isActive ? '当前套餐' : '微信支付';
     const disabled = isActive || !plan.capabilities || !plan.capabilities.onlinePayment;
     card.innerHTML = `
       <div class="plan-card-head">
@@ -242,7 +242,7 @@ function renderPlanCards(subscription) {
     `;
     const payButton = card.querySelector('[data-plan-pay]');
     if (payButton && !disabled) {
-      payButton.addEventListener('click', () => startZpayTopUp(plan.id, payButton));
+      payButton.addEventListener('click', () => startWechatTopUp(plan.id, payButton));
     }
     elements.planCards.appendChild(card);
   }
@@ -511,11 +511,25 @@ async function logoutAccount() {
   switchAuthMode('login');
 }
 
+async function handleApiError(response) {
+  if (response && !response.ok && response.error === 'UNAUTHORIZED') {
+    alert('您的登录会话已失效（由于服务器重启或 Token 过期），已自动为您退出，请重新登录。');
+    await window.addWhatsapp.logoutAccount();
+    applyAuthState({ authenticated: false, user: null });
+    switchAuthMode('login');
+    return true;
+  }
+  return false;
+}
+
 async function refreshCloudEntitlements() {
   elements.refreshEntitlementsButton.disabled = true;
   elements.syncState.textContent = '正在刷新套餐...';
   const response = await window.addWhatsapp.refreshCloudEntitlements();
   elements.refreshEntitlementsButton.disabled = false;
+  if (await handleApiError(response)) {
+    return;
+  }
   if (response.ok && response.subscription) {
     renderSubscriptionState(response.subscription);
     elements.syncState.textContent = '套餐余额已刷新。';
@@ -549,7 +563,7 @@ function renderManualPayment(paymentResult) {
     elements.manualPaymentQrFallback.hidden = false;
     elements.manualPaymentQrFallback.textContent = '服务器还没配置收款码图片 URL';
   }
-  if (elements.zpayPaymentLinkBox) elements.zpayPaymentLinkBox.hidden = true;
+  if (elements.paymentLinkBox) elements.paymentLinkBox.hidden = true;
 }
 
 function renderZpayPayment(paymentResult) {
@@ -565,10 +579,41 @@ function renderZpayPayment(paymentResult) {
   elements.manualPaymentQr.removeAttribute('src');
   elements.manualPaymentQrFallback.hidden = false;
   elements.manualPaymentQrFallback.textContent = payment.paymentUrl ? '如果浏览器没有自动弹出，请用左侧链接打开或复制。' : '支付链接生成失败';
-  if (elements.zpayPaymentLinkBox) elements.zpayPaymentLinkBox.hidden = !payment.paymentUrl;
-  if (elements.zpayPaymentLink) elements.zpayPaymentLink.textContent = payment.paymentUrl || '-';
-  if (elements.zpayPaymentOpenButton) elements.zpayPaymentOpenButton.dataset.paymentUrl = payment.paymentUrl || '';
-  if (elements.zpayPaymentCopyButton) elements.zpayPaymentCopyButton.dataset.paymentUrl = payment.paymentUrl || '';
+  if (elements.paymentLinkBox) elements.paymentLinkBox.hidden = !payment.paymentUrl;
+  if (elements.paymentLink) elements.paymentLink.textContent = payment.paymentUrl || '-';
+  if (elements.paymentOpenButton) elements.paymentOpenButton.dataset.paymentUrl = payment.paymentUrl || '';
+  if (elements.paymentCopyButton) elements.paymentCopyButton.dataset.paymentUrl = payment.paymentUrl || '';
+}
+
+function renderWechatPayment(paymentResult) {
+  if (!elements.manualPaymentPanel || !paymentResult || !paymentResult.payment) return;
+  const { order, payment, plan } = paymentResult;
+  const payUrl = payment.codeUrl || payment.paymentUrl || '';
+  elements.manualPaymentPanel.hidden = false;
+  elements.manualPaymentTitle.textContent = `${plan.name} ${formatCredits(plan.credits)} 额度`;
+  elements.manualPaymentDescription.textContent = '请用微信扫描右侧二维码付款。付款成功后系统会自动入账，稍后点击刷新套餐。';
+  elements.manualPaymentOrderNo.textContent = order.orderNo;
+  elements.manualPaymentAmount.textContent = `¥${(Number(payment.amountCents || plan.amountCents || 0) / 100).toFixed(2)}`;
+  elements.manualPaymentNote.textContent = '等待微信支付回调';
+  if (payment.qrImageDataUrl) {
+    elements.manualPaymentQr.hidden = false;
+    elements.manualPaymentQr.src = payment.qrImageDataUrl;
+    elements.manualPaymentQrFallback.hidden = true;
+  } else {
+    elements.manualPaymentQr.hidden = true;
+    elements.manualPaymentQr.removeAttribute('src');
+    elements.manualPaymentQrFallback.hidden = false;
+    elements.manualPaymentQrFallback.textContent = payUrl ? '二维码生成失败，请复制支付链接处理。' : '微信支付链接生成失败';
+  }
+  if (elements.paymentLinkBox) elements.paymentLinkBox.hidden = !payUrl;
+  if (elements.paymentLink) elements.paymentLink.textContent = payUrl || '-';
+  if (elements.paymentOpenButton) elements.paymentOpenButton.dataset.paymentUrl = payUrl;
+  if (elements.paymentCopyButton) elements.paymentCopyButton.dataset.paymentUrl = payUrl;
+}
+
+function setPaymentState(message) {
+  elements.syncState.textContent = message;
+  if (elements.planPaymentState) elements.planPaymentState.textContent = message;
 }
 
 async function startManualTopUp(planId = null, sourceButton = null) {
@@ -578,17 +623,24 @@ async function startManualTopUp(planId = null, sourceButton = null) {
   const targetPlanId = plan && plan.id ? plan.id : (state.subscription && state.subscription.plan && state.subscription.plan.id);
   const buttons = [sourceButton, elements.quotaPayButton, elements.billingPayButton].filter(Boolean);
   for (const button of buttons) button.disabled = true;
-  elements.syncState.textContent = '正在生成付款订单...';
+  setPaymentState('正在生成付款订单...');
 
-  const response = await window.addWhatsapp.startManualTopUp({ planId: targetPlanId });
-  if (!response.ok) {
-    elements.syncState.textContent = response.error || '付款订单创建失败。';
-    updateActionLocks();
-    return;
+  try {
+    const response = await window.addWhatsapp.startManualTopUp({ planId: targetPlanId });
+    if (await handleApiError(response)) {
+      return;
+    }
+    if (!response.ok) {
+      setPaymentState(response.error || '付款订单创建失败。');
+      updateActionLocks();
+      return;
+    }
+
+    renderManualPayment(response);
+    setPaymentState(`订单 ${response.order.orderNo} 已生成，付款后等管理员确认入账。`);
+  } catch (error) {
+    setPaymentState(error.message || '付款订单创建失败，请稍后重试。');
   }
-
-  renderManualPayment(response);
-  elements.syncState.textContent = `订单 ${response.order.orderNo} 已生成，付款后等管理员确认入账。`;
   updateActionLocks();
 }
 
@@ -596,20 +648,55 @@ async function startZpayTopUp(planId = null, sourceButton = null) {
   const plan = planId
     ? (state.subscription && state.subscription.catalog || []).find(item => item.id === planId)
     : state.subscription && state.subscription.plan;
-  const targetPlanId = plan && plan.id;
+  const targetPlanId = plan && plan.id ? plan.id : (state.subscription && state.subscription.plan && state.subscription.plan.id);
   const buttons = [sourceButton, elements.quotaPayButton, elements.billingPayButton].filter(Boolean);
   for (const button of buttons) button.disabled = true;
-  elements.syncState.textContent = '正在生成 ZPAY 付款订单...';
+  setPaymentState('正在生成 ZPAY 付款订单...');
 
-  const response = await window.addWhatsapp.startZpayTopUp({ planId: targetPlanId });
-  if (!response.ok) {
-    elements.syncState.textContent = response.error || 'ZPAY 付款订单创建失败。';
-    updateActionLocks();
-    return;
+  try {
+    const response = await window.addWhatsapp.startZpayTopUp({ planId: targetPlanId });
+    if (await handleApiError(response)) {
+      return;
+    }
+    if (!response.ok) {
+      setPaymentState(response.error || 'ZPAY 付款订单创建失败。');
+      updateActionLocks();
+      return;
+    }
+
+    renderZpayPayment(response);
+    setPaymentState(`订单 ${response.order.orderNo} 已生成，ZPAY 收银台已打开，付款后会自动入账。`);
+  } catch (error) {
+    setPaymentState(error.message || 'ZPAY 付款订单创建失败，请稍后重试。');
   }
+  updateActionLocks();
+}
 
-  renderZpayPayment(response);
-  elements.syncState.textContent = `订单 ${response.order.orderNo} 已生成，ZPAY 收银台已打开，付款后会自动入账。`;
+async function startWechatTopUp(planId = null, sourceButton = null) {
+  const plan = planId
+    ? (state.subscription && state.subscription.catalog || []).find(item => item.id === planId)
+    : state.subscription && state.subscription.plan;
+  const targetPlanId = plan && plan.id ? plan.id : (state.subscription && state.subscription.plan && state.subscription.plan.id);
+  const buttons = [sourceButton, elements.quotaPayButton, elements.billingPayButton].filter(Boolean);
+  for (const button of buttons) button.disabled = true;
+  setPaymentState('正在生成微信支付订单...');
+
+  try {
+    const response = await window.addWhatsapp.startWechatTopUp({ planId: targetPlanId });
+    if (await handleApiError(response)) {
+      return;
+    }
+    if (!response.ok) {
+      setPaymentState(response.error || '微信支付订单创建失败。');
+      updateActionLocks();
+      return;
+    }
+
+    renderWechatPayment(response);
+    setPaymentState(`订单 ${response.order.orderNo} 已生成，请扫码付款，付款后会自动入账。`);
+  } catch (error) {
+    setPaymentState(error.message || '微信支付订单创建失败，请稍后重试。');
+  }
   updateActionLocks();
 }
 
@@ -631,6 +718,10 @@ async function openAnotherWorkspace() {
   elements.workspaceRiskConfirmButton.disabled = true;
   const response = await window.addWhatsapp.openAnotherWorkspace({});
   elements.workspaceRiskConfirmButton.disabled = false;
+  if (await handleApiError(response)) {
+    hideWorkspaceRiskModal();
+    return;
+  }
   if (!response.ok) {
     elements.syncState.textContent = response.error || '打开新工作台失败。';
     return;
@@ -1360,22 +1451,22 @@ for (const tab of elements.authTabs) {
 elements.loginForm.addEventListener('submit', handleLogin);
 elements.registerForm.addEventListener('submit', handleRegister);
 elements.refreshEntitlementsButton.addEventListener('click', refreshCloudEntitlements);
-elements.quotaPayButton.addEventListener('click', () => startZpayTopUp());
-elements.billingPayButton.addEventListener('click', () => startZpayTopUp());
-if (elements.zpayPaymentOpenButton) {
-  elements.zpayPaymentOpenButton.addEventListener('click', async () => {
-    const url = elements.zpayPaymentOpenButton.dataset.paymentUrl;
+elements.quotaPayButton.addEventListener('click', () => startWechatTopUp());
+elements.billingPayButton.addEventListener('click', () => startWechatTopUp());
+if (elements.paymentOpenButton) {
+  elements.paymentOpenButton.addEventListener('click', async () => {
+    const url = elements.paymentOpenButton.dataset.paymentUrl;
     if (!url) return;
     const result = await window.addWhatsapp.openExternalUrl(url);
-    elements.syncState.textContent = result && result.ok ? '已再次请求打开 ZPAY 收银台。' : '打开失败，请复制链接到浏览器。';
+    elements.syncState.textContent = result && result.ok ? '已再次请求打开微信支付链接。' : '打开失败，请复制链接处理。';
   });
 }
-if (elements.zpayPaymentCopyButton) {
-  elements.zpayPaymentCopyButton.addEventListener('click', () => {
-    const url = elements.zpayPaymentCopyButton.dataset.paymentUrl;
+if (elements.paymentCopyButton) {
+  elements.paymentCopyButton.addEventListener('click', () => {
+    const url = elements.paymentCopyButton.dataset.paymentUrl;
     if (!url) return;
     window.addWhatsapp.copyText(url);
-    elements.syncState.textContent = '支付链接已复制，可以粘贴到浏览器打开。';
+    elements.syncState.textContent = '支付链接已复制。';
   });
 }
 elements.importButton.addEventListener('click', importContacts);

@@ -4,8 +4,10 @@ import crypto from "node:crypto";
 
 import {
   buildAlipayPagePayRequest,
+  buildWechatNativePayRequest,
   buildZpayPagePayRequest,
   parseAlipayNotification,
+  parseWechatNotification,
   parseZpayNotification,
   parseMockAlipayNotification,
   signMockAlipayPayload,
@@ -28,6 +30,19 @@ function verifyAlipayRequestSignature(params, publicKey) {
     .map((key) => `${key}=${params[key]}`)
     .join("&");
   return crypto.verify("RSA-SHA256", Buffer.from(signingText), publicKey, Buffer.from(params.sign, "base64"));
+}
+
+function encryptWechatResource(payload, apiV3Key, { nonce = "notify-nonce", associatedData = "transaction" } = {}) {
+  const cipher = crypto.createCipheriv("aes-256-gcm", Buffer.from(apiV3Key), Buffer.from(nonce));
+  cipher.setAAD(Buffer.from(associatedData));
+  const encrypted = Buffer.concat([cipher.update(JSON.stringify(payload), "utf8"), cipher.final()]);
+  const authTag = cipher.getAuthTag();
+  return {
+    algorithm: "AEAD_AES_256_GCM",
+    ciphertext: Buffer.concat([encrypted, authTag]).toString("base64"),
+    associated_data: associatedData,
+    nonce
+  };
 }
 
 describe("payment provider adapters", () => {
@@ -252,5 +267,102 @@ describe("payment provider adapters", () => {
     assert.equal(event.providerTradeNo, "zpay-trade-001");
     assert.equal(event.payload.sign, undefined);
     assert.equal(event.payload.sign_type, undefined);
+  });
+
+  it("creates a signed WeChat Native payment request with a scannable code url", async () => {
+    const { publicKey, privateKey } = crypto.generateKeyPairSync("rsa", {
+      modulusLength: 2048,
+      publicKeyEncoding: { type: "spki", format: "pem" },
+      privateKeyEncoding: { type: "pkcs8", format: "pem" }
+    });
+    const order = {
+      id: "order_wechat_001",
+      orderNo: "202606030001",
+      planId: "professional",
+      credits: 5000,
+      amountCents: 150000
+    };
+    let capturedRequest;
+    const request = await buildWechatNativePayRequest(order, {
+      mchId: "1113492162",
+      appId: "wx92f39a8b81948f51",
+      merchantSerialNo: "6E44BE6FB4CE6CBF496988E993FFE93BD3D692E7",
+      merchantPrivateKey: privateKey,
+      notifyUrl: "https://api.addwhatsapp.com/v1/payments/wechat/notify",
+      now: 1780419600,
+      nonce: "wechat-test-nonce",
+      fetchImpl: async (url, options) => {
+        capturedRequest = { url, options };
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ code_url: "weixin://wxpay/bizpayurl?pr=test-token" })
+        };
+      }
+    });
+
+    assert.equal(capturedRequest.url, "https://api.mch.weixin.qq.com/v3/pay/transactions/native");
+    const body = capturedRequest.options.body;
+    const payload = JSON.parse(body);
+    assert.equal(payload.mchid, "1113492162");
+    assert.equal(payload.appid, "wx92f39a8b81948f51");
+    assert.equal(payload.out_trade_no, "202606030001");
+    assert.equal(payload.description, "Add WhatsApp 5000 credits");
+    assert.equal(payload.notify_url, "https://api.addwhatsapp.com/v1/payments/wechat/notify");
+    assert.deepEqual(payload.amount, { total: 150000, currency: "CNY" });
+
+    const authorization = capturedRequest.options.headers.Authorization;
+    assert.match(authorization, /^WECHATPAY2-SHA256-RSA2048 /);
+    const authFields = Object.fromEntries(
+      authorization.replace(/^WECHATPAY2-SHA256-RSA2048\s+/, "")
+        .split(",")
+        .map((part) => part.split("="))
+        .map(([key, value]) => [key, value.replace(/^"|"$/g, "")])
+    );
+    assert.equal(authFields.mchid, "1113492162");
+    assert.equal(authFields.serial_no, "6E44BE6FB4CE6CBF496988E993FFE93BD3D692E7");
+    assert.equal(authFields.nonce_str, "wechat-test-nonce");
+    assert.equal(authFields.timestamp, "1780419600");
+    const signingText = `POST\n/v3/pay/transactions/native\n1780419600\nwechat-test-nonce\n${body}\n`;
+    assert.equal(crypto.verify("RSA-SHA256", Buffer.from(signingText), publicKey, Buffer.from(authFields.signature, "base64")), true);
+
+    assert.equal(request.provider, "wechat");
+    assert.equal(request.orderId, "order_wechat_001");
+    assert.equal(request.orderNo, "202606030001");
+    assert.equal(request.amountCents, 150000);
+    assert.equal(request.paymentUrl, "weixin://wxpay/bizpayurl?pr=test-token");
+    assert.equal(request.codeUrl, "weixin://wxpay/bizpayurl?pr=test-token");
+  });
+
+  it("decrypts WeChat APIv3 notifications into the common payment event contract", () => {
+    const apiV3Key = "0123456789abcdef0123456789abcdef";
+    const decrypted = {
+      appid: "wx92f39a8b81948f51",
+      mchid: "1113492162",
+      out_trade_no: "202606030001",
+      transaction_id: "420000000020260603000001",
+      trade_state: "SUCCESS",
+      amount: { total: 150000, payer_total: 150000, currency: "CNY" }
+    };
+    const notification = {
+      id: "wechat-notify-001",
+      create_time: "2026-06-03T00:58:29+08:00",
+      event_type: "TRANSACTION.SUCCESS",
+      resource_type: "encrypt-resource",
+      resource: encryptWechatResource(decrypted, apiV3Key)
+    };
+
+    const event = parseWechatNotification(notification, {
+      apiV3Key,
+      expectedMchId: "1113492162",
+      expectedAppId: "wx92f39a8b81948f51"
+    });
+
+    assert.equal(event.provider, "wechat");
+    assert.equal(event.providerEventId, "wechat:wechat-notify-001:TRANSACTION.SUCCESS");
+    assert.equal(event.orderNo, "202606030001");
+    assert.equal(event.eventType, "payment_succeeded");
+    assert.equal(event.providerTradeNo, "420000000020260603000001");
+    assert.equal(event.payload.out_trade_no, "202606030001");
   });
 });
