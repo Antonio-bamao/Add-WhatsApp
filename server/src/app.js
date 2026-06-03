@@ -162,6 +162,7 @@ export function createAppServer(options = {}) {
       }
 
       if (request.method === "GET" && url.pathname === "/v1/admin/console") {
+        await authAdminId(runtime, request);
         jsonResponse(response, 200, await runtime.getAdminConsoleSnapshot());
         return;
       }

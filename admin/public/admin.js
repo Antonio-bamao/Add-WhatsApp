@@ -3,6 +3,8 @@ import { actionQueue, adminModules, auditTrail, desktopAdminMappings } from "./a
 const pageOutlet = document.querySelector("[data-page-outlet]");
 const moduleButtons = document.querySelectorAll("[data-module-link]");
 const routeButtons = document.querySelectorAll("[data-route-link]");
+const loginScreen = document.querySelector("[data-login-screen]");
+const adminShell = document.querySelector("[data-admin-shell]");
 const adminLoginForm = document.querySelector("[data-admin-login]");
 const adminUsernameInput = document.querySelector("[data-admin-username]");
 const adminPasswordInput = document.querySelector("[data-admin-password]");
@@ -58,6 +60,21 @@ function resolveApiBaseUrl() {
 
 function connectedEnvironmentStatus() {
   return API_BASE_URL.includes("127.0.0.1") ? "本地 API 预览" : "API 已连接";
+}
+
+function setAdminAuthenticated(authenticated) {
+  if (loginScreen) loginScreen.hidden = authenticated;
+  if (adminShell) adminShell.hidden = !authenticated;
+}
+
+function clearAdminSession(message = "") {
+  adminAccessToken = "";
+  window.sessionStorage.removeItem(ADMIN_TOKEN_STORAGE_KEY);
+  resetPaymentEventsState();
+  resetContactImportsState();
+  if (pageOutlet) pageOutlet.innerHTML = "";
+  if (adminLoginStatus) adminLoginStatus.textContent = message;
+  setAdminAuthenticated(false);
 }
 
 function statusTone(status) {
@@ -179,8 +196,8 @@ function paymentEventRows(module) {
 
 function paymentEventSummary(module, rows) {
   if (paymentEventsState.loading) return "正在读取支付事件分页 API...";
-  if (paymentEventsState.error) return `分页 API 读取失败，显示快照：${paymentEventsState.error}`;
-  if (!adminAccessToken) return "未登录管理员，显示当前快照。";
+  if (paymentEventsState.error) return `分页 API 读取失败：${paymentEventsState.error}`;
+  if (!adminAccessToken) return "";
   if (!paymentEventsState.loaded) return `等待分页 API，当前显示快照 ${rows.length} 条。`;
   const pageIndex = Math.floor(paymentEventsQuery.offset / paymentEventsQuery.limit) + 1;
   const pageCount = Math.max(1, Math.ceil(paymentEventsState.total / paymentEventsQuery.limit));
@@ -248,8 +265,8 @@ function renderPaymentEvents(module) {
 
 function contactImportSummary(module, rows) {
   if (contactImportsState.loading) return "正在读取名单审计 API...";
-  if (contactImportsState.error) return `名单审计 API 读取失败，显示快照：${contactImportsState.error}`;
-  if (!adminAccessToken) return "未登录管理员，显示当前快照。";
+  if (contactImportsState.error) return `名单审计 API 读取失败：${contactImportsState.error}`;
+  if (!adminAccessToken) return "";
   if (!contactImportsState.loaded) return `等待名单审计 API，当前显示快照 ${rows.length} 条。`;
   const pageIndex = Math.floor(contactImportsQuery.offset / contactImportsQuery.limit) + 1;
   const pageCount = Math.max(1, Math.ceil(contactImportsState.total / contactImportsQuery.limit));
@@ -268,7 +285,7 @@ function contactImportRows(module) {
       `<button type="button" data-contact-import-download="${item.id}" data-contact-import-kind="original">原始</button><button type="button" data-contact-import-download="${item.id}" data-contact-import-kind="parsed">解析</button>`
     ]);
   }
-  return (module.records || []).map((row) => [...row, "登录后可下载"]);
+  return (module.records || []).map((row) => [...row, ""]);
 }
 
 function renderContactImports(module) {
@@ -819,6 +836,11 @@ function updateNavigation(activeKey) {
 }
 
 function renderRoute() {
+  if (!adminAccessToken) {
+    setAdminAuthenticated(false);
+    return;
+  }
+  setAdminAuthenticated(true);
   const activeKey = activeKeyFromHash();
   updateNavigation(activeKey);
 
@@ -878,19 +900,35 @@ function applyConsoleSnapshot(snapshot) {
 }
 
 async function loadConsoleSnapshot() {
+  if (!adminAccessToken) {
+    setAdminAuthenticated(false);
+    return;
+  }
   try {
     const response = await fetch(`${API_BASE_URL}/v1/admin/console`, {
-      headers: adminAccessToken ? { authorization: `Bearer ${adminAccessToken}` } : {}
+      headers: adminHeaders()
     });
+    if (response.status === 401 || response.status === 403) {
+      clearAdminSession("请先登录管理员账号。");
+      return;
+    }
     if (!response.ok) throw new Error(`ADMIN_CONSOLE_API_${response.status}`);
     applyConsoleSnapshot(await response.json());
   } catch {
-    runtimeState = { ...runtimeState, environmentStatus: "API 未连接" };
-    renderRoute();
+    clearAdminSession("API 未连接，请确认服务器启动后再登录。");
   }
 }
 
-loadConsoleSnapshot();
+function initializeAdminApp() {
+  if (!adminAccessToken) {
+    setAdminAuthenticated(false);
+    return;
+  }
+  setAdminAuthenticated(true);
+  loadConsoleSnapshot();
+}
+
+initializeAdminApp();
 
 async function loginAdmin(event) {
   event.preventDefault();
@@ -910,11 +948,10 @@ async function loginAdmin(event) {
     window.sessionStorage.setItem(ADMIN_TOKEN_STORAGE_KEY, adminAccessToken);
     adminPasswordInput.value = "";
     adminLoginStatus.textContent = `已登录：${payload.admin.username}`;
+    setAdminAuthenticated(true);
     await loadConsoleSnapshot();
   } catch {
-    adminAccessToken = "";
-    window.sessionStorage.removeItem(ADMIN_TOKEN_STORAGE_KEY);
-    adminLoginStatus.textContent = "登录失败，请确认 API 和管理员密码。";
+    clearAdminSession("登录失败，请确认 API 和管理员密码。");
   }
 }
 

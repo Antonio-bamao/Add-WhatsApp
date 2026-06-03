@@ -229,8 +229,8 @@ INSERT INTO admin_users (
   updated_at
 ) VALUES (
   'admin-preview',
-  'admin-preview',
-  'scrypt:addwhatsappdevsalt0011223344:ee989fa30bb0e6aad75d75b4d3f2094fc589036cb0db78d246cad02fa4751f2711641eb59de59224605fad5809f4e6e6ffdab83eb4f11b085ba57f73486b423b',
+  'yojiro',
+  'scrypt:addwhatsappdevsalt0011223344:f364dc6d774e4c1d1ea990f0cef9a65b5b7d0bba1c2909db2740744068b96ab89be89431031225da73fe988fd37bfec57954c330405ae36e3fd2fb5547c20631',
   'owner',
   'active',
   '2026-05-26T00:00:00.000Z',

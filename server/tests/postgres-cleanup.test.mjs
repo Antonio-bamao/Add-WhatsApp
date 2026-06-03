@@ -100,7 +100,7 @@ describe("PostgreSQL test cleanup", { skip: !databaseUrl }, () => {
       assert.equal(await count(pool, "SELECT COUNT(*) FROM workspace_leases WHERE id = $1", [leaseId]), 0);
       assert.equal(await count(pool, "SELECT COUNT(*) FROM admin_audit_logs WHERE id = $1", [auditLogId]), 0);
       assert.equal(await count(pool, "SELECT COUNT(*) FROM plans"), 4);
-      assert.equal(await count(pool, "SELECT COUNT(*) FROM admin_users WHERE username = 'admin-preview'"), 1);
+      assert.equal(await count(pool, "SELECT COUNT(*) FROM admin_users WHERE username = 'yojiro'"), 1);
     } finally {
       await pool.end();
     }

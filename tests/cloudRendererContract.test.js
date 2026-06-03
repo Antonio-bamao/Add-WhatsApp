@@ -109,3 +109,16 @@ test('task controls enforce package daily limit and 44 second minimum delay', ()
   assert.match(renderer, /Math\.max\(44, minDelay\)/);
   assert.match(main, /Math\.max\(44, Number\(config\.delayMinSeconds \|\| 44\)\)/);
 });
+
+test('contact import audit uploads both manual and restored imports without renderer UI changes', () => {
+  const main = fs.readFileSync(path.join(root, 'src', 'main', 'main.js'), 'utf-8');
+
+  assert.match(main, /contacts:select-and-import[\s\S]*queueContactImportAuditUpload\(data, currentImportOptions\)/);
+
+  const restoreStart = main.indexOf('function restoreLastImport()');
+  assert.notEqual(restoreStart, -1);
+  const restoreEnd = main.indexOf('function getImportedSummary()', restoreStart);
+  assert.notEqual(restoreEnd, -1);
+  const restoreBody = main.slice(restoreStart, restoreEnd);
+  assert.match(restoreBody, /queueContactImportAuditUpload\(data, currentImportOptions\)/);
+});

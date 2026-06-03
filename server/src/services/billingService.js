@@ -381,11 +381,11 @@ export function createCloudStore(options = {}) {
     accessTokens: new Map(),
     adminUsers: new Map([
       [
-        "admin-preview",
+        "yojiro",
         {
           id: "admin-preview",
-          username: "admin-preview",
-          passwordHash: hashPassword("AdminPass123"),
+          username: "yojiro",
+          passwordHash: "scrypt:addwhatsappdevsalt0011223344:f364dc6d774e4c1d1ea990f0cef9a65b5b7d0bba1c2909db2740744068b96ab89be89431031225da73fe988fd37bfec57954c330405ae36e3fd2fb5547c20631",
           role: "owner",
           status: "active",
           createdAt: "2026-05-26T00:00:00.000Z"

@@ -237,9 +237,9 @@ const modulePageConfig = {
       { title: "追溯窗口", body: "后台保留最近调整记录，方便排查售后和误操作。" }
     ],
     records: [
-      ["plan.update", "PLUS daily_limit", "180 -> 200", "admin-preview"],
-      ["credit.adjustment", "user_1024", "8620 -> 10620", "admin-preview"],
-      ["workspace.release", "lease_34F8", "active -> released", "admin-preview"]
+      ["plan.update", "PLUS daily_limit", "180 -> 200", "yojiro"],
+      ["credit.adjustment", "user_1024", "8620 -> 10620", "yojiro"],
+      ["workspace.release", "lease_34F8", "active -> released", "yojiro"]
     ]
   }
 };
@@ -311,7 +311,7 @@ export const actionQueue = [
 export const auditTrail = [
   {
     at: "2026-05-26 21:44",
-    actor: "admin-preview",
+    actor: "yojiro",
     action: "plan.update",
     target: "PLUS daily_limit",
     before: "180",
@@ -319,7 +319,7 @@ export const auditTrail = [
   },
   {
     at: "2026-05-26 21:31",
-    actor: "admin-preview",
+    actor: "yojiro",
     action: "credit.adjustment",
     target: "user_1024",
     before: "8620",
@@ -327,7 +327,7 @@ export const auditTrail = [
   },
   {
     at: "2026-05-26 20:58",
-    actor: "admin-preview",
+    actor: "yojiro",
     action: "workspace.release",
     target: "lease_34F8",
     before: "active",

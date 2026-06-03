@@ -80,7 +80,7 @@ Local admin login endpoint:
 POST http://127.0.0.1:4110/v1/admin/auth/login
 ```
 
-The local development seed admin is `admin-preview`. Its password is stored only as a scrypt hash in the local schema/runtime seed; use `AdminPass123` for local preview login.
+The local development seed admin username is `yojiro`. Its password is stored only as a scrypt hash in the local schema/runtime seed; use `yojiro123` for local preview login.
 
 Payment callback endpoints:
 

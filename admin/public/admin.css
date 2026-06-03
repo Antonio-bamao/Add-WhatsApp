@@ -20,6 +20,10 @@
   box-sizing: border-box;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 body {
   margin: 0;
   min-width: 320px;
@@ -38,6 +42,25 @@ select {
 
 button {
   cursor: pointer;
+}
+
+.login-screen {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: 24px;
+  background: linear-gradient(135deg, #f4f8f2 0%, #ffffff 52%, #edf5f0 100%);
+}
+
+.login-card {
+  width: min(420px, 100%);
+  margin: 0;
+  padding: 28px;
+  box-shadow: var(--shadow);
+}
+
+.login-card .brand-lockup {
+  margin-bottom: 18px;
 }
 
 .admin-shell {

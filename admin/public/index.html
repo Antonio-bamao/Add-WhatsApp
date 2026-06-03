@@ -9,7 +9,31 @@
     <link rel="stylesheet" href="./admin.css" />
   </head>
   <body>
-    <div class="admin-shell">
+    <section class="login-screen" data-login-screen>
+      <form class="admin-login login-card" data-admin-login>
+        <div class="brand-lockup">
+          <span class="brand-mark" aria-hidden="true">
+            <img src="./logo.png" alt="" />
+          </span>
+          <div>
+            <strong>Add WhatsApp</strong>
+            <span>admin.addwhatsapp.com</span>
+          </div>
+        </div>
+        <label>
+          <span>管理员账号</span>
+          <input data-admin-username name="username" autocomplete="username" value="yojiro" />
+        </label>
+        <label>
+          <span>管理员密码</span>
+          <input data-admin-password name="password" type="password" autocomplete="current-password" />
+        </label>
+        <button type="submit">登录后台</button>
+        <small data-admin-login-status></small>
+      </form>
+    </section>
+
+    <div class="admin-shell" data-admin-shell hidden>
       <aside class="sidebar" aria-label="后台导航">
         <div class="brand-lockup">
           <span class="brand-mark" aria-hidden="true">
@@ -37,19 +61,6 @@
         <p class="sidebar-note">
           管理台只放运营与审计能力。公开官网继续留在 website，桌面端继续留在 src，API 后续独立部署到 api.addwhatsapp.com。
         </p>
-
-        <form class="admin-login" data-admin-login>
-          <label>
-            <span>管理员账号</span>
-            <input data-admin-username name="username" autocomplete="username" value="admin-preview" />
-          </label>
-          <label>
-            <span>管理员密码</span>
-            <input data-admin-password name="password" type="password" autocomplete="current-password" />
-          </label>
-          <button type="submit">登录后台</button>
-          <small data-admin-login-status>未登录，仅显示预览数据。</small>
-        </form>
       </aside>
 
       <main class="main" data-page-outlet></main>

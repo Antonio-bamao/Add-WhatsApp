@@ -66,7 +66,7 @@ describe("PostgreSQL billing runtime", { skip: !databaseUrl }, () => {
 
       const adminLogin = await request(baseUrl, "/v1/admin/auth/login", {
         method: "POST",
-        body: { username: "admin-preview", password: "AdminPass123" }
+        body: { username: "yojiro", password: "yojiro123" }
       });
       assert.equal(adminLogin.response.status, 200);
       assert.ok(adminLogin.payload.adminAccessToken);
@@ -149,7 +149,7 @@ describe("PostgreSQL billing runtime", { skip: !databaseUrl }, () => {
 
       const adminLogin = await request(baseUrl, "/v1/admin/auth/login", {
         method: "POST",
-        body: { username: "admin-preview", password: "AdminPass123" }
+        body: { username: "yojiro", password: "yojiro123" }
       });
       const adminAuth = { authorization: `Bearer ${adminLogin.payload.adminAccessToken}` };
 
@@ -229,7 +229,10 @@ describe("PostgreSQL billing runtime", { skip: !databaseUrl }, () => {
       assert.equal(restored.response.status, 200);
       assert.equal(restored.payload.status, "active");
 
-      const consoleSnapshot = await request(baseUrl, "/v1/admin/console");
+      const rejectedConsoleSnapshot = await request(baseUrl, "/v1/admin/console");
+      assert.equal(rejectedConsoleSnapshot.response.status, 401);
+
+      const consoleSnapshot = await request(baseUrl, "/v1/admin/console", { headers: adminAuth });
       assert.equal(consoleSnapshot.payload.source, "postgres");
       assert.ok(consoleSnapshot.payload.summary.users >= 1);
       assert.ok(consoleSnapshot.payload.summary.creditEntries >= 1);

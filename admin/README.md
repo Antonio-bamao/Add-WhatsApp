@@ -15,8 +15,8 @@ This folder is the preview home for `admin.addwhatsapp.com`.
 - Do not store public marketing content here.
 - Do not store production secrets, database URLs, WhatsApp sessions, or desktop login/cache data here. Customer list downloads must go through the authenticated API; the static admin app must not embed file contents.
 - API and database code should remain a separate service when it is added.
-- Runtime data is read from `http://127.0.0.1:4110/v1/admin/console` during local preview; if the API is offline, the UI falls back to static preview data.
-- Sensitive API operations require an admin token from `http://127.0.0.1:4110/v1/admin/auth/login`.
+- Runtime data is read from `http://127.0.0.1:4110/v1/admin/console` only after admin login.
+- All admin pages and sensitive API operations require an admin token from `http://127.0.0.1:4110/v1/admin/auth/login`.
 
 ## Local Commands
 
@@ -38,8 +38,8 @@ npm run dev
 Local preview admin login:
 
 ```text
-username: admin-preview
-password: AdminPass123
+username: yojiro
+password: yojiro123
 ```
 
 Module pages use hash routes:

@@ -83,6 +83,7 @@ describe("admin console structure", () => {
       "额度账本",
       "用量限额",
       "订单与入账",
+      "名单审计",
       "推荐审核",
       "设备与工作台",
       "审计日志"
@@ -102,7 +103,7 @@ describe("admin console structure", () => {
     assert.match(css, /@media \(max-width: 860px\)/);
   });
 
-  it("loads runtime data from the local server API before falling back to preview data", () => {
+  it("requires a full-screen admin login before loading runtime data", () => {
     const html = readText("public/index.html");
     const js = readText("public/admin.js");
 
@@ -113,11 +114,20 @@ describe("admin console structure", () => {
     assert.match(js, /\/v1\/admin\/console/);
     assert.match(js, /fetch/);
     assert.match(js, /applyConsoleSnapshot/);
+    assert.match(html, /data-login-screen/);
+    assert.match(html, /data-admin-shell/);
     assert.match(html, /data-admin-login/);
     assert.match(html, /data-admin-username/);
     assert.match(html, /data-admin-password/);
+    assert.match(html, /value="yojiro"/);
+    assert.match(js, /setAdminAuthenticated/);
+    assert.match(js, /initializeAdminApp/);
+    assert.match(js, /adminHeaders\(\)/);
     assert.match(js, /本地 API 预览/);
     assert.match(js, /API 未连接/);
+    assert.doesNotMatch(html + js, /未登录，仅显示预览数据|登录后可下载|未登录管理员，显示当前快照/);
+    assert.doesNotMatch(html + js, /admin-preview|AdminPass123/);
+    assert.doesNotMatch(js, /\nloadConsoleSnapshot\(\);\s*\n\s*async function loginAdmin/);
   });
 
   it("exposes real admin operation forms for the first运营闭环", () => {
