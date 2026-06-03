@@ -34,6 +34,10 @@ body {
   line-height: 1.5;
 }
 
+body.admin-auth-locked {
+  overflow: hidden;
+}
+
 button,
 input,
 select {
@@ -49,18 +53,27 @@ button {
   min-height: 100vh;
   place-items: center;
   padding: 24px;
-  background: linear-gradient(135deg, #f4f8f2 0%, #ffffff 52%, #edf5f0 100%);
+  background:
+    radial-gradient(circle at 12% 16%, rgba(191, 246, 216, 0.42), transparent 34%),
+    linear-gradient(110deg, #f7faf4 0%, #ffffff 48%, #f3f5ed 100%);
 }
 
 .login-card {
-  width: min(420px, 100%);
+  width: min(446px, calc(100vw - 32px));
   margin: 0;
-  padding: 28px;
+  padding: 28px 24px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.92);
   box-shadow: var(--shadow);
 }
 
 .login-card .brand-lockup {
-  margin-bottom: 18px;
+  margin-bottom: 20px;
+}
+
+.login-card .brand-lockup strong {
+  font-size: 22px;
 }
 
 .admin-shell {

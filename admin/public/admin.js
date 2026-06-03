@@ -63,8 +63,16 @@ function connectedEnvironmentStatus() {
 }
 
 function setAdminAuthenticated(authenticated) {
-  if (loginScreen) loginScreen.hidden = authenticated;
-  if (adminShell) adminShell.hidden = !authenticated;
+  document.body.classList.toggle("admin-auth-locked", !authenticated);
+  document.body.classList.toggle("admin-authenticated", authenticated);
+  if (loginScreen) {
+    loginScreen.hidden = authenticated;
+    loginScreen.style.display = authenticated ? "none" : "grid";
+  }
+  if (adminShell) {
+    adminShell.hidden = !authenticated;
+    adminShell.style.display = authenticated ? "grid" : "none";
+  }
 }
 
 function clearAdminSession(message = "") {

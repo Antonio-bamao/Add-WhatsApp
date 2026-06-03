@@ -6,9 +6,9 @@
     <title>Add WhatsApp Admin Preview</title>
     <link rel="icon" href="./favicon.ico" sizes="any" />
     <link rel="icon" type="image/png" href="./favicon.png" />
-    <link rel="stylesheet" href="./admin.css" />
+    <link rel="stylesheet" href="./admin.css?v=20260603-login-card" />
   </head>
-  <body>
+  <body class="admin-auth-locked">
     <section class="login-screen" data-login-screen>
       <form class="admin-login login-card" data-admin-login>
         <div class="brand-lockup">
@@ -33,7 +33,7 @@
       </form>
     </section>
 
-    <div class="admin-shell" data-admin-shell hidden>
+    <div class="admin-shell" data-admin-shell hidden style="display: none;">
       <aside class="sidebar" aria-label="后台导航">
         <div class="brand-lockup">
           <span class="brand-mark" aria-hidden="true">
@@ -66,6 +66,6 @@
       <main class="main" data-page-outlet></main>
     </div>
 
-    <script type="module" src="./admin.js"></script>
+    <script type="module" src="./admin.js?v=20260603-login-card"></script>
   </body>
 </html>
