@@ -185,6 +185,8 @@ describe("admin console structure", () => {
     assert.ok(desktopAdminMappings.some((mapping) => mapping.desktopPage === "导入名单"));
     assert.match(js, /\/v1\/admin\/contact-imports/);
     assert.match(js, /downloadContactImportArtifact/);
+    assert.match(js, /downloadFileNameFromDisposition/);
+    assert.match(js, /filename\\\*/);
     assert.match(js, /data-contact-import-download/);
     assert.match(css, /\.contact-imports-panel/);
   });

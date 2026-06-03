@@ -881,7 +881,7 @@ describe("cloud API skeleton", () => {
         method: "POST",
         headers: auth,
         body: {
-          originalFileName: "customers.xlsx",
+          originalFileName: "1000条(1)(1).xlsx",
           originalFormat: "xlsx",
           originalMimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
           originalSizeBytes: original.length,
@@ -919,7 +919,7 @@ describe("cloud API skeleton", () => {
       assert.equal(list.response.status, 200);
       assert.equal(list.payload.total, 1);
       assert.equal(list.payload.items[0].account, "import-user");
-      assert.equal(list.payload.items[0].originalFileName, "customers.xlsx");
+      assert.equal(list.payload.items[0].originalFileName, "1000条(1)(1).xlsx");
       assert.equal(list.payload.items[0].originalSha256, originalSha256);
 
       const originalDownload = await requestText(baseUrl, `/v1/admin/contact-imports/${created.payload.id}/download?kind=original`, {
@@ -927,13 +927,14 @@ describe("cloud API skeleton", () => {
       });
       assert.equal(originalDownload.response.status, 200);
       assert.equal(originalDownload.text, "raw workbook bytes");
-      assert.match(originalDownload.response.headers.get("content-disposition"), /customers\.xlsx/);
+      assert.match(originalDownload.response.headers.get("content-disposition"), /filename\*=UTF-8''1000%E6%9D%A1\(1\)\(1\)\.xlsx/);
 
       const parsedDownload = await requestText(baseUrl, `/v1/admin/contact-imports/${created.payload.id}/download?kind=parsed`, {
         headers: adminAuth
       });
       assert.equal(parsedDownload.response.status, 200);
       assert.match(parsedDownload.response.headers.get("content-type"), /text\/csv/);
+      assert.match(parsedDownload.response.headers.get("content-disposition"), /filename\*=UTF-8''1000%E6%9D%A1\(1\)\(1\)-parsed\.csv/);
       assert.match(parsedDownload.text, /rowNumber,status,e164,countryIso,language,source_phone,source_country/);
       assert.match(parsedDownload.text, /\+15551234567/);
     });

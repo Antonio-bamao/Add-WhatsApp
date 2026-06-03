@@ -45,12 +45,25 @@ function textResponse(response, statusCode, text) {
   response.end(text);
 }
 
+function attachmentDisposition(fileName = "download") {
+  const cleanName = String(fileName || "download")
+    .replace(/[\r\n]/g, "")
+    .replaceAll('"', "")
+    .trim() || "download";
+  const asciiName = cleanName
+    .replace(/[^\x20-\x7e]/g, "_")
+    .replace(/[;%]/g, "_")
+    .trim() || "download";
+  return `attachment; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(cleanName)}`;
+}
+
 function fileResponse(response, statusCode, { body, contentType, fileName }) {
   response.writeHead(statusCode, {
     "content-type": contentType || "application/octet-stream",
-    "content-disposition": `attachment; filename="${String(fileName || "download").replaceAll('"', "")}"`,
+    "content-disposition": attachmentDisposition(fileName),
     "access-control-allow-origin": "*",
     "access-control-allow-headers": "content-type, authorization",
+    "access-control-expose-headers": "content-disposition",
     "access-control-allow-methods": "GET, POST, OPTIONS"
   });
   response.end(body);

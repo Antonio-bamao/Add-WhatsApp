@@ -502,6 +502,19 @@ async function copyPaymentToken(event) {
   }
 }
 
+function downloadFileNameFromDisposition(disposition, fallback) {
+  const encodedMatch = /filename\*=UTF-8''([^;]+)/i.exec(disposition || "");
+  if (encodedMatch) {
+    try {
+      return decodeURIComponent(encodedMatch[1]);
+    } catch {
+      return fallback;
+    }
+  }
+  const quotedMatch = /filename="([^"]+)"/.exec(disposition || "");
+  return quotedMatch ? quotedMatch[1] : fallback;
+}
+
 async function downloadContactImportArtifact(event) {
   const button = event.target.closest("[data-contact-import-download]");
   if (!button) return;
@@ -517,8 +530,7 @@ async function downloadContactImportArtifact(event) {
     if (!response.ok) throw new Error(`CONTACT_IMPORT_DOWNLOAD_${response.status}`);
     const blob = await response.blob();
     const disposition = response.headers.get("content-disposition") || "";
-    const match = /filename="([^"]+)"/.exec(disposition);
-    const fileName = match ? match[1] : `contact-import-${kind}.csv`;
+    const fileName = downloadFileNameFromDisposition(disposition, `contact-import-${kind}.csv`);
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
