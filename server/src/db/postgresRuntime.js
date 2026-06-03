@@ -216,6 +216,21 @@ function csvEscape(value) {
   return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
 }
 
+function shouldKeepExcelText(header, value) {
+  const text = value === undefined || value === null ? "" : String(value).trim();
+  if (!text) return false;
+  const normalizedHeader = String(header || "").toLowerCase();
+  const digitCount = (text.match(/\d/g) || []).length;
+  const phoneHeader = normalizedHeader === "e164" || /phone|mobile|tel|电话|号码|手机|手机号/.test(normalizedHeader);
+  const numericLike = /^[+\d][\d\s().-]*$/.test(text);
+  return (phoneHeader && digitCount >= 6) || (numericLike && digitCount >= 10);
+}
+
+function excelFriendlyCsvValue(header, value) {
+  const text = value === undefined || value === null ? "" : String(value);
+  return shouldKeepExcelText(header, text) ? `\t${text}` : text;
+}
+
 function parsedRowsCsv(rows = []) {
   const sourceKeys = [];
   for (const row of rows) {
@@ -227,11 +242,11 @@ function parsedRowsCsv(rows = []) {
   const lines = [headers.join(",")];
   for (const row of rows) {
     lines.push(headers.map((header) => {
-      if (header.startsWith("source_")) return csvEscape(row.source?.[header.slice(7)]);
-      return csvEscape(row[header]);
+      if (header.startsWith("source_")) return csvEscape(excelFriendlyCsvValue(header, row.source?.[header.slice(7)]));
+      return csvEscape(excelFriendlyCsvValue(header, row[header]));
     }).join(","));
   }
-  return `${lines.join("\r\n")}\r\n`;
+  return `\ufeff${lines.join("\r\n")}\r\n`;
 }
 
 function parsedDownloadFileName(originalFileName) {

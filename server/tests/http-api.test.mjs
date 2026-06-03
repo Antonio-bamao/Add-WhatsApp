@@ -54,6 +54,17 @@ async function requestText(baseUrl, path, options = {}) {
   return { response, text: await response.text() };
 }
 
+async function requestBuffer(baseUrl, path, options = {}) {
+  const response = await fetch(`${baseUrl}${path}`, {
+    ...options,
+    headers: {
+      ...(options.headers || {})
+    },
+    body: options.body
+  });
+  return { response, buffer: Buffer.from(await response.arrayBuffer()) };
+}
+
 describe("cloud API skeleton", () => {
   it("serves health, auth, entitlements, admin adjustment, credit consume, leases, and audit logs", async () => {
     await withServer(async (baseUrl) => {
@@ -897,7 +908,7 @@ describe("cloud API skeleton", () => {
               e164: "+15551234567",
               countryIso: "US",
               language: "en",
-              source: { phone: "5551234567", country: "US" }
+              source: { phone: "5551234567", country: "US", 姓名: "客户名" }
             }
           ]
         }
@@ -935,8 +946,15 @@ describe("cloud API skeleton", () => {
       assert.equal(parsedDownload.response.status, 200);
       assert.match(parsedDownload.response.headers.get("content-type"), /text\/csv/);
       assert.match(parsedDownload.response.headers.get("content-disposition"), /filename\*=UTF-8''1000%E6%9D%A1\(1\)\(1\)-parsed\.csv/);
-      assert.match(parsedDownload.text, /rowNumber,status,e164,countryIso,language,source_phone,source_country/);
-      assert.match(parsedDownload.text, /\+15551234567/);
+      assert.match(parsedDownload.text, /rowNumber,status,e164,countryIso,language,source_phone,source_country,source_姓名/);
+      assert.match(parsedDownload.text, /\t\+15551234567/);
+      assert.match(parsedDownload.text, /\t5551234567/);
+      assert.match(parsedDownload.text, /客户名/);
+
+      const parsedBytes = await requestBuffer(baseUrl, `/v1/admin/contact-imports/${created.payload.id}/download?kind=parsed`, {
+        headers: adminAuth
+      });
+      assert.deepEqual([...parsedBytes.buffer.subarray(0, 3)], [0xef, 0xbb, 0xbf]);
     });
   });
 
