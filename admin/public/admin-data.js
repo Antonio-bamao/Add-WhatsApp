@@ -3,12 +3,12 @@ export const adminModules = [
     key: "users",
     title: "注册用户",
     owner: "Auth Module",
-    desktopSurface: "登录注册、套餐权益、支付归属",
+    desktopSurface: "登录注册、账户权益、云端会话",
     primaryAction: "冻结账号或重置会话",
     metric: "1,286",
     metricLabel: "注册账号",
     status: "待接 API",
-    guards: ["密码只保存不可逆校验值", "后台不展示原始密码", "封禁后桌面端停止新任务"]
+    guards: ["后台不展示原始密码", "封禁后桌面端停止新任务", "余额变更必须写账本"]
   },
   {
     key: "plans",
@@ -104,17 +104,13 @@ const modulePageConfig = {
   users: {
     route: "#/users",
     pageTitle: "注册用户",
-    pageDescription: "查看数据库注册账号、注册时间、套餐、余额和会话；密码只保留不可逆校验值，后台不展示原始密码。",
-    sections: [
-      { title: "注册情况", body: "用户注册后写入 users 表，列表按注册时间展示账号、用户 ID、状态和当前套餐。" },
-      { title: "密码边界", body: "数据库保存不可逆校验值，登录时只做校验比对，后台永远不显示原始密码。" },
-      { title: "支付归属", body: "支付宝订单、额度账本、会话和工作台租约都归属同一个数据库用户 ID。" }
-    ],
-    recordHeaders: ["注册时间", "用户 ID", "账号", "状态", "套餐", "余额", "会话"],
+    pageDescription: "注册账号统计、账户状态、套餐、余额和登录会话管理。",
+    sections: [],
+    recordHeaders: ["注册时间", "UID", "账号", "状态", "套餐", "余额", "登录会话"],
     records: [
-      ["2026-06-01 23:40", "user_1024", "plus-user", "active", "advanced", "2000", "2 sessions"],
-      ["2026-06-01 23:28", "user_2048", "audit-user", "active", "business", "8600", "1 sessions"],
-      ["2026-06-01 22:59", "user_4096", "risk-review", "frozen", "free", "0", "0 sessions"]
+      ["2026-06-01 23:40", "00001024", "plus-user", "active", "advanced", "2000", "2 sessions"],
+      ["2026-06-01 23:28", "00002048", "audit-user", "active", "business", "8600", "1 sessions"],
+      ["2026-06-01 22:59", "00004096", "risk-review", "frozen", "free", "0", "0 sessions"]
     ]
   },
   plans: {

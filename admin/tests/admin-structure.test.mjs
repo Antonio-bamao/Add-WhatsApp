@@ -53,7 +53,11 @@ describe("admin console structure", () => {
       assert.ok(module.route);
       assert.ok(module.pageTitle);
       assert.ok(module.pageDescription);
-      assert.ok(module.sections.length >= 3);
+      if (module.key === "users") {
+        assert.equal(module.sections.length, 0);
+      } else {
+        assert.ok(module.sections.length >= 3);
+      }
     }
   });
 
@@ -207,18 +211,43 @@ describe("admin console structure", () => {
     assert.match(css, /\.event-summary/);
   });
 
-  it("renders the users module as a registration list without password fields", () => {
+  it("renders the users module as a dense account management table without password fields", () => {
     const data = readText("public/admin-data.js");
     const js = readText("public/admin.js");
+    const css = readText("public/admin.css");
 
     assert.match(data, /pageTitle: "注册用户"/);
     assert.match(data, /注册时间/);
-    assert.match(data, /用户 ID/);
+    assert.match(data, /UID/);
     assert.match(data, /账号/);
     assert.match(data, /套餐/);
     assert.match(data, /余额/);
-    assert.match(data, /会话/);
-    assert.match(js, /module\.recordHeaders/);
+    assert.match(data, /登录会话/);
+    assert.match(js, /renderUsersModulePage/);
+    assert.match(js, /formatUserUid/);
+    assert.match(js, /renderUserEditModal/);
+    assert.match(js, /openUserEditModal/);
+    assert.match(js, /closeUserEditModal/);
+    assert.match(js, /saveUserEditModal/);
+    assert.match(js, /data-user-edit/);
+    assert.match(js, /data-user-modal/);
+    assert.match(js, /data-user-modal-save/);
+    assert.match(js, /data-user-modal-cancel/);
+    assert.match(js, /保存修改/);
+    assert.match(js, /取消/);
+    assert.match(js, /data-user-id/);
+    assert.doesNotMatch(js, /<td><select data-user-status/);
+    assert.doesNotMatch(js, /<td><select data-user-plan/);
+    assert.doesNotMatch(js, /<span class="credit-balance">.*data-user-credit-amount/s);
+    assert.match(css, /\.users-management-table/);
+    assert.match(css, /\.user-edit-modal/);
+    assert.match(css, /\.modal-actions/);
+    assert.match(css, /\.modal-card\s*{[^}]*font-size:\s*16px/s);
+    assert.match(css, /\.modal-user-summary dd\s*{[^}]*font-size:\s*17px/s);
+    assert.match(css, /\.modal-form label\s*{[^}]*font-size:\s*14px/s);
+    assert.match(css, /\.modal-form input,\s*\.modal-form select\s*{[^}]*min-height:\s*46px/s);
+    assert.match(css, /\.primary-button,\s*\.secondary-button\s*{[^}]*min-height:\s*46px/s);
+    assert.doesNotMatch(data + js, /注册情况|密码边界|支付归属/);
     assert.doesNotMatch(data, /password_hash|passwordHash|明文密码|密码哈希/i);
     assert.doesNotMatch(js, /password_hash|passwordHash|明文密码|密码哈希/i);
   });

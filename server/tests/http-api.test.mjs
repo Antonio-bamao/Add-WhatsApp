@@ -251,16 +251,16 @@ describe("cloud API skeleton", () => {
       assert.equal(consoleSnapshot.payload.summary.paymentEvents, 1);
       assert.deepEqual(consoleSnapshot.payload.modules.users.recordHeaders, [
         "注册时间",
-        "用户 ID",
+        "UID",
         "账号",
         "状态",
         "套餐",
         "余额",
-        "会话"
+        "登录会话"
       ]);
       assert.equal(consoleSnapshot.payload.modules.users.records.length, 1);
       const userRow = consoleSnapshot.payload.modules.users.records[0];
-      assert.equal(userRow[1], registered.payload.user.id);
+      assert.match(userRow[1], /^\d{8}$/);
       assert.equal(userRow[2], "api-user");
       assert.equal(userRow[3], "active");
       assert.equal(userRow[4], "advanced");
@@ -1007,6 +1007,10 @@ describe("cloud API skeleton", () => {
         body: { username: "yojiro", password: "yojiro123" }
       });
       const adminAuth = { authorization: `Bearer ${adminLogin.payload.adminAccessToken}` };
+      const consoleSnapshot = await request(baseUrl, "/v1/admin/console", { headers: adminAuth });
+      const opsUserRow = consoleSnapshot.payload.modules.users.records.find((row) => row[2] === "ops-user");
+      assert.ok(opsUserRow);
+      assert.match(opsUserRow[1], /^\d{8}$/);
 
       const releasedLease = await request(baseUrl, `/v1/admin/workspaces/leases/${lease.payload.leaseId}/release`, {
         method: "POST",
@@ -1016,7 +1020,7 @@ describe("cloud API skeleton", () => {
       assert.equal(releasedLease.response.status, 200);
       assert.equal(releasedLease.payload.status, "released");
 
-      const frozen = await request(baseUrl, `/v1/admin/users/${registered.payload.user.id}/status`, {
+      const frozen = await request(baseUrl, `/v1/admin/users/${opsUserRow[1]}/status`, {
         method: "POST",
         headers: adminAuth,
         body: { status: "frozen", reason: "risk review" }

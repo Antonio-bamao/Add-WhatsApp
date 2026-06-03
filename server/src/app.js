@@ -442,6 +442,22 @@ export function createAppServer(options = {}) {
         return;
       }
 
+      if (request.method === "POST" && /^\/v1\/admin\/users\/[^/]+\/plan$/.test(url.pathname)) {
+        const adminUserId = await authAdminId(runtime, request);
+        const userId = url.pathname.split("/")[4];
+        const body = await readJson(request);
+        jsonResponse(response, 200, await runtime.updateUserPlan({ ...body, userId, adminUserId, ip: clientIp(request) }));
+        return;
+      }
+
+      if (request.method === "POST" && /^\/v1\/admin\/users\/[^/]+\/sessions\/revoke$/.test(url.pathname)) {
+        const adminUserId = await authAdminId(runtime, request);
+        const userId = url.pathname.split("/")[4];
+        const body = await readJson(request);
+        jsonResponse(response, 200, await runtime.revokeUserSessions({ ...body, userId, adminUserId, ip: clientIp(request) }));
+        return;
+      }
+
       if (request.method === "POST" && /^\/v1\/admin\/workspaces\/leases\/[^/]+\/release$/.test(url.pathname)) {
         const adminUserId = await authAdminId(runtime, request);
         const leaseId = url.pathname.split("/")[5];

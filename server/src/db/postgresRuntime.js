@@ -35,10 +35,17 @@ function normalizeUsername(username) {
 function publicUser(row) {
   return {
     id: row.id,
+    uid: shortUserUid(row.id),
     username: row.username,
     status: row.status,
     createdAt: row.created_at
   };
+}
+
+function shortUserUid(userId) {
+  const digest = crypto.createHash("sha256").update(String(userId || "")).digest("hex");
+  const number = Number.parseInt(digest.slice(0, 12), 16) % 100000000;
+  return String(number).padStart(8, "0");
 }
 
 function referralCodeFor(username) {
@@ -275,6 +282,27 @@ async function requireActiveUserForAdmin(client, { userId, account }) {
 async function requireUser(client, userId) {
   const result = await client.query("SELECT * FROM users WHERE id = $1", [userId]);
   const user = result.rows[0];
+  if (!user) throw new Error("USER_NOT_FOUND");
+  return user;
+}
+
+async function requireUserForAdminIdentifier(client, identifier) {
+  const clean = String(identifier || "").trim();
+  if (!clean) throw new Error("USER_IDENTIFIER_REQUIRED");
+
+  const byId = await client.query("SELECT * FROM users WHERE id = $1", [clean]);
+  if (byId.rows[0]) return byId.rows[0];
+
+  if (/^\d{8}$/.test(clean)) {
+    const candidates = await client.query("SELECT * FROM users ORDER BY created_at DESC LIMIT 1000");
+    const byUid = candidates.rows.find((user) => shortUserUid(user.id) === clean);
+    if (byUid) return byUid;
+  }
+
+  const normalized = String(clean).toLowerCase();
+  if (!/^[a-z0-9._-]{3,64}$/.test(normalized)) throw new Error("USERNAME_INVALID");
+  const byUsername = await client.query("SELECT * FROM users WHERE username = $1", [normalized]);
+  const user = byUsername.rows[0];
   if (!user) throw new Error("USER_NOT_FOUND");
   return user;
 }
@@ -598,7 +626,7 @@ export function createPostgresRuntime({ databaseUrl, pool } = {}) {
       const client = await db.connect();
       try {
         await client.query("BEGIN");
-        const user = await requireActiveUserForAdmin(client, { userId, account });
+        const user = await requireUserForAdminIdentifier(client, userId || account);
         userId = user.id;
         const before = { balanceCredits: await balanceFor(client, userId) };
         const { entry } = await appendLedger(client, {
@@ -1163,7 +1191,8 @@ export function createPostgresRuntime({ databaseUrl, pool } = {}) {
       const client = await db.connect();
       try {
         await client.query("BEGIN");
-        const user = await requireUser(client, userId);
+        const user = await requireUserForAdminIdentifier(client, userId);
+        userId = user.id;
         const before = { status: user.status };
         const updatedAt = isoNow();
         await client.query("UPDATE users SET status = $1, updated_at = $2 WHERE id = $3", [status, updatedAt, userId]);
@@ -1178,6 +1207,69 @@ export function createPostgresRuntime({ databaseUrl, pool } = {}) {
         });
         await client.query("COMMIT");
         return { userId, username: user.username, status, updatedAt };
+      } catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+      } finally {
+        client.release();
+      }
+    },
+
+    async updateUserPlan({ userId, planId, adminUserId, reason, ip }) {
+      const client = await db.connect();
+      try {
+        await client.query("BEGIN");
+        const user = await requireUserForAdminIdentifier(client, userId);
+        const plan = await getPlan(client, planId);
+        const currentSubscription = await getSubscription(client, user.id);
+        const now = isoNow();
+        await client.query(
+          "UPDATE subscriptions SET status = 'inactive', ends_at = $1, changed_at = $1 WHERE user_id = $2 AND status = 'active'",
+          [now, user.id]
+        );
+        await client.query(
+          `INSERT INTO subscriptions (id, user_id, plan_id, status, started_at, ends_at, changed_at)
+           VALUES ($1, $2, $3, 'active', $4, NULL, $4)`,
+          [createId("sub"), user.id, plan.id, now]
+        );
+        await appendAuditLog(client, {
+          adminUserId,
+          action: "user.plan_update",
+          targetType: "user",
+          targetId: user.id,
+          before: { planId: currentSubscription?.plan_id || "free" },
+          after: { planId: plan.id, reason: reason || "admin plan update" },
+          ip
+        });
+        await client.query("COMMIT");
+        return { userId: user.id, username: user.username, planId: plan.id, updatedAt: now };
+      } catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+      } finally {
+        client.release();
+      }
+    },
+
+    async revokeUserSessions({ userId, adminUserId, reason, ip }) {
+      const client = await db.connect();
+      try {
+        await client.query("BEGIN");
+        const user = await requireUserForAdminIdentifier(client, userId);
+        const before = await client.query("SELECT COUNT(*)::int AS count FROM sessions WHERE user_id = $1 AND revoked_at IS NULL", [user.id]);
+        const revokedAt = isoNow();
+        await client.query("UPDATE sessions SET revoked_at = $1 WHERE user_id = $2 AND revoked_at IS NULL", [revokedAt, user.id]);
+        await appendAuditLog(client, {
+          adminUserId,
+          action: "user.sessions_revoke",
+          targetType: "user",
+          targetId: user.id,
+          before: { activeSessions: Number(before.rows[0]?.count || 0) },
+          after: { activeSessions: 0, reason: reason || "admin sessions revoke" },
+          ip
+        });
+        await client.query("COMMIT");
+        return { userId: user.id, username: user.username, revokedCount: Number(before.rows[0]?.count || 0), revokedAt };
       } catch (error) {
         await client.query("ROLLBACK");
         throw error;
@@ -1255,10 +1347,10 @@ export function createPostgresRuntime({ databaseUrl, pool } = {}) {
             users: {
               metric: String(users.rows.length),
               status: "PostgreSQL 已接",
-              recordHeaders: ["注册时间", "用户 ID", "账号", "状态", "套餐", "余额", "会话"],
+              recordHeaders: ["注册时间", "UID", "账号", "状态", "套餐", "余额", "登录会话"],
               records: tableRows(users.rows, (user) => [
                 user.created_at,
-                user.id,
+                shortUserUid(user.id),
                 user.username,
                 user.status,
                 subscriptionByUser.get(user.id) || "-",

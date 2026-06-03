@@ -271,6 +271,174 @@ function renderPaymentEvents(module) {
   `;
 }
 
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function formatUserUid(value) {
+  const text = String(value || "").trim();
+  if (/^\d{8}$/.test(text)) return text;
+  let hash = 0;
+  for (let index = 0; index < text.length; index += 1) {
+    hash = (hash * 31 + text.charCodeAt(index)) >>> 0;
+  }
+  return String(hash % 100000000).padStart(8, "0");
+}
+
+function userRows(module) {
+  return (module.records || []).filter((row) => row[0] !== "暂无记录");
+}
+
+function userStatusOptions(selected) {
+  return ["active", "frozen"]
+    .map((status) => `<option value="${status}" ${selected === status ? "selected" : ""}>${status === "active" ? "正常" : "封禁"}</option>`)
+    .join("");
+}
+
+function userPlanOptions(selected) {
+  return ["free", "advanced", "professional", "business"]
+    .map((plan) => `<option value="${plan}" ${selected === plan ? "selected" : ""}>${plan}</option>`)
+    .join("");
+}
+
+function sessionCount(value) {
+  const match = /^(\d+)/.exec(String(value || ""));
+  return match ? Number(match[1]) : 0;
+}
+
+function loginSessionLabel(value) {
+  return `${sessionCount(value)} 个登录会话`;
+}
+
+function renderUserEditModal() {
+  return `
+    <div class="user-edit-modal" data-user-modal hidden>
+      <div class="modal-backdrop" data-user-modal-cancel></div>
+      <section class="modal-card" role="dialog" aria-modal="true" aria-labelledby="user-edit-title">
+        <div class="modal-head">
+          <div>
+            <p class="eyebrow">ACCOUNT EDIT</p>
+            <h2 id="user-edit-title">修改账户</h2>
+          </div>
+          <button class="modal-close" type="button" data-user-modal-cancel aria-label="取消">×</button>
+        </div>
+        <dl class="modal-user-summary">
+          <div><dt>UID</dt><dd data-user-modal-uid></dd></div>
+          <div><dt>账号</dt><dd data-user-modal-account></dd></div>
+          <div><dt>当前余额</dt><dd data-user-modal-balance></dd></div>
+          <div><dt>登录会话</dt><dd data-user-modal-sessions></dd></div>
+        </dl>
+        <form class="modal-form" data-user-modal-form>
+          <label>
+            <span>状态</span>
+            <select data-user-modal-status>${userStatusOptions("active")}</select>
+          </label>
+          <label>
+            <span>套餐</span>
+            <select data-user-modal-plan>${userPlanOptions("free")}</select>
+          </label>
+          <label>
+            <span>余额调整</span>
+            <input data-user-modal-credit-amount type="number" step="1" placeholder="例如 500 或 -100" />
+          </label>
+          <label class="modal-check">
+            <input data-user-modal-revoke-sessions type="checkbox" />
+            <span>清空登录会话，让用户重新登录</span>
+          </label>
+          <small class="modal-status" data-user-modal-status-text></small>
+          <div class="modal-actions">
+            <button class="secondary-button" type="button" data-user-modal-cancel>取消</button>
+            <button class="primary-button" type="submit" data-user-modal-save>保存修改</button>
+          </div>
+        </form>
+      </section>
+    </div>
+  `;
+}
+
+function renderUsersModulePage(module) {
+  const rows = userRows(module);
+  const activeCount = rows.filter((row) => row[3] === "active").length;
+  const frozenCount = rows.filter((row) => row[3] === "frozen").length;
+  const totalBalance = rows.reduce((sum, row) => sum + (Number(row[5]) || 0), 0);
+
+  pageOutlet.innerHTML = `
+    ${headerTemplate({
+      eyebrow: module.owner,
+      title: module.pageTitle,
+      description: "注册账号、状态、套餐、余额和登录会话集中管理。",
+      status: module.status
+    })}
+
+    <section class="summary-grid users-summary" aria-label="注册用户统计">
+      <div class="summary-tile"><span>注册用户</span><strong>${module.metric || rows.length}</strong></div>
+      <div class="summary-tile"><span>正常账号</span><strong>${activeCount}</strong></div>
+      <div class="summary-tile"><span>封禁账号</span><strong>${frozenCount}</strong></div>
+      <div class="summary-tile"><span>总余额</span><strong>${totalBalance}</strong></div>
+    </section>
+
+    <section class="section-block users-management-panel">
+      <div class="users-panel-head">
+        <h2>账户列表</h2>
+        <span>${rows.length} 条记录</span>
+      </div>
+      <div class="table-wrap users-management-table">
+        <table>
+          <thead>
+            <tr>
+              <th scope="col">UID</th>
+              <th scope="col">账号</th>
+              <th scope="col">注册时间</th>
+              <th scope="col">状态</th>
+              <th scope="col">套餐</th>
+              <th scope="col">余额</th>
+              <th scope="col">登录会话</th>
+              <th scope="col">修改</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${
+              rows.length > 0
+                ? rows.map((row) => {
+                    const uid = formatUserUid(row[1]);
+                    const account = escapeHtml(row[2]);
+                    const status = String(row[3] || "active");
+                    const plan = String(row[4] || "free");
+                    const balance = String(row[5] || "0");
+                    const sessions = String(row[6] || "0 sessions");
+                    return `
+                      <tr data-user-row data-user-id="${escapeHtml(row[1])}" data-user-uid="${uid}" data-user-account="${account}" data-user-created="${escapeHtml(row[0])}" data-user-current-status="${escapeHtml(status)}" data-user-current-plan="${escapeHtml(plan)}" data-user-balance="${escapeHtml(balance)}" data-user-sessions="${escapeHtml(sessions)}">
+                        <td><code>${uid}</code></td>
+                        <td><strong>${account}</strong></td>
+                        <td>${escapeHtml(row[0])}</td>
+                        <td><span class="status-pill status-pill--${status === "active" ? "good" : "warn"}">${status === "active" ? "正常" : "封禁"}</span></td>
+                        <td>${escapeHtml(plan)}</td>
+                        <td><strong>${escapeHtml(balance)}</strong></td>
+                        <td>${loginSessionLabel(sessions)}</td>
+                        <td>
+                          <div class="user-actions">
+                            <button type="button" data-user-edit>修改</button>
+                            <small data-user-action-status></small>
+                          </div>
+                        </td>
+                      </tr>
+                    `;
+                  }).join("")
+                : `<tr><td colspan="8">暂无注册用户</td></tr>`
+            }
+          </tbody>
+        </table>
+      </div>
+    </section>
+    ${renderUserEditModal()}
+  `;
+}
+
 function contactImportSummary(module, rows) {
   if (contactImportsState.loading) return "正在读取名单审计 API...";
   if (contactImportsState.error) return `名单审计 API 读取失败：${contactImportsState.error}`;
@@ -678,6 +846,11 @@ function renderDashboard() {
 }
 
 function renderModulePage(module) {
+  if (module.key === "users") {
+    renderUsersModulePage(module);
+    return;
+  }
+
   pageOutlet.innerHTML = `
     ${headerTemplate({
       eyebrow: module.owner,
@@ -803,10 +976,110 @@ async function submitWorkspaceRelease(form) {
 
 async function submitUserStatusChange(form) {
   const body = formPayload(form);
-  return postAdminOperation(`/v1/admin/users/${encodeURIComponent(body.userId)}/status`, {
+  const identifier = body.userId || body.account;
+  return postAdminOperation(`/v1/admin/users/${encodeURIComponent(identifier)}/status`, {
     status: body.status,
     reason: body.reason
   });
+}
+
+async function updateUserPlan(identifier, planId, reason) {
+  return postAdminOperation(`/v1/admin/users/${encodeURIComponent(identifier)}/plan`, {
+    planId,
+    reason
+  });
+}
+
+async function revokeUserSessions(identifier, reason) {
+  return postAdminOperation(`/v1/admin/users/${encodeURIComponent(identifier)}/sessions/revoke`, {
+    reason
+  });
+}
+
+function setUserModalStatus(modal, message, tone = "neutral") {
+  const status = modal.querySelector("[data-user-modal-status-text]");
+  if (!status) return;
+  status.textContent = message;
+  status.dataset.tone = tone;
+}
+
+function closeUserEditModal(event) {
+  const cancel = event?.target?.closest?.("[data-user-modal-cancel]");
+  if (event && !cancel) return;
+  const modal = pageOutlet.querySelector("[data-user-modal]");
+  if (!modal) return;
+  modal.hidden = true;
+  modal.removeAttribute("data-user-id");
+  setUserModalStatus(modal, "");
+}
+
+function openUserEditModal(event) {
+  const button = event.target.closest("[data-user-edit]");
+  if (!button) return;
+  const row = button.closest("[data-user-row]");
+  if (!row) return;
+  const modal = pageOutlet.querySelector("[data-user-modal]");
+  if (!modal) return;
+
+  modal.dataset.userId = row.dataset.userId;
+  modal.dataset.userAccount = row.dataset.userAccount;
+  modal.dataset.userCurrentStatus = row.dataset.userCurrentStatus;
+  modal.dataset.userCurrentPlan = row.dataset.userCurrentPlan;
+
+  modal.querySelector("[data-user-modal-uid]").textContent = row.dataset.userUid || "";
+  modal.querySelector("[data-user-modal-account]").textContent = row.dataset.userAccount || "";
+  modal.querySelector("[data-user-modal-balance]").textContent = row.dataset.userBalance || "0";
+  modal.querySelector("[data-user-modal-sessions]").textContent = loginSessionLabel(row.dataset.userSessions);
+  modal.querySelector("[data-user-modal-status]").value = row.dataset.userCurrentStatus || "active";
+  modal.querySelector("[data-user-modal-plan]").value = row.dataset.userCurrentPlan || "free";
+  modal.querySelector("[data-user-modal-credit-amount]").value = "";
+  modal.querySelector("[data-user-modal-revoke-sessions]").checked = false;
+  setUserModalStatus(modal, "");
+  modal.hidden = false;
+  modal.querySelector("[data-user-modal-status]")?.focus();
+}
+
+async function saveUserEditModal(event) {
+  const form = event.target.closest("[data-user-modal-form]");
+  if (!form) return;
+  event.preventDefault();
+  const modal = form.closest("[data-user-modal]");
+  if (!modal) return;
+
+  const identifier = modal.dataset.userId;
+  const account = modal.dataset.userAccount;
+  const status = modal.querySelector("[data-user-modal-status]")?.value || "active";
+  const planId = modal.querySelector("[data-user-modal-plan]")?.value || "free";
+  const currentStatus = modal.dataset.userCurrentStatus;
+  const currentPlan = modal.dataset.userCurrentPlan;
+  const amount = Number(modal.querySelector("[data-user-modal-credit-amount]")?.value || 0);
+  const revokeSessions = Boolean(modal.querySelector("[data-user-modal-revoke-sessions]")?.checked);
+  const saveButton = modal.querySelector("[data-user-modal-save]");
+  const reason = `admin account update: ${account}`;
+
+  saveButton.disabled = true;
+  setUserModalStatus(modal, "正在保存...");
+  try {
+    if (status !== currentStatus) {
+      await postAdminOperation(`/v1/admin/users/${encodeURIComponent(identifier)}/status`, { status, reason });
+    }
+    if (planId !== currentPlan) {
+      await updateUserPlan(identifier, planId, reason);
+    }
+    if (Number.isInteger(amount) && amount !== 0) {
+      await postAdminOperation("/v1/admin/credits/adjust", { userId: identifier, amount, reason });
+    }
+    if (revokeSessions) {
+      await revokeUserSessions(identifier, reason);
+    }
+    await loadConsoleSnapshot();
+    closeUserEditModal();
+  } catch (error) {
+    const message = error.message === "ADMIN_LOGIN_REQUIRED" ? "请先登录管理员账号。" : `保存失败：${error.message}`;
+    setUserModalStatus(modal, message, "danger");
+  } finally {
+    saveButton.disabled = false;
+  }
 }
 
 async function handleOperationSubmit(event) {
@@ -977,6 +1250,7 @@ async function loginAdmin(event) {
 
 adminLoginForm.addEventListener("submit", loginAdmin);
 pageOutlet.addEventListener("submit", handleOperationSubmit);
+pageOutlet.addEventListener("submit", saveUserEditModal);
 pageOutlet.addEventListener("input", filterPaymentEvents);
 pageOutlet.addEventListener("input", filterContactImports);
 pageOutlet.addEventListener("change", handlePaymentEventControlChange);
@@ -984,6 +1258,8 @@ pageOutlet.addEventListener("click", paginatePaymentEvents);
 pageOutlet.addEventListener("click", paginateContactImports);
 pageOutlet.addEventListener("click", copyPaymentToken);
 pageOutlet.addEventListener("click", downloadContactImportArtifact);
+pageOutlet.addEventListener("click", openUserEditModal);
+pageOutlet.addEventListener("click", closeUserEditModal);
 
 Object.assign(window, {
   applyConsoleSnapshot,
@@ -1010,5 +1286,13 @@ Object.assign(window, {
   submitOrderCompensation,
   submitWorkspaceRelease,
   submitUserStatusChange,
+  updateUserPlan,
+  revokeUserSessions,
+  openUserEditModal,
+  closeUserEditModal,
+  saveUserEditModal,
+  renderUserEditModal,
+  renderUsersModulePage,
+  formatUserUid,
   renderRoute
 });

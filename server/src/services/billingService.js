@@ -81,10 +81,17 @@ function businessParts(store) {
 function publicUser(user) {
   return {
     id: user.id,
+    uid: shortUserUid(user.id),
     username: user.username,
     status: user.status,
     createdAt: user.createdAt
   };
+}
+
+function shortUserUid(userId) {
+  const digest = crypto.createHash("sha256").update(String(userId || "")).digest("hex");
+  const number = Number.parseInt(digest.slice(0, 12), 16) % 100000000;
+  return String(number).padStart(8, "0");
 }
 
 function normalizeUsername(username) {
@@ -108,11 +115,14 @@ function getUser(store, userId) {
 }
 
 function resolveUserForAdmin(store, { userId, account }) {
-  if (userId) return getUser(store, userId);
-  const normalized = normalizeUsername(account);
+  const identifier = String(userId || account || "").trim();
+  if (!identifier) throw new Error("USER_IDENTIFIER_REQUIRED");
+  if (store.users.has(identifier)) return findUser(store, identifier);
+  const shortUidMatch = [...store.users.values()].find((item) => shortUserUid(item.id) === identifier);
+  if (shortUidMatch) return shortUidMatch;
+  const normalized = normalizeUsername(identifier);
   const user = [...store.users.values()].find((item) => item.username === normalized);
   if (!user) throw new Error("USER_NOT_FOUND");
-  if (user.status !== "active") throw new Error("USER_NOT_ACTIVE");
   return user;
 }
 
@@ -866,7 +876,8 @@ export function adminReleaseWorkspaceLease(store, { leaseId, adminUserId, reason
 
 export function setUserStatus(store, { userId, status, adminUserId, reason, ip }) {
   if (!["active", "frozen"].includes(status)) throw new Error("USER_STATUS_INVALID");
-  const user = findUser(store, userId);
+  const user = resolveUserForAdmin(store, { userId });
+  userId = user.id;
   const before = { status: user.status };
   user.status = status;
   user.updatedAt = isoNow(store);
@@ -881,6 +892,53 @@ export function setUserStatus(store, { userId, status, adminUserId, reason, ip }
     ip
   });
   return { userId: user.id, username: user.username, status: user.status, updatedAt: user.updatedAt };
+}
+
+export function updateUserPlan(store, { userId, planId, adminUserId, reason, ip }) {
+  const user = resolveUserForAdmin(store, { userId });
+  const plan = getPlan(planId);
+  const beforeSubscription = getSubscription(store, user.id);
+  const now = isoNow(store);
+  store.subscriptions.set(user.id, {
+    ...beforeSubscription,
+    id: beforeSubscription.id || createId("sub"),
+    userId: user.id,
+    planId: plan.id,
+    status: "active",
+    changedAt: now
+  });
+  appendAuditLog(store, {
+    adminUserId,
+    action: "user.plan_update",
+    targetType: "user",
+    targetId: user.id,
+    before: { planId: beforeSubscription.planId },
+    after: { planId: plan.id, reason: reason || "admin plan update" },
+    ip
+  });
+  return { userId: user.id, username: user.username, planId: plan.id, updatedAt: now };
+}
+
+export function revokeUserSessions(store, { userId, adminUserId, reason, ip }) {
+  const user = resolveUserForAdmin(store, { userId });
+  const revokedAt = isoNow(store);
+  let revokedCount = 0;
+  for (const session of store.sessions.values()) {
+    if (session.userId === user.id && !session.revokedAt) {
+      session.revokedAt = revokedAt;
+      revokedCount += 1;
+    }
+  }
+  appendAuditLog(store, {
+    adminUserId,
+    action: "user.sessions_revoke",
+    targetType: "user",
+    targetId: user.id,
+    before: { activeSessions: revokedCount },
+    after: { activeSessions: 0, reason: reason || "admin sessions revoke" },
+    ip
+  });
+  return { userId: user.id, username: user.username, revokedCount, revokedAt };
 }
 
 function workspaceLeaseForUser(store, userId, leaseId) {
@@ -898,7 +956,7 @@ function tableRows(items, mapper) {
   return items.length > 0 ? items.map(mapper) : [["暂无记录", "empty", "等待 API 写入", "本地预览"]];
 }
 
-const USER_RECORD_HEADERS = ["注册时间", "用户 ID", "账号", "状态", "套餐", "余额", "会话"];
+const USER_RECORD_HEADERS = ["注册时间", "UID", "账号", "状态", "套餐", "余额", "登录会话"];
 
 function auditPreviewRows(auditLogs) {
   return auditLogs.map((entry) => ({
@@ -986,7 +1044,7 @@ export function getAdminConsoleSnapshot(store) {
         const sessions = [...store.sessions.values()].filter((session) => session.userId === user.id).length;
         return [
           user.createdAt,
-          user.id,
+          shortUserUid(user.id),
           user.username,
           user.status,
           subscription.planId,
@@ -1146,6 +1204,8 @@ export function createMemoryRuntime(options = {}) {
     releaseWorkspaceLease: (body) => releaseWorkspaceLease(store, body),
     adminReleaseWorkspaceLease: (body) => adminReleaseWorkspaceLease(store, body),
     setUserStatus: (body) => setUserStatus(store, body),
+    updateUserPlan: (body) => updateUserPlan(store, body),
+    revokeUserSessions: (body) => revokeUserSessions(store, body),
     listAuditLogs: () => listAuditLogs(store),
     getAdminConsoleSnapshot: () => getAdminConsoleSnapshot(store)
   };
