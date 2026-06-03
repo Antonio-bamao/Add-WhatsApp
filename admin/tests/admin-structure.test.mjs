@@ -53,7 +53,7 @@ describe("admin console structure", () => {
       assert.ok(module.route);
       assert.ok(module.pageTitle);
       assert.ok(module.pageDescription);
-      if (module.key === "users") {
+      if (module.key === "users" || module.key === "orders") {
         assert.equal(module.sections.length, 0);
       } else {
         assert.ok(module.sections.length >= 3);
@@ -202,11 +202,21 @@ describe("admin console structure", () => {
     assert.match(js, /\/v1\/admin\/payment-events/);
     assert.match(js, /loadPaymentEvents/);
     assert.match(js, /paymentEventsQuery/);
+    assert.match(js, /renderOrdersModulePage/);
+    assert.match(js, /orders-workspace/);
+    assert.match(js, /orders-actions-grid/);
+    assert.match(js, /订单记录/);
+    const ordersRenderer = js.match(/function renderOrdersModulePage\(module\) \{[\s\S]*?\n\}/)?.[0] || "";
+    assert.match(ordersRenderer, /订单记录/);
+    assert.match(ordersRenderer, /eyebrow: ""/);
+    assert.doesNotMatch(ordersRenderer, /module\.sections|必须遵守|section\.body|module-hero/);
     assert.match(js, /data-payment-event-provider/);
     assert.match(js, /data-payment-event-processed/);
     assert.match(js, /data-payment-events-page/);
     assert.match(js, /paginatePaymentEvents/);
     assert.match(js, /handlePaymentEventControlChange/);
+    assert.match(css, /\.orders-workspace/);
+    assert.match(css, /\.orders-actions-grid/);
     assert.match(css, /\.event-pagination/);
     assert.match(css, /\.event-summary/);
   });

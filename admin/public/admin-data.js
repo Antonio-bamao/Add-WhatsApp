@@ -162,12 +162,9 @@ const modulePageConfig = {
   orders: {
     route: "#/orders",
     pageTitle: "订单与入账",
-    pageDescription: "先支持人工收款，管理员标记订单已支付后统一写 purchase 账本。",
-    sections: [
-      { title: "订单创建", body: "额度页购买按钮后续创建订单，订单包含套餐、额度、金额和状态。" },
-      { title: "人工入账", body: "标记 paid 后写 purchase 账本；重复标记不重复入账。" },
-      { title: "异常处理", body: "paid_pending_credit 进入补偿队列，退款和拒付写负向账本。" }
-    ],
+    pageDescription: "订单、支付状态、入账记录。",
+    sections: [],
+    recordHeaders: ["订单号", "状态", "额度", "入账"],
     records: [
       ["ADWA-000001", "created", "2000 credits", "待确认收款"],
       ["ADWA-000002", "paid", "5000 credits", "已入账"],

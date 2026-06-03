@@ -114,9 +114,9 @@ function headerTemplate({ eyebrow, title, description, status }) {
   return `
     <header class="topbar">
       <div>
-        <p class="eyebrow">${eyebrow}</p>
+        ${eyebrow ? `<p class="eyebrow">${eyebrow}</p>` : ""}
         <h1>${title}</h1>
-        <p class="lead">${description}</p>
+        ${description ? `<p class="lead">${description}</p>` : ""}
       </div>
       <span class="environment-chip">${status}</span>
     </header>
@@ -221,7 +221,6 @@ function renderPaymentEvents(module) {
       <div class="event-toolbar">
         <div>
           <h2>支付回调事件</h2>
-          <p>核对渠道、事件号、订单和入账处理状态。重复通知应显示同一事件号，不应重复入账。</p>
         </div>
         <div class="event-filters">
           <label>
@@ -292,6 +291,23 @@ function formatUserUid(value) {
 
 function userRows(module) {
   return (module.records || []).filter((row) => row[0] !== "暂无记录");
+}
+
+function orderRows(module) {
+  return module.records || [];
+}
+
+function orderStats(module) {
+  const rows = orderRows(module);
+  const pending = rows.filter((row) => row[1] !== "paid").length;
+  const paid = rows.filter((row) => row[1] === "paid").length;
+  const pendingCredit = rows.filter((row) => row[1] === "paid_pending_credit").length;
+  return [
+    { label: "待处理订单", value: pending },
+    { label: "已支付订单", value: paid },
+    { label: "待补偿订单", value: pendingCredit },
+    { label: "回调事件", value: paymentEventRows(module).length }
+  ];
 }
 
 function userStatusOptions(selected) {
@@ -758,7 +774,6 @@ function renderOperationPanel(moduleKey) {
       <section class="operation-panel" aria-label="订单入账操作">
         <div>
           <h2>人工标记已支付</h2>
-          <p>确认收款后把订单置为 paid，并写入 purchase 额度流水；重复提交不会重复入账。</p>
         </div>
         <form class="operation-form" data-operation-form="order-mark-paid">
           <label><span>订单号 / 订单 ID</span><input name="orderId" required placeholder="订单号或 order_..." /></label>
@@ -770,7 +785,6 @@ function renderOperationPanel(moduleKey) {
       <section class="operation-panel" aria-label="订单补偿队列">
         <div>
           <h2>重试待入账订单</h2>
-          <p>处理 paid_pending_credit 订单，仍使用同一个 purchase 幂等键，避免补偿重复入账。</p>
         </div>
         <form class="operation-form operation-form--compact" data-operation-form="order-compensate">
           <label><span>批次上限</span><input name="limit" required type="number" min="1" max="100" value="20" /></label>
@@ -845,9 +859,54 @@ function renderDashboard() {
   `;
 }
 
+function renderOrdersModulePage(module) {
+  const stats = orderStats(module);
+  pageOutlet.innerHTML = `
+    ${headerTemplate({
+      eyebrow: "",
+      title: module.pageTitle,
+      description: "",
+      status: module.status
+    })}
+
+    <section class="summary-grid orders-summary" aria-label="订单入账统计">
+      ${stats
+        .map(
+          (item) => `
+            <div class="summary-tile">
+              <span>${item.label}</span>
+              <strong>${item.value}</strong>
+            </div>
+          `
+        )
+        .join("")}
+    </section>
+
+    <div class="orders-workspace">
+      <div class="orders-actions-grid">
+        ${renderOperationPanel(module.key)}
+      </div>
+
+      <section class="section-block orders-records-panel">
+        <div class="section-head">
+          <h2>订单记录</h2>
+          <span>${orderRows(module).length} 条记录</span>
+        </div>
+        ${table(module.recordHeaders || ["订单号", "状态", "额度", "入账"], orderRows(module))}
+      </section>
+
+      ${renderPaymentEvents(module)}
+    </div>
+  `;
+}
+
 function renderModulePage(module) {
   if (module.key === "users") {
     renderUsersModulePage(module);
+    return;
+  }
+  if (module.key === "orders") {
+    renderOrdersModulePage(module);
     return;
   }
 

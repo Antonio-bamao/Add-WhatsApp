@@ -466,6 +466,57 @@ h3 {
   color: var(--danger);
 }
 
+.orders-summary {
+  margin-bottom: 20px;
+}
+
+.orders-workspace {
+  display: grid;
+  gap: 20px;
+}
+
+.orders-actions-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(320px, 0.85fr);
+  gap: 14px;
+}
+
+.orders-actions-grid .operation-panel {
+  grid-template-columns: 1fr;
+  gap: 14px;
+  margin-bottom: 0;
+}
+
+.orders-actions-grid .operation-panel h2 {
+  margin-bottom: 0;
+}
+
+.orders-actions-grid .operation-form {
+  grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
+}
+
+.orders-actions-grid .operation-form--compact {
+  grid-template-columns: minmax(160px, 240px) auto;
+}
+
+.section-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+.section-head h2 {
+  margin-bottom: 0;
+}
+
+.section-head span {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
 .users-summary {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
@@ -993,9 +1044,12 @@ code {
   .page-layout,
   .detail-grid,
   .module-hero,
+  .orders-actions-grid,
   .operation-panel,
   .operation-form,
-  .operation-form--compact {
+  .operation-form--compact,
+  .orders-actions-grid .operation-form,
+  .orders-actions-grid .operation-form--compact {
     grid-template-columns: 1fr;
   }
 
