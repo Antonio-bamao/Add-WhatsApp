@@ -9,6 +9,9 @@ function isoNow() {
   return new Date().toISOString();
 }
 
+const ORDER_PAYMENT_TTL_MS = 5 * 60 * 1000;
+const migratedOrderLifecyclePools = new WeakSet();
+
 function hashPassword(password) {
   const salt = crypto.randomBytes(16).toString("hex");
   const hash = crypto.scryptSync(String(password), salt, 64).toString("hex");
@@ -90,6 +93,7 @@ function toOrder(row, balanceCredits = undefined) {
     paymentProvider: row.payment_provider,
     providerTradeNo: row.provider_trade_no,
     createdAt: row.created_at,
+    expiresAt: row.expires_at,
     paidAt: row.paid_at,
     closedAt: row.closed_at
   };
@@ -263,6 +267,13 @@ async function appendAuditLog(client, { adminUserId, action, targetType, targetI
     [entry.id, entry.adminUserId, entry.targetType, entry.targetId, entry.action, entry.beforeJson, entry.afterJson, entry.ip, entry.createdAt]
   );
   return entry;
+}
+
+async function ensureOrderLifecycleColumns(client, db) {
+  if (migratedOrderLifecyclePools.has(db)) return;
+  await client.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS expires_at TEXT");
+  await client.query("UPDATE orders SET expires_at = created_at WHERE expires_at IS NULL");
+  migratedOrderLifecyclePools.add(db);
 }
 
 async function orderByIdOrNumber(client, { orderId, orderNo, forUpdate = false }) {
@@ -544,6 +555,7 @@ export function createPostgresRuntime({ databaseUrl, pool } = {}) {
     async createOrder({ userId, planId, credits, amountCents }) {
       const client = await db.connect();
       try {
+        await ensureOrderLifecycleColumns(client, db);
         await requireActiveUser(client, userId);
         const plan = await getPlan(client, planId);
         const order = {
@@ -557,12 +569,13 @@ export function createPostgresRuntime({ databaseUrl, pool } = {}) {
           paymentProvider: "manual",
           createdAt: isoNow()
         };
+        order.expiresAt = new Date(new Date(order.createdAt).getTime() + ORDER_PAYMENT_TTL_MS).toISOString();
         if (!Number.isInteger(order.credits) || order.credits <= 0) throw new Error("ORDER_CREDITS_INVALID");
         if (!Number.isInteger(order.amountCents) || order.amountCents < 0) throw new Error("ORDER_AMOUNT_INVALID");
         await client.query(
-          `INSERT INTO orders (id, order_no, user_id, plan_id, credits, amount_cents, status, payment_provider, provider_trade_no, created_at, paid_at, closed_at)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULL, $9, NULL, NULL)`,
-          [order.id, order.orderNo, order.userId, order.planId, order.credits, order.amountCents, order.status, order.paymentProvider, order.createdAt]
+          `INSERT INTO orders (id, order_no, user_id, plan_id, credits, amount_cents, status, payment_provider, provider_trade_no, created_at, expires_at, paid_at, closed_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULL, $9, $10, NULL, NULL)`,
+          [order.id, order.orderNo, order.userId, order.planId, order.credits, order.amountCents, order.status, order.paymentProvider, order.createdAt, order.expiresAt]
         );
         return { ...order, providerTradeNo: null, paidAt: null, closedAt: null };
       } finally {
@@ -578,11 +591,99 @@ export function createPostgresRuntime({ databaseUrl, pool } = {}) {
         const order = result.rows[0];
         if (!order) throw new Error("ORDER_NOT_FOUND");
         if (order.status === "paid") throw new Error("ORDER_ALREADY_PAID");
-        if (order.closed_at || order.status === "closed") throw new Error("ORDER_CLOSED");
+        if (order.expires_at && new Date(order.expires_at) <= new Date()) {
+          await this.closeOrder({ userId, orderId, reason: "expired" });
+          throw new Error("ORDER_CLOSED");
+        }
+        if (order.closed_at || ["closed", "canceled", "expired"].includes(order.status)) throw new Error("ORDER_CLOSED");
         return toOrder(order);
       } finally {
         client.release();
       }
+    },
+
+    async getOrderStatus({ userId, orderId }) {
+      const client = await db.connect();
+      try {
+        await requireActiveUser(client, userId);
+        const result = await client.query("SELECT * FROM orders WHERE id = $1 AND user_id = $2", [orderId, userId]);
+        const order = result.rows[0];
+        if (!order) throw new Error("ORDER_NOT_FOUND");
+        return toOrder(order, await balanceFor(client, userId));
+      } finally {
+        client.release();
+      }
+    },
+
+    async listOrders({ userId, limit = 20, offset = 0 } = {}) {
+      const client = await db.connect();
+      try {
+        await requireActiveUser(client, userId);
+        const normalizedLimit = Math.min(Math.max(Number(limit) || 20, 1), 100);
+        const normalizedOffset = Math.max(Number(offset) || 0, 0);
+        const count = await client.query("SELECT COUNT(*)::int AS total FROM orders WHERE user_id = $1", [userId]);
+        const result = await client.query(
+          "SELECT * FROM orders WHERE user_id = $1 ORDER BY created_at DESC, order_no DESC LIMIT $2 OFFSET $3",
+          [userId, normalizedLimit, normalizedOffset]
+        );
+        return {
+          items: result.rows.map((row) => toOrder(row)),
+          total: count.rows[0].total,
+          limit: normalizedLimit,
+          offset: normalizedOffset
+        };
+      } finally {
+        client.release();
+      }
+    },
+
+    async markOrderPaymentProvider({ userId, orderId, provider }) {
+      const client = await db.connect();
+      try {
+        await requireActiveUser(client, userId);
+        const result = await client.query("SELECT * FROM orders WHERE id = $1 AND user_id = $2", [orderId, userId]);
+        const order = result.rows[0];
+        if (!order) throw new Error("ORDER_NOT_FOUND");
+        if (order.status === "paid") throw new Error("ORDER_ALREADY_PAID");
+        if (order.closed_at || ["closed", "canceled", "expired"].includes(order.status)) throw new Error("ORDER_CLOSED");
+        const normalizedProvider = String(provider || order.payment_provider || "manual").trim().toLowerCase();
+        const updated = await client.query("UPDATE orders SET payment_provider = $1 WHERE id = $2 RETURNING *", [normalizedProvider, orderId]);
+        return toOrder(updated.rows[0]);
+      } finally {
+        client.release();
+      }
+    },
+
+    async closeOrder({ userId, orderId, reason = "canceled" }) {
+      const client = await db.connect();
+      try {
+        await client.query("BEGIN");
+        await requireActiveUser(client, userId);
+        const order = await orderByIdOrNumber(client, { orderId, forUpdate: true });
+        if (!order || order.user_id !== userId) throw new Error("ORDER_NOT_FOUND");
+        if (order.status === "paid") throw new Error("ORDER_ALREADY_PAID");
+        if (order.closed_at || ["closed", "canceled", "expired"].includes(order.status)) {
+          await client.query("COMMIT");
+          return toOrder(order, await balanceFor(client, userId));
+        }
+        const status = String(reason || "canceled").trim().toLowerCase() === "expired" ? "expired" : "canceled";
+        const closedAt = isoNow();
+        const updated = await client.query(
+          "UPDATE orders SET status = $1, closed_at = $2 WHERE id = $3 RETURNING *",
+          [status, closedAt, order.id]
+        );
+        await client.query("COMMIT");
+        return toOrder(updated.rows[0], await balanceFor(client, userId));
+      } catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+      } finally {
+        client.release();
+      }
+    },
+
+    async expireOrder({ userId, orderId }) {
+      return this.closeOrder({ userId, orderId, reason: "expired" });
     },
 
     async markOrderPaid({ orderId, adminUserId, providerTradeNo, ip }) {

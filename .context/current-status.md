@@ -85,3 +85,7 @@
 - 下一步：生产服务器 `git pull --ff-only` 后执行根项目依赖安装、API 重启、website/admin 构建和 Nginx reload；用户完全退出旧托盘进程，重新下载安装包后用微信 Native 生成测试订单，扫码付款后检查 `/v1/payments/wechat/notify`、后台 payment-events 和用户余额。
 - 阻塞项：如果继续使用旧沙箱应用，需确认支付宝沙箱 `alipay.trade.page.pay` 已恢复；此前沙箱曾出现 `SYSTEM_ERROR` / `504 Gateway Time-out`，并且 `alipay.trade.query` 返回 `ACQ.TRADE_NOT_EXIST`。
 - 阻塞项：管理员登录方式、支付渠道/人工收款流程、生产域名和部署平台还未最终确定。
+- 已完成：微信 Native 在 RackNerd 境外服务器上 `fetch failed` 的根因已确认并修复；服务端对微信支付官方 API 加入 IPv4 强制和多区域 fallback，默认依次尝试 `api.mch.weixin.qq.com`、`apihk.mch.weixin.qq.com`、`apius.mch.weixin.qq.com`、`apieu.mch.weixin.qq.com`，生产截图已显示专业版微信扫码二维码成功生成。
+- 已完成：复制支付链接在 Electron sandbox 下的安全异常已修复，`copyText` 改为 renderer 通过 IPC 让 main process 写入剪贴板。
+- 当前状态：本地 `main` 与 `origin/main` 均在 `cf20374`；支付相关关键提交包括 `33916ac`、`26bd29b`、`e4c1580`、`e7913f4`、`cf20374`。工作区只有未跟踪 `server/scratch_db.js`，这是临时文件，交接时不要误提交。
+- 下一步：不要在生产环境设置 `WECHAT_GATEWAY_URL`，避免覆盖默认 fallback；继续用真实微信扫码付款验证 notify、后台 payment-events、订单状态和用户余额，全部确认后再重新打包和发布官网 latest EXE。

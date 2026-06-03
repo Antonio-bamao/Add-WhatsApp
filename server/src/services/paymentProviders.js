@@ -40,6 +40,13 @@ function normalizeWechatPrivateKey(value) {
   return privateKey;
 }
 
+function formatWechatTimeExpire(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toISOString().replace(/\.\d{3}Z$/, "+00:00");
+}
+
 function alipayKeyType(privateKey) {
   return privateKey.includes("BEGIN PRIVATE KEY") && !privateKey.includes("BEGIN RSA PRIVATE KEY")
     ? "PKCS8"
@@ -226,6 +233,8 @@ export async function buildWechatNativePayRequest(order, options = {}) {
       currency: "CNY"
     }
   };
+  const timeExpire = formatWechatTimeExpire(order.expiresAt || options.expiresAt);
+  if (timeExpire) payload.time_expire = timeExpire;
   const body = JSON.stringify(payload);
   const timestamp = String(options.now || Math.floor(Date.now() / 1000));
   const nonce = String(options.nonce || crypto.randomBytes(16).toString("hex"));
@@ -255,6 +264,7 @@ export async function buildWechatNativePayRequest(order, options = {}) {
     try {
       response = await fetchImpl(`${gateway}${apiPath}`, {
         method: "POST",
+        signal: options.signal,
         headers: {
           "Accept": "application/json",
           "Content-Type": "application/json",
@@ -293,6 +303,79 @@ export async function buildWechatNativePayRequest(order, options = {}) {
     paymentUrl: codeUrl,
     params: payload
   };
+}
+
+export async function buildWechatCloseOrderRequest(order, options = {}) {
+  const gatewayUrlOption = options.gatewayUrl ? String(options.gatewayUrl).trim().replace(/\/+$/, "") : "";
+  const gateways = gatewayUrlOption
+    ? [gatewayUrlOption]
+    : [
+        "https://api.mch.weixin.qq.com",
+        "https://apihk.mch.weixin.qq.com",
+        "https://apius.mch.weixin.qq.com",
+        "https://apieu.mch.weixin.qq.com"
+      ];
+  const mchId = String(options.mchId || "").trim();
+  const merchantSerialNo = String(options.merchantSerialNo || "").trim();
+  const merchantPrivateKey = normalizeWechatPrivateKey(options.merchantPrivateKey);
+  const orderNo = String(order?.orderNo || "").trim();
+  if (!mchId) throw new Error("WECHAT_MCH_ID_REQUIRED");
+  if (!merchantSerialNo) throw new Error("WECHAT_MERCHANT_SERIAL_NO_REQUIRED");
+  if (!orderNo) throw new Error("ORDER_NO_REQUIRED");
+
+  const apiPath = `/v3/pay/transactions/out-trade-no/${encodeURIComponent(orderNo)}/close`;
+  const body = JSON.stringify({ mchid: mchId });
+  const timestamp = String(options.now || Math.floor(Date.now() / 1000));
+  const nonce = String(options.nonce || crypto.randomBytes(16).toString("hex"));
+  const signature = signWechatRequest({
+    method: "POST",
+    pathname: apiPath,
+    body,
+    timestamp,
+    nonce,
+    privateKey: merchantPrivateKey
+  });
+  const authorization = [
+    `mchid="${mchId}"`,
+    `nonce_str="${nonce}"`,
+    `timestamp="${timestamp}"`,
+    `serial_no="${merchantSerialNo}"`,
+    `signature="${signature}"`
+  ].join(",");
+  const fetchImpl = options.fetchImpl || globalThis.fetch;
+  if (typeof fetchImpl !== "function") throw new Error("WECHAT_FETCH_UNAVAILABLE");
+
+  let lastError;
+  let response;
+  let responsePayload = {};
+  for (const gateway of gateways) {
+    try {
+      response = await fetchImpl(`${gateway}${apiPath}`, {
+        method: "POST",
+        signal: options.signal,
+        headers: {
+          "Accept": "application/json",
+          "Content-Type": "application/json",
+          "Authorization": `WECHATPAY2-SHA256-RSA2048 ${authorization}`
+        },
+        body
+      });
+      if (response.status !== 204 && typeof response.json === "function") responsePayload = await response.json();
+      lastError = null;
+      break;
+    } catch (err) {
+      if (response) {
+        lastError = null;
+        break;
+      }
+      lastError = err;
+    }
+  }
+  if (lastError) throw lastError;
+  if (!response.ok && response.status !== 204) {
+    throw new Error(`WECHAT_CLOSE_ORDER_FAILED:${responsePayload.message || responsePayload.code || response.status}`);
+  }
+  return { provider: "wechat", orderNo, closed: true };
 }
 
 export function buildAlipayPagePayRequest(order, options = {}) {

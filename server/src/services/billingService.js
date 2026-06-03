@@ -47,6 +47,8 @@ function isoNow(store) {
   return store.now().toISOString();
 }
 
+const ORDER_PAYMENT_TTL_MS = 5 * 60 * 1000;
+
 function createId(prefix) {
   return `${prefix}_${crypto.randomUUID()}`;
 }
@@ -441,6 +443,7 @@ export function createOrder(store, { userId, planId, credits, amountCents }) {
     paymentProvider: "manual",
     providerTradeNo: null,
     createdAt: isoNow(store),
+    expiresAt: new Date(store.now().getTime() + ORDER_PAYMENT_TTL_MS).toISOString(),
     paidAt: null,
     closedAt: null
   };
@@ -455,8 +458,63 @@ export function getOrderForPayment(store, { userId, orderId }) {
   const order = store.orders.get(orderId);
   if (!order || order.userId !== userId) throw new Error("ORDER_NOT_FOUND");
   if (order.status === "paid") throw new Error("ORDER_ALREADY_PAID");
-  if (order.closedAt || order.status === "closed") throw new Error("ORDER_CLOSED");
+  if (order.expiresAt && new Date(order.expiresAt) <= store.now()) {
+    closeOrder(store, { userId, orderId, reason: "expired" });
+    throw new Error("ORDER_CLOSED");
+  }
+  if (order.closedAt || ["closed", "canceled", "expired"].includes(order.status)) throw new Error("ORDER_CLOSED");
   return { ...order };
+}
+
+export function getOrderStatus(store, { userId, orderId }) {
+  getUser(store, userId);
+  const order = store.orders.get(orderId);
+  if (!order || order.userId !== userId) throw new Error("ORDER_NOT_FOUND");
+  return { ...store.orders.get(orderId), balanceCredits: balanceFor(store, userId) };
+}
+
+export function listOrders(store, { userId, limit = 20, offset = 0 } = {}) {
+  getUser(store, userId);
+  const normalizedLimit = Math.min(Math.max(Number(limit) || 20, 1), 100);
+  const normalizedOffset = Math.max(Number(offset) || 0, 0);
+  const orders = [...store.orders.values()]
+    .filter((order) => order.userId === userId)
+    .sort((left, right) => {
+      const byCreatedAt = String(right.createdAt).localeCompare(String(left.createdAt));
+      return byCreatedAt || String(right.orderNo).localeCompare(String(left.orderNo));
+    });
+  return {
+    items: orders.slice(normalizedOffset, normalizedOffset + normalizedLimit).map((order) => ({ ...order })),
+    total: orders.length,
+    limit: normalizedLimit,
+    offset: normalizedOffset
+  };
+}
+
+export function markOrderPaymentProvider(store, { userId, orderId, provider }) {
+  getUser(store, userId);
+  const order = store.orders.get(orderId);
+  if (!order || order.userId !== userId) throw new Error("ORDER_NOT_FOUND");
+  if (order.status === "paid") throw new Error("ORDER_ALREADY_PAID");
+  if (order.closedAt || ["closed", "canceled", "expired"].includes(order.status)) throw new Error("ORDER_CLOSED");
+  order.paymentProvider = String(provider || order.paymentProvider || "manual").trim().toLowerCase();
+  return { ...order };
+}
+
+export function closeOrder(store, { userId, orderId, reason = "canceled" }) {
+  getUser(store, userId);
+  const order = store.orders.get(orderId);
+  if (!order || order.userId !== userId) throw new Error("ORDER_NOT_FOUND");
+  if (order.status === "paid") throw new Error("ORDER_ALREADY_PAID");
+  if (order.closedAt || ["closed", "canceled", "expired"].includes(order.status)) return { ...order, balanceCredits: balanceFor(store, userId) };
+  const normalizedReason = String(reason || "canceled").trim().toLowerCase();
+  order.status = normalizedReason === "expired" ? "expired" : "canceled";
+  order.closedAt = isoNow(store);
+  return { ...order, balanceCredits: balanceFor(store, userId) };
+}
+
+export function expireOrder(store, { userId, orderId }) {
+  return closeOrder(store, { userId, orderId, reason: "expired" });
 }
 
 function orderByIdOrNumber(store, { orderId, orderNo }) {
@@ -895,6 +953,11 @@ export function createMemoryRuntime(options = {}) {
     consumeCredit: (body) => consumeCredit(store, body),
     createOrder: (body) => createOrder(store, body),
     getOrderForPayment: (body) => getOrderForPayment(store, body),
+    getOrderStatus: (body) => getOrderStatus(store, body),
+    listOrders: (body) => listOrders(store, body),
+    markOrderPaymentProvider: (body) => markOrderPaymentProvider(store, body),
+    closeOrder: (body) => closeOrder(store, body),
+    expireOrder: (body) => expireOrder(store, body),
     markOrderPaid: (body) => markOrderPaid(store, body),
     processPaymentEvent: (body) => processPaymentEvent(store, body),
     processPendingOrderCredits: (body) => processPendingOrderCredits(store, body),

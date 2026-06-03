@@ -270,6 +270,45 @@ function createCloudDesktopController({ client, sessionStore, deviceId = 'deskto
     }
   }
 
+  async function getPaymentOrderStatus({ orderId }) {
+    const session = sessionStore.load();
+    if (!session.authenticated || !session.accessToken) {
+      return { ok: false, authRequired: true, error: '请先登录账号。' };
+    }
+    try {
+      const order = await client.getOrderStatus(session.accessToken, orderId);
+      return { ok: true, order };
+    } catch (error) {
+      return handleCloudError(error);
+    }
+  }
+
+  async function listPaymentOrders() {
+    const session = sessionStore.load();
+    if (!session.authenticated || !session.accessToken) {
+      return { ok: false, authRequired: true, error: '请先登录账号。' };
+    }
+    try {
+      const orders = await client.listOrders(session.accessToken);
+      return { ok: true, ...orders };
+    } catch (error) {
+      return handleCloudError(error);
+    }
+  }
+
+  async function closePaymentOrder({ orderId, reason = 'canceled' }) {
+    const session = sessionStore.load();
+    if (!session.authenticated || !session.accessToken) {
+      return { ok: false, authRequired: true, error: '请先登录账号。' };
+    }
+    try {
+      const order = await client.closeOrder(session.accessToken, orderId, { reason });
+      return { ok: true, order };
+    } catch (error) {
+      return handleCloudError(error);
+    }
+  }
+
   async function createManualTopUp({ planId }) {
     const session = sessionStore.load();
     if (!session.authenticated || !session.accessToken) {
@@ -323,6 +362,9 @@ function createCloudDesktopController({ client, sessionStore, deviceId = 'deskto
     createAlipayTopUp,
     createZpayTopUp,
     createWechatTopUp,
+    getPaymentOrderStatus,
+    listPaymentOrders,
+    closePaymentOrder,
     register,
     login,
     logout,

@@ -1495,6 +1495,29 @@ td {
   font-size: 15px;
 }
 
+.payment-action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-top: 12px;
+}
+
+.payment-countdown {
+  min-width: 160px;
+  padding: 8px 10px;
+  color: #0f6f61;
+  font-size: 13px;
+  font-weight: 700;
+  background: #edf8f4;
+  border: 1px solid #b8d3c9;
+  border-radius: 8px;
+}
+
+.text-button.danger {
+  color: #b53b32;
+}
+
 .payment-link-box {
   display: grid;
   grid-template-columns: auto auto auto minmax(0, 1fr);
@@ -1543,6 +1566,30 @@ td {
 .manual-payment-qr div {
   color: var(--muted);
   font-size: 13px;
+}
+
+.manual-payment-qr div strong {
+  display: block;
+  margin-top: 10px;
+  color: #0f6f61;
+  font-size: 14px;
+}
+
+.payment-loading-spinner {
+  display: block;
+  width: 34px;
+  height: 34px;
+  margin: 0 auto;
+  border: 3px solid rgba(18, 143, 124, 0.18);
+  border-top-color: #128f7c;
+  border-radius: 50%;
+  animation: payment-spin 0.8s linear infinite;
+}
+
+@keyframes payment-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .plan-grid {

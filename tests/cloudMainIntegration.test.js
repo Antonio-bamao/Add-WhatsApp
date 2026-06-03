@@ -424,6 +424,58 @@ test('cloud controller creates a WeChat Native top-up payment for the selected p
   ]);
 });
 
+test('cloud controller reads and cancels active payment orders', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'add-whatsapp-cloud-order-close-'));
+  const sessionStore = new CloudSessionStore(path.join(dir, 'cloud-session.json'));
+  sessionStore.save({
+    user: { id: 'user-1', username: 'cloud-user' },
+    accessToken: 'access-1',
+    refreshToken: 'refresh-1',
+    entitlements: { userId: 'user-1', planId: 'advanced', balanceCredits: 0 }
+  });
+  const calls = [];
+  const client = new CloudApiClient({
+    baseUrl: 'http://api.test',
+    fetchImpl: async (url, options = {}) => {
+      calls.push({ url, options });
+      assert.equal(options.headers.authorization, 'Bearer access-1');
+      if (url.endsWith('/v1/orders/order-wechat-1') && options.method === 'GET') {
+        return response(200, {
+          id: 'order-wechat-1',
+          orderNo: '202606030001',
+          status: 'created',
+          expiresAt: '2026-06-03T07:25:00.000Z'
+        });
+      }
+      if (url.endsWith('/v1/orders/order-wechat-1/close')) {
+        assert.equal(options.method, 'POST');
+        assert.deepEqual(JSON.parse(options.body), { reason: 'canceled' });
+        return response(200, {
+          id: 'order-wechat-1',
+          orderNo: '202606030001',
+          status: 'canceled',
+          closedAt: '2026-06-03T07:21:00.000Z'
+        });
+      }
+      throw new Error(`unexpected ${url}`);
+    }
+  });
+  const { createCloudDesktopController } = require('../src/main/cloudDesktopController');
+  const controller = createCloudDesktopController({ client, sessionStore, deviceId: 'desktop-1' });
+
+  const status = await controller.getPaymentOrderStatus({ orderId: 'order-wechat-1' });
+  const closed = await controller.closePaymentOrder({ orderId: 'order-wechat-1', reason: 'canceled' });
+
+  assert.equal(status.ok, true);
+  assert.equal(status.order.expiresAt, '2026-06-03T07:25:00.000Z');
+  assert.equal(closed.ok, true);
+  assert.equal(closed.order.status, 'canceled');
+  assert.deepEqual(calls.map(call => call.url), [
+    'http://api.test/v1/orders/order-wechat-1',
+    'http://api.test/v1/orders/order-wechat-1/close'
+  ]);
+});
+
 test('cloud controller reports a deployment hint when the WeChat Native payment route is missing', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'add-whatsapp-cloud-wechat-missing-route-'));
   const sessionStore = new CloudSessionStore(path.join(dir, 'cloud-session.json'));

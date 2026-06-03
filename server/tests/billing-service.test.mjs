@@ -10,11 +10,16 @@ import {
   createCloudStore,
   createOrder,
   getEntitlements,
+  getOrderForPayment,
+  getOrderStatus,
+  listOrders,
   PLAN_CATALOG,
   issueWorkspaceLease,
   markOrderPaid,
+  closeOrder,
   processPaymentEvent,
   processPendingOrderCredits,
+  expireOrder,
   releaseWorkspaceLease,
   renewWorkspaceLease,
   registerUser
@@ -193,6 +198,50 @@ describe("cloud billing service", () => {
     assert.equal(getEntitlements(store, user.id).balanceCredits, 2000);
     assert.equal(store.paymentEvents.size, 1);
     assert.equal(store.creditLedger.filter((entry) => entry.type === "purchase").length, 1);
+  });
+
+  it("creates online payment orders with a five minute expiry and closes them on cancellation or timeout", () => {
+    const store = createCloudStore({ now: "2026-06-03T07:20:00.000Z" });
+    const user = registerUser(store, { username: "timeout-user", password: "StrongPass123", planId: "professional" });
+    const order = createOrder(store, { userId: user.id, planId: "professional", credits: 5000, amountCents: 150000 });
+
+    assert.equal(order.status, "created");
+    assert.equal(order.expiresAt, "2026-06-03T07:25:00.000Z");
+    assert.equal(getOrderStatus(store, { userId: user.id, orderId: order.id }).expiresAt, "2026-06-03T07:25:00.000Z");
+
+    const canceled = closeOrder(store, { userId: user.id, orderId: order.id, reason: "canceled" });
+    assert.equal(canceled.status, "canceled");
+    assert.ok(canceled.closedAt);
+    assert.throws(
+      () => getOrderForPayment(store, { userId: user.id, orderId: order.id }),
+      /ORDER_CLOSED/
+    );
+
+    const timeoutOrder = createOrder(store, { userId: user.id, planId: "professional", credits: 5000, amountCents: 150000 });
+    const expired = expireOrder(store, { userId: user.id, orderId: timeoutOrder.id });
+    assert.equal(expired.status, "expired");
+    assert.ok(expired.closedAt);
+  });
+
+  it("lists a user's payment orders including canceled, expired, and paid statuses", () => {
+    const store = createCloudStore({ now: "2026-06-03T07:20:00.000Z" });
+    const user = registerUser(store, { username: "history-user", password: "StrongPass123", planId: "professional" });
+    const otherUser = registerUser(store, { username: "history-other", password: "StrongPass123", planId: "advanced" });
+    const canceled = createOrder(store, { userId: user.id, planId: "professional", credits: 5000, amountCents: 150000 });
+    const expired = createOrder(store, { userId: user.id, planId: "advanced", credits: 2000, amountCents: 80000 });
+    const paid = createOrder(store, { userId: user.id, planId: "business", credits: 20000, amountCents: 400000 });
+    createOrder(store, { userId: otherUser.id, planId: "advanced", credits: 2000, amountCents: 80000 });
+
+    closeOrder(store, { userId: user.id, orderId: canceled.id, reason: "canceled" });
+    expireOrder(store, { userId: user.id, orderId: expired.id });
+    markOrderPaid(store, { orderId: paid.id, adminUserId: "admin-1", providerTradeNo: "paid-history-1", ip: "127.0.0.1" });
+
+    const history = listOrders(store, { userId: user.id });
+
+    assert.deepEqual(history.items.map((order) => order.orderNo), [paid.orderNo, expired.orderNo, canceled.orderNo]);
+    assert.deepEqual(history.items.map((order) => order.status), ["paid", "expired", "canceled"]);
+    assert.equal(history.total, 3);
+    assert.equal(history.items[0].balanceCredits, undefined);
   });
 
   it("retries paid pending credit orders without duplicating purchase ledger entries", () => {

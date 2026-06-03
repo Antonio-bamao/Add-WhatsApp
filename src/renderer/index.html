@@ -416,6 +416,11 @@
                 <div><span>付款金额</span><strong id="manualPaymentAmount">-</strong></div>
                 <div><span>支付状态</span><strong id="manualPaymentNote">-</strong></div>
               </div>
+              <div class="payment-action-row">
+                <span id="paymentCountdown" class="payment-countdown">订单生成后 5 分钟内有效</span>
+                <button id="paymentCancelButton" class="text-button danger" type="button" hidden>取消支付</button>
+                <button id="paymentRetryButton" class="text-button" type="button" hidden>重新生成</button>
+              </div>
               <div id="paymentLinkBox" class="payment-link-box" hidden>
                 <span>支付链接</span>
                 <button id="paymentOpenButton" class="text-button" type="button">打开支付链接</button>
@@ -623,13 +628,13 @@
                     <th>操作</th>
                   </tr>
                 </thead>
-                <tbody>
+                <tbody id="billingHistoryBody">
                   <tr>
-                    <td>BILL-LOCAL-PREVIEW</td>
-                    <td><span class="status-tag status-valid">预览</span></td>
+                    <td>-</td>
+                    <td><span class="status-tag status-pending">加载中</span></td>
                     <td>¥0.00</td>
                     <td>-</td>
-                    <td>待接入</td>
+                    <td>等待刷新</td>
                   </tr>
                 </tbody>
               </table>

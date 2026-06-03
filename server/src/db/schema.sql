@@ -97,6 +97,7 @@ CREATE TABLE IF NOT EXISTS orders (
   payment_provider TEXT,
   provider_trade_no TEXT,
   created_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
   paid_at TEXT,
   closed_at TEXT
 );

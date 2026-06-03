@@ -123,14 +123,6 @@ function createWindow() {
   });
 
   mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'));
-  mainWindow.webContents.openDevTools();
-
-  mainWindow.webContents.on('before-input-event', (event, input) => {
-    if ((input.control && input.shift && input.key.toLowerCase() === 'i') || input.key === 'F12') {
-      mainWindow.webContents.toggleDevTools();
-      event.preventDefault();
-    }
-  });
 }
 
 app.whenReady().then(() => {
@@ -468,6 +460,33 @@ ipcMain.handle('cloud:wechat-top-up', async (_event, payload = {}) => {
       });
     }
     return result;
+  } catch (error) {
+    return { ok: false, error: error.message };
+  }
+});
+
+ipcMain.handle('cloud:order-status', async (_event, payload = {}) => {
+  try {
+    return await cloudController.getPaymentOrderStatus({ orderId: payload.orderId });
+  } catch (error) {
+    return { ok: false, error: error.message };
+  }
+});
+
+ipcMain.handle('cloud:list-payment-orders', async () => {
+  try {
+    return await cloudController.listPaymentOrders();
+  } catch (error) {
+    return { ok: false, error: error.message };
+  }
+});
+
+ipcMain.handle('cloud:close-payment-order', async (_event, payload = {}) => {
+  try {
+    return await cloudController.closePaymentOrder({
+      orderId: payload.orderId,
+      reason: payload.reason || 'canceled'
+    });
   } catch (error) {
     return { ok: false, error: error.message };
   }

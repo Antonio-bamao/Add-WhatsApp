@@ -23,7 +23,7 @@ dns.lookup = function (hostname, options, callback) {
 };
 import { createPostgresRuntime } from "./db/postgresRuntime.js";
 import { createMemoryRuntime } from "./services/billingService.js";
-import { buildAlipayPagePayRequest, buildWechatNativePayRequest, buildZpayPagePayRequest, parseAlipayNotification, parseMockAlipayNotification, parseWechatNotification, parseZpayNotification, queryAlipayTrade } from "./services/paymentProviders.js";
+import { buildAlipayPagePayRequest, buildWechatCloseOrderRequest, buildWechatNativePayRequest, buildZpayPagePayRequest, parseAlipayNotification, parseMockAlipayNotification, parseWechatNotification, parseZpayNotification, queryAlipayTrade } from "./services/paymentProviders.js";
 
 function jsonResponse(response, statusCode, payload) {
   response.writeHead(statusCode, {
@@ -105,7 +105,23 @@ function readEnvFileValue(value, filePath) {
   return fs.readFileSync(filePath, "utf8");
 }
 
+async function withTimeoutSignal(fn, timeoutMs, timeoutMessage) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await Promise.race([
+      fn(controller.signal),
+      new Promise((_, reject) => {
+        setTimeout(() => reject(new Error(timeoutMessage)), timeoutMs);
+      })
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function errorStatus(error) {
+  if (/TIMEOUT/.test(error.message)) return 504;
   if (/ADMIN_FORBIDDEN/.test(error.message)) return 403;
   if (/SIGNATURE/.test(error.message)) return 401;
   if (/UNAUTHORIZED|AUTH_FAILED|NOT_ACTIVE/.test(error.message)) return 401;
@@ -196,6 +212,46 @@ export function createAppServer(options = {}) {
         return;
       }
 
+      if (request.method === "GET" && url.pathname === "/v1/orders") {
+        const userId = await authUserId(runtime, request);
+        jsonResponse(response, 200, await runtime.listOrders({
+          userId,
+          limit: url.searchParams.get("limit"),
+          offset: url.searchParams.get("offset")
+        }));
+        return;
+      }
+
+      if (request.method === "GET" && /^\/v1\/orders\/[^/]+$/.test(url.pathname)) {
+        const userId = await authUserId(runtime, request);
+        const orderId = decodeURIComponent(url.pathname.split("/")[3]);
+        jsonResponse(response, 200, await runtime.getOrderStatus({ userId, orderId }));
+        return;
+      }
+
+      if (request.method === "POST" && /^\/v1\/orders\/[^/]+\/close$/.test(url.pathname)) {
+        const userId = await authUserId(runtime, request);
+        const orderId = decodeURIComponent(url.pathname.split("/")[3]);
+        const body = await readJson(request);
+        const order = await runtime.getOrderStatus({ userId, orderId });
+        if (order.paymentProvider === "wechat" && !order.closedAt && order.status !== "paid") {
+          const closeTimeoutMs = Math.max(Number(env.WECHAT_CLOSE_TIMEOUT_MS || 8000), 1);
+          await withTimeoutSignal((signal) => buildWechatCloseOrderRequest(order, {
+              gatewayUrl: env.WECHAT_GATEWAY_URL,
+              mchId: env.WECHAT_MCH_ID,
+              merchantSerialNo: env.WECHAT_MERCHANT_SERIAL_NO,
+              merchantPrivateKey: readEnvFileValue(env.WECHAT_MERCHANT_PRIVATE_KEY, env.WECHAT_MERCHANT_PRIVATE_KEY_PATH),
+              fetchImpl,
+              signal
+            }),
+            closeTimeoutMs,
+            "WECHAT_CLOSE_ORDER_TIMEOUT"
+          );
+        }
+        jsonResponse(response, 200, await runtime.closeOrder({ userId, orderId, reason: body.reason || "canceled" }));
+        return;
+      }
+
       if (request.method === "POST" && /^\/v1\/orders\/[^/]+\/payments\/alipay\/page-pay$/.test(url.pathname)) {
         const userId = await authUserId(runtime, request);
         const orderId = url.pathname.split("/")[3];
@@ -234,7 +290,7 @@ export function createAppServer(options = {}) {
         const userId = await authUserId(runtime, request);
         const orderId = url.pathname.split("/")[3];
         const order = await runtime.getOrderForPayment({ userId, orderId });
-        jsonResponse(response, 200, await buildWechatNativePayRequest(order, {
+        const payment = await buildWechatNativePayRequest(order, {
           gatewayUrl: env.WECHAT_GATEWAY_URL,
           mchId: env.WECHAT_MCH_ID,
           appId: env.WECHAT_APP_ID,
@@ -243,7 +299,9 @@ export function createAppServer(options = {}) {
           merchantPrivateKey: readEnvFileValue(env.WECHAT_MERCHANT_PRIVATE_KEY, env.WECHAT_MERCHANT_PRIVATE_KEY_PATH),
           notifyUrl: env.WECHAT_NOTIFY_URL,
           fetchImpl
-        }));
+        });
+        await runtime.markOrderPaymentProvider({ userId, orderId, provider: "wechat" });
+        jsonResponse(response, 200, payment);
         return;
       }
 

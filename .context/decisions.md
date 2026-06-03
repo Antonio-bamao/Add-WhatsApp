@@ -169,3 +169,10 @@
 - 背景：ZPAY 通道存在余额、费率、JSAPI 页面注册和第三方稳定性问题；用户已具备微信商户号、APIv3 key、商户 API 证书序列号、`apiclient_key.pem` 和公网 HTTPS notify URL，可以直连官方微信 Native。
 - 理由：官方微信 Native 减少第三方手续费和通道限制；服务端统一负责订单归属、金额派生、商户私钥签名、APIv3 通知解密和幂等入账，客户端只显示二维码和链接兜底，继续复用现有订单/账本模型。
 - 约束：`WECHAT_API_V3_KEY`、`WECHAT_MERCHANT_PRIVATE_KEY` 或 `WECHAT_MERCHANT_PRIVATE_KEY_PATH` 只能在 `server/` 生产环境变量中；微信 notify 必须走 `https://api.addwhatsapp.com/v1/payments/wechat/notify`；付款成功仍以微信异步通知和后台 payment-events 为准，前端显示二维码或用户扫码不能视为已支付。
+
+## 2026-06-03: 微信支付服务端默认启用多区域官方网关 fallback
+
+- 决策：微信 Native 下单默认不再只请求 `https://api.mch.weixin.qq.com`，而是按顺序尝试 `api.mch.weixin.qq.com`、`apihk.mch.weixin.qq.com`、`apius.mch.weixin.qq.com`、`apieu.mch.weixin.qq.com`；这些微信支付域名在 Node DNS lookup 层强制使用 IPv4。
+- 背景：RackNerd 生产服务器到微信支付主域名连接超时，导致官方微信 Native 下单 `fetch failed`；但换用微信支付区域接入点后可生成 Native `code_url`。
+- 理由：境外 VPS 到微信支付主域名的线路不稳定，多区域 fallback 比要求用户更换服务器更快、更可控，也保留官方微信支付直连能力。
+- 约束：生产环境不要设置 `WECHAT_GATEWAY_URL`，除非明确要禁用 fallback 并指定单一网关；支付签名、订单金额、notify 解密和幂等入账仍全部只在 `server/` 执行。

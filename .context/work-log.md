@@ -417,3 +417,13 @@
 - 结果：新下载包 `sizeBytes=78880538`，SHA256 `0d09e629b73034aa634fb4161aef0985b00262d093a21238adc0c34e9b271742`，`releaseDate=2026-06-03`。
 - 验证：`npm test` 114/114；`server npm test` 30/30；`admin npm test` 8/8；`website npm test` 6/6；根项目 `npm run build` 成功；`website npm run build` 成功；latest/release 两个 EXE SHA256 一致。
 - 下一步：服务器 `git pull --ff-only` 后重启 API 并部署 website/admin；确认 `/etc/add-whatsapp/wechat/apiclient_key.pem` 权限可读；用新版 EXE 创建一笔小额订单，付款后检查微信 notify、后台 payment-events、订单状态和用户余额。
+
+## 2026-06-03T03:20:00+08:00｜修复境外服务器微信 Native 下单超时
+- 目标：解决 RackNerd 生产服务器点击专业版/商业版微信支付后前端按钮已触发、但服务端调用微信官方 API 返回 `fetch failed`，导致无法生成 Native 二维码的问题。
+- 诊断：生产服务器 curl `https://api.mch.weixin.qq.com/v3/certificates` 时 IPv4 连接超时、IPv6 无法连接；ZPAY 之前能通是因为请求第三方 ZPAY 网关，不经过微信官方 `api.mch.weixin.qq.com` 出口线路。
+- 动作：先保留前端 `[payment-debug]` 调试日志和服务端错误 cause 输出，确认按钮、登录 token、订单创建都不是根因；后续提交 `33916ac`、`26bd29b`、`e4c1580`、`e7913f4` 逐步暴露 AggregateError、强制微信支付域名 IPv4，并为微信 Native 下单加入多区域网关 fallback。
+- 结果：`buildWechatNativePayRequest` 默认依次尝试 `https://api.mch.weixin.qq.com`、`https://apihk.mch.weixin.qq.com`、`https://apius.mch.weixin.qq.com`、`https://apieu.mch.weixin.qq.com`；生产环境生成微信 Native `code_url` 成功，桌面端能显示微信扫码二维码、订单号、金额和支付链接。
+- 结果：提交 `cf20374` 顺手修复 Electron sandbox 下复制支付链接的问题：`copyText` 改为通过 main process IPC 调用 `clipboard.writeText`。
+- 注意：生产环境不要设置 `WECHAT_GATEWAY_URL`，否则会覆盖默认 fallback，只走单个网关；保留 `WECHAT_MCH_ID`、`WECHAT_APP_ID`、`WECHAT_API_V3_KEY`、`WECHAT_MERCHANT_SERIAL_NO`、`WECHAT_MERCHANT_PRIVATE_KEY_PATH`、`WECHAT_NOTIFY_URL`。
+- 验证：用户截图显示专业版订单已生成微信扫码支付面板和二维码，订单号 `1780469909751`，金额 `¥1500.00`，状态为等待微信支付回调；本地仓库 `main` 已同步到 `origin/main` 的 `cf20374`，仅剩未跟踪 `server/scratch_db.js` 未处理。
+- 下一步：新窗口继续用实际扫码支付验证微信异步通知 `/v1/payments/wechat/notify`、后台 payment-events、订单状态和用户余额；验证无误后再打包和部署 website 下载包。

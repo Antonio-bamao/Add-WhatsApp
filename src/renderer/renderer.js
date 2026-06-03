@@ -4,7 +4,8 @@ const state = {
   imported: null,
   templates: { en: [], es: [], fr: [] },
   taskStats: { sent: 0, failed: 0, unregistered: 0, invalid: 0 },
-  activeTemplateLanguage: 'en'
+  activeTemplateLanguage: 'en',
+  activePayment: null
 };
 
 const elements = {
@@ -134,16 +135,22 @@ const elements = {
   paymentLink: document.getElementById('paymentLink'),
   paymentOpenButton: document.getElementById('paymentOpenButton'),
   paymentCopyButton: document.getElementById('paymentCopyButton'),
+  paymentCountdown: document.getElementById('paymentCountdown'),
+  paymentCancelButton: document.getElementById('paymentCancelButton'),
+  paymentRetryButton: document.getElementById('paymentRetryButton'),
   billingPlanDescription: document.getElementById('billingPlanDescription'),
   billingPayButton: document.getElementById('billingPayButton'),
   billingIncludedList: document.getElementById('billingIncludedList'),
   billingExcludedList: document.getElementById('billingExcludedList'),
+  billingHistoryBody: document.getElementById('billingHistoryBody'),
   refreshEntitlementsButton: document.getElementById('refreshEntitlementsButton')
 };
 
 const PAGE_ACTIONS = new Set(['importPage']);
 const IMPORT_OPTIONS_STORAGE_KEY = 'addWhatsapp.importOptions';
 const DEFAULT_MANUAL_ALIPAY_QR = '../../assets/pay/alipay-qr.png';
+const PAYMENT_ORDER_TTL_MS = 5 * 60 * 1000;
+const PAYMENT_POLL_INTERVAL_MS = 3000;
 const PAYMENT_DEBUG_PREFIX = '[payment-debug]';
 const TEMPLATE_META = {
   en: { title: '英语模板', description: '英语区号码随机选择这些文案。', badge: 'EN' },
@@ -152,8 +159,12 @@ const TEMPLATE_META = {
 };
 
 function debugPayment(step, payload = {}) {
+  if (localStorage.getItem('addWhatsapp.paymentDebug') !== '1') return;
   console.log(PAYMENT_DEBUG_PREFIX, step, payload);
 }
+
+let paymentCountdownTimer = null;
+let paymentPollTimer = null;
 
 function switchAuthMode(mode) {
   for (const tab of elements.authTabs) {
@@ -379,6 +390,63 @@ function renderBillingFeatureLists(plan) {
   elements.billingExcludedList.innerHTML = excluded.map(item => `<span class="feature-no">${escapeHtml(item)}</span>`).join('');
 }
 
+function billingStatusMeta(status) {
+  const normalized = String(status || '').toLowerCase();
+  const labels = {
+    created: ['待支付', 'pending'],
+    paid: ['已支付', 'valid'],
+    paid_pending_credit: ['入账处理中', 'pending'],
+    canceled: ['已取消', 'invalid'],
+    expired: ['已超时', 'invalid'],
+    closed: ['已关闭', 'invalid']
+  };
+  return labels[normalized] || [status || '-', 'pending'];
+}
+
+function renderBillingHistory(orders = []) {
+  if (!elements.billingHistoryBody) return;
+  if (!orders.length) {
+    elements.billingHistoryBody.innerHTML = '<tr class="empty-row"><td colspan="5">暂无充值订单。</td></tr>';
+    return;
+  }
+  elements.billingHistoryBody.innerHTML = orders.map((order) => {
+    const [label, tone] = billingStatusMeta(order.status);
+    const paidOrClosedAt = order.paidAt || order.closedAt || order.createdAt;
+    const action = order.status === 'paid'
+      ? '已入账'
+      : (order.status === 'created' ? '等待支付' : '无需处理');
+    return `
+      <tr>
+        <td>${escapeHtml(order.orderNo || order.id || '-')}</td>
+        <td><span class="status-tag status-${tone}">${escapeHtml(label)}</span></td>
+        <td>¥${(Number(order.amountCents || 0) / 100).toFixed(2)}</td>
+        <td>${formatTime(paidOrClosedAt)}</td>
+        <td>${action}</td>
+      </tr>
+    `;
+  }).join('');
+}
+
+async function refreshBillingOrders({ quiet = false } = {}) {
+  if (!elements.billingHistoryBody || !window.addWhatsapp.listPaymentOrders || !state.auth.authenticated) return;
+  if (!quiet) {
+    elements.billingHistoryBody.innerHTML = '<tr class="empty-row"><td colspan="5">正在刷新账单...</td></tr>';
+  }
+  try {
+    const response = await window.addWhatsapp.listPaymentOrders();
+    if (await handleApiError(response)) return;
+    if (response.ok) {
+      renderBillingHistory(response.items || []);
+    } else if (!quiet) {
+      elements.billingHistoryBody.innerHTML = `<tr class="empty-row"><td colspan="5">${escapeHtml(response.error || '账单刷新失败。')}</td></tr>`;
+    }
+  } catch (error) {
+    if (!quiet) {
+      elements.billingHistoryBody.innerHTML = `<tr class="empty-row"><td colspan="5">${escapeHtml(error.message || '账单刷新失败。')}</td></tr>`;
+    }
+  }
+}
+
 function planIncludedFeatures(plan = {}) {
   const capabilities = plan.capabilities || {};
   const features = [
@@ -447,11 +515,16 @@ function updateActionLocks() {
   }
   const paymentAccess = featureAccess('onlinePayment');
   const canPay = Boolean(paymentAccess.ok && state.auth && state.auth.authenticated);
+  const hasOpenPayment = Boolean(
+    state.activePayment
+    && state.activePayment.orderId
+    && ['pending', 'closing'].includes(state.activePayment.status)
+  );
   for (const button of [elements.quotaPayButton, elements.billingPayButton]) {
     if (!button) continue;
-    button.disabled = !canPay;
+    button.disabled = !canPay || hasOpenPayment;
     button.title = paymentAccess.ok
-      ? (canPay ? '' : '请先登录账号。')
+      ? (hasOpenPayment ? '请先取消或完成当前支付订单。' : (canPay ? '' : '请先登录账号。'))
       : paymentAccess.message;
   }
   const activePlanId = state.subscription && state.subscription.plan && state.subscription.plan.id;
@@ -460,10 +533,10 @@ function updateActionLocks() {
     const plan = catalog.find(item => item.id === button.dataset.planPay);
     const isActivePlan = button.dataset.planPay === activePlanId;
     const planCanPay = Boolean(plan && !isActivePlan && plan.capabilities && plan.capabilities.onlinePayment && Number(plan.minimumTopUpCredits || 0) > 0);
-    button.disabled = !planCanPay || !canPay;
+    button.disabled = !planCanPay || !canPay || hasOpenPayment;
     button.title = isActivePlan
       ? ''
-      : (planCanPay ? (canPay ? '' : '请先登录账号。') : '该套餐无需线上充值。');
+      : (hasOpenPayment ? '请先取消或完成当前支付订单。' : (planCanPay ? (canPay ? '' : '请先登录账号。') : '该套餐无需线上充值。'));
     debugPayment('plan button lock state', {
       planId: button.dataset.planPay,
       activePlanId,
@@ -563,14 +636,177 @@ async function refreshCloudEntitlements() {
   }
   if (response.ok && response.subscription) {
     renderSubscriptionState(response.subscription);
+    await refreshBillingOrders({ quiet: true });
     elements.syncState.textContent = '套餐余额已刷新。';
   } else {
     elements.syncState.textContent = response.error || '刷新套餐失败。';
   }
 }
 
+function clearPaymentTimers() {
+  if (paymentCountdownTimer) {
+    clearInterval(paymentCountdownTimer);
+    paymentCountdownTimer = null;
+  }
+  if (paymentPollTimer) {
+    clearInterval(paymentPollTimer);
+    paymentPollTimer = null;
+  }
+}
+
+function paymentExpiryFor(order = {}) {
+  return order.expiresAt || new Date(Date.now() + PAYMENT_ORDER_TTL_MS).toISOString();
+}
+
+function formatPaymentRemaining(ms) {
+  const totalSeconds = Math.max(0, Math.ceil(ms / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${String(seconds).padStart(2, '0')}`;
+}
+
+function setPaymentControls({ canCancel = false, canRetry = false, cancelText = '取消支付' } = {}) {
+  if (elements.paymentCancelButton) {
+    elements.paymentCancelButton.hidden = !canCancel;
+    elements.paymentCancelButton.textContent = cancelText;
+  }
+  if (elements.paymentRetryButton) elements.paymentRetryButton.hidden = !canRetry;
+}
+
+function updatePaymentCountdown() {
+  if (!state.activePayment || !elements.paymentCountdown) return;
+  const remainingMs = new Date(state.activePayment.expiresAt).getTime() - Date.now();
+  if (state.activePayment.status !== 'pending') {
+    elements.paymentCountdown.textContent = state.activePayment.statusText || '';
+    return;
+  }
+  if (remainingMs <= 0) {
+    elements.paymentCountdown.textContent = '订单已超时，正在关闭支付链路...';
+    closeActivePayment('expired');
+    return;
+  }
+  elements.paymentCountdown.textContent = `${formatPaymentRemaining(remainingMs)} 后订单自动关闭`;
+}
+
+function startPaymentWatchers() {
+  clearPaymentTimers();
+  updatePaymentCountdown();
+  paymentCountdownTimer = setInterval(updatePaymentCountdown, 1000);
+  paymentPollTimer = setInterval(pollActivePayment, PAYMENT_POLL_INTERVAL_MS);
+}
+
+function renderClosedPayment(status, message) {
+  state.activePayment = state.activePayment
+    ? { ...state.activePayment, status, statusText: message }
+    : null;
+  clearPaymentTimers();
+  if (elements.manualPaymentNote) elements.manualPaymentNote.textContent = message;
+  if (elements.paymentCountdown) elements.paymentCountdown.textContent = message;
+  if (elements.manualPaymentQr) {
+    elements.manualPaymentQr.hidden = true;
+    elements.manualPaymentQr.removeAttribute('src');
+  }
+  if (elements.manualPaymentQrFallback) {
+    elements.manualPaymentQrFallback.hidden = false;
+    elements.manualPaymentQrFallback.textContent = status === 'paid'
+      ? '支付成功，额度已入账。'
+      : '支付链路已关闭，可重新生成订单。';
+  }
+  setPaymentControls({ canCancel: false, canRetry: status !== 'paid' });
+  updateActionLocks();
+}
+
+function renderPaymentClosingState(message) {
+  clearPaymentTimers();
+  if (state.activePayment) state.activePayment.statusText = message;
+  if (elements.manualPaymentNote) elements.manualPaymentNote.textContent = message;
+  if (elements.paymentCountdown) elements.paymentCountdown.textContent = message;
+  if (elements.manualPaymentQr) {
+    elements.manualPaymentQr.hidden = true;
+    elements.manualPaymentQr.removeAttribute('src');
+  }
+  if (elements.manualPaymentQrFallback) {
+    elements.manualPaymentQrFallback.hidden = false;
+    elements.manualPaymentQrFallback.textContent = '支付链路正在关闭，二维码已停止显示。';
+  }
+  if (elements.paymentLinkBox) elements.paymentLinkBox.hidden = true;
+  setPaymentControls({ canCancel: false, canRetry: false });
+  updateActionLocks();
+}
+
+function renderPaymentUnavailable(message = '订单已失效，可重新生成。') {
+  clearPaymentTimers();
+  setPaymentState(message);
+  if (state.activePayment) {
+    state.activePayment.status = 'unavailable';
+    state.activePayment.statusText = message;
+  }
+  if (elements.manualPaymentNote) elements.manualPaymentNote.textContent = message;
+  if (elements.paymentCountdown) elements.paymentCountdown.textContent = message;
+  if (elements.manualPaymentQr) {
+    elements.manualPaymentQr.hidden = true;
+    elements.manualPaymentQr.removeAttribute('src');
+  }
+  if (elements.manualPaymentQrFallback) {
+    elements.manualPaymentQrFallback.hidden = false;
+    elements.manualPaymentQrFallback.textContent = '当前支付订单已结束，请重新生成订单。';
+  }
+  if (elements.paymentLinkBox) elements.paymentLinkBox.hidden = true;
+  setPaymentControls({ canCancel: false, canRetry: true });
+  state.activePayment = null;
+  updateActionLocks();
+}
+
+async function pollActivePayment() {
+  if (!state.activePayment || state.activePayment.status !== 'pending') return;
+  if (!window.addWhatsapp.getPaymentOrderStatus) return;
+  try {
+    const response = await window.addWhatsapp.getPaymentOrderStatus({ orderId: state.activePayment.orderId });
+    if (await handleApiError(response)) return;
+    if (!response.ok || !response.order) return;
+    const order = response.order;
+    if (order.status === 'paid') {
+      renderClosedPayment('paid', '支付成功，额度已自动入账。');
+      await refreshCloudEntitlements();
+      await refreshBillingOrders({ quiet: true });
+      return;
+    }
+    if (order.status === 'canceled' || order.status === 'expired' || order.closedAt) {
+      renderClosedPayment(order.status || 'canceled', order.status === 'expired' ? '订单已超时关闭。' : '订单已取消。');
+      await refreshBillingOrders({ quiet: true });
+    }
+  } catch (error) {
+    debugPayment('payment poll failed', { message: error && error.message });
+  }
+}
+
+async function closeActivePayment(reason = 'canceled') {
+  if (!state.activePayment || state.activePayment.status !== 'pending') return;
+  const orderId = state.activePayment.orderId;
+  const isExpired = reason === 'expired';
+  state.activePayment.status = 'closing';
+  renderPaymentClosingState(isExpired ? '订单已超时，正在关闭支付链路...' : '正在关闭支付链路...');
+  try {
+    const response = await window.addWhatsapp.closePaymentOrder({ orderId, reason });
+    if (await handleApiError(response)) return;
+    if (!response.ok) {
+      renderPaymentUnavailable('订单已失效，可重新生成。');
+      await refreshBillingOrders({ quiet: true });
+      return;
+    }
+    renderClosedPayment(isExpired ? 'expired' : 'canceled', isExpired ? '订单已超时关闭。' : '订单已取消。');
+    setPaymentState(isExpired ? '订单已超时，支付链路已关闭。' : '订单已取消，支付链路已关闭。');
+    await refreshBillingOrders({ quiet: true });
+  } catch (error) {
+    renderPaymentUnavailable('订单已失效，可重新生成。');
+    await refreshBillingOrders({ quiet: true });
+  }
+}
+
 function renderManualPayment(paymentResult) {
   if (!elements.manualPaymentPanel || !paymentResult || !paymentResult.payment) return;
+  clearPaymentTimers();
+  state.activePayment = null;
   const { order, payment, plan } = paymentResult;
   elements.manualPaymentPanel.hidden = false;
   elements.manualPaymentTitle.textContent = `${plan.name} ${formatCredits(plan.credits)} 额度`;
@@ -595,10 +831,13 @@ function renderManualPayment(paymentResult) {
     elements.manualPaymentQrFallback.textContent = '服务器还没配置收款码图片 URL';
   }
   if (elements.paymentLinkBox) elements.paymentLinkBox.hidden = true;
+  setPaymentControls({ canCancel: false, canRetry: false });
 }
 
 function renderZpayPayment(paymentResult) {
   if (!elements.manualPaymentPanel || !paymentResult || !paymentResult.payment) return;
+  clearPaymentTimers();
+  state.activePayment = null;
   const { order, payment, plan } = paymentResult;
   elements.manualPaymentPanel.hidden = false;
   elements.manualPaymentTitle.textContent = `${plan.name} ${formatCredits(plan.credits)} 额度`;
@@ -614,6 +853,52 @@ function renderZpayPayment(paymentResult) {
   if (elements.paymentLink) elements.paymentLink.textContent = payment.paymentUrl || '-';
   if (elements.paymentOpenButton) elements.paymentOpenButton.dataset.paymentUrl = payment.paymentUrl || '';
   if (elements.paymentCopyButton) elements.paymentCopyButton.dataset.paymentUrl = payment.paymentUrl || '';
+  setPaymentControls({ canCancel: false, canRetry: false });
+}
+
+function renderWechatPaymentLoading(plan = {}) {
+  if (!elements.manualPaymentPanel) return;
+  clearPaymentTimers();
+  state.activePayment = null;
+  const credits = Number(plan.minimumTopUpCredits || 0);
+  const amountCents = credits * Number(plan.unitPriceCents || 0);
+  elements.manualPaymentPanel.hidden = false;
+  elements.manualPaymentTitle.textContent = `${plan.name || '套餐'} ${credits ? formatCredits(credits) : ''} 额度`;
+  elements.manualPaymentDescription.textContent = '正在向服务端生成订单，并连接微信支付获取专属二维码。';
+  elements.manualPaymentOrderNo.textContent = '生成中';
+  elements.manualPaymentAmount.textContent = amountCents ? `¥${(amountCents / 100).toFixed(2)}` : '计算中';
+  elements.manualPaymentNote.textContent = '支付链路正在加载中';
+  if (elements.paymentCountdown) elements.paymentCountdown.textContent = '支付链路正在加载中';
+  if (elements.paymentRetryButton && plan.id) elements.paymentRetryButton.dataset.planId = plan.id;
+  if (elements.manualPaymentQr) {
+    elements.manualPaymentQr.hidden = true;
+    elements.manualPaymentQr.removeAttribute('src');
+  }
+  if (elements.manualPaymentQrFallback) {
+    elements.manualPaymentQrFallback.hidden = false;
+    elements.manualPaymentQrFallback.innerHTML = '<span class="payment-loading-spinner" aria-hidden="true"></span><strong>支付链路正在加载中</strong>';
+  }
+  if (elements.paymentLinkBox) elements.paymentLinkBox.hidden = true;
+  setPaymentControls({ canCancel: false, canRetry: false });
+  updateActionLocks();
+}
+
+function renderPaymentLoadFailed(message) {
+  clearPaymentTimers();
+  state.activePayment = null;
+  if (elements.manualPaymentNote) elements.manualPaymentNote.textContent = message;
+  if (elements.paymentCountdown) elements.paymentCountdown.textContent = message;
+  if (elements.manualPaymentQr) {
+    elements.manualPaymentQr.hidden = true;
+    elements.manualPaymentQr.removeAttribute('src');
+  }
+  if (elements.manualPaymentQrFallback) {
+    elements.manualPaymentQrFallback.hidden = false;
+    elements.manualPaymentQrFallback.textContent = '支付链路加载失败，可重新生成订单。';
+  }
+  if (elements.paymentLinkBox) elements.paymentLinkBox.hidden = true;
+  setPaymentControls({ canCancel: false, canRetry: true });
+  updateActionLocks();
 }
 
 function renderWechatPayment(paymentResult) {
@@ -626,6 +911,14 @@ function renderWechatPayment(paymentResult) {
   elements.manualPaymentOrderNo.textContent = order.orderNo;
   elements.manualPaymentAmount.textContent = `¥${(Number(payment.amountCents || plan.amountCents || 0) / 100).toFixed(2)}`;
   elements.manualPaymentNote.textContent = '等待微信支付回调';
+  state.activePayment = {
+    orderId: order.id || payment.orderId,
+    orderNo: order.orderNo || payment.orderNo,
+    planId: plan.id,
+    status: 'pending',
+    expiresAt: paymentExpiryFor(order)
+  };
+  if (elements.paymentRetryButton) elements.paymentRetryButton.dataset.planId = plan.id;
   if (payment.qrImageDataUrl) {
     elements.manualPaymentQr.hidden = false;
     elements.manualPaymentQr.src = payment.qrImageDataUrl;
@@ -640,6 +933,9 @@ function renderWechatPayment(paymentResult) {
   if (elements.paymentLink) elements.paymentLink.textContent = payUrl || '-';
   if (elements.paymentOpenButton) elements.paymentOpenButton.dataset.paymentUrl = payUrl;
   if (elements.paymentCopyButton) elements.paymentCopyButton.dataset.paymentUrl = payUrl;
+  setPaymentControls({ canCancel: true, canRetry: false });
+  startPaymentWatchers();
+  updateActionLocks();
 }
 
 function setPaymentState(message) {
@@ -704,6 +1000,10 @@ async function startZpayTopUp(planId = null, sourceButton = null) {
 }
 
 async function startWechatTopUp(planId = null, sourceButton = null) {
+  if (state.activePayment && state.activePayment.status === 'pending') {
+    setPaymentState('请先完成或取消当前支付订单。');
+    return;
+  }
   const plan = planId
     ? (state.subscription && state.subscription.catalog || []).find(item => item.id === planId)
     : state.subscription && state.subscription.plan;
@@ -719,6 +1019,7 @@ async function startWechatTopUp(planId = null, sourceButton = null) {
   });
   for (const button of buttons) button.disabled = true;
   setPaymentState('正在生成微信支付订单...');
+  renderWechatPaymentLoading(plan || { id: targetPlanId, name: '微信支付' });
 
   try {
     const response = await window.addWhatsapp.startWechatTopUp({ planId: targetPlanId });
@@ -736,18 +1037,23 @@ async function startWechatTopUp(planId = null, sourceButton = null) {
       return;
     }
     if (!response.ok) {
-      setPaymentState(response.error || '微信支付订单创建失败。');
+      const message = response.error || '微信支付订单创建失败。';
+      renderPaymentLoadFailed(message);
+      setPaymentState(message);
       return;
     }
 
     renderWechatPayment(response);
     setPaymentState(`订单 ${response.order.orderNo} 已生成，请扫码付款，付款后会自动入账。`);
+    await refreshBillingOrders({ quiet: true });
   } catch (error) {
     debugPayment('startWechatTopUp exception', {
       targetPlanId,
       message: error && error.message
     });
-    setPaymentState(error.message || '微信支付订单创建失败，请稍后重试。');
+    const message = error.message || '微信支付订单创建失败，请稍后重试。';
+    renderPaymentLoadFailed(message);
+    setPaymentState(message);
   } finally {
     debugPayment('startWechatTopUp finally update locks', { targetPlanId });
     updateActionLocks();
@@ -1467,6 +1773,7 @@ async function loadAuthenticatedWorkspace(bootstrap = null) {
   }
   if (data.history) renderHistory(data.history);
   await loadTemplates();
+  await refreshBillingOrders({ quiet: true });
 }
 
 async function bootstrapApp() {
@@ -1507,6 +1814,18 @@ elements.registerForm.addEventListener('submit', handleRegister);
 elements.refreshEntitlementsButton.addEventListener('click', refreshCloudEntitlements);
 elements.quotaPayButton.addEventListener('click', () => startWechatTopUp());
 elements.billingPayButton.addEventListener('click', () => startWechatTopUp());
+if (elements.paymentCancelButton) {
+  elements.paymentCancelButton.addEventListener('click', () => closeActivePayment('canceled'));
+}
+if (elements.paymentRetryButton) {
+  elements.paymentRetryButton.addEventListener('click', () => {
+    const planId = elements.paymentRetryButton.dataset.planId || (state.activePayment && state.activePayment.planId);
+    clearPaymentTimers();
+    state.activePayment = null;
+    setPaymentControls({ canCancel: false, canRetry: false });
+    startWechatTopUp(planId || null, elements.paymentRetryButton);
+  });
+}
 if (elements.paymentOpenButton) {
   elements.paymentOpenButton.addEventListener('click', async () => {
     const url = elements.paymentOpenButton.dataset.paymentUrl;

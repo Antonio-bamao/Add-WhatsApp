@@ -3,9 +3,10 @@ const { createEntitlementState } = require('./billingPlans');
 const DEFAULT_API_BASE_URL = 'https://api.addwhatsapp.com';
 
 class CloudApiClient {
-  constructor({ baseUrl = DEFAULT_API_BASE_URL, fetchImpl = globalThis.fetch } = {}) {
+  constructor({ baseUrl = DEFAULT_API_BASE_URL, fetchImpl = globalThis.fetch, requestTimeoutMs = 12000 } = {}) {
     this.baseUrl = String(baseUrl || DEFAULT_API_BASE_URL).replace(/\/+$/, '');
     this.fetchImpl = fetchImpl;
+    this.requestTimeoutMs = Math.max(Number(requestTimeoutMs) || 12000, 1);
     if (typeof this.fetchImpl !== 'function') {
       throw new Error('当前运行环境不支持云端 API 请求。');
     }
@@ -71,6 +72,31 @@ class CloudApiClient {
     });
   }
 
+  async getOrderStatus(accessToken, orderId) {
+    return this.request(`/v1/orders/${encodeURIComponent(orderId)}`, {
+      headers: { authorization: `Bearer ${accessToken}` }
+    });
+  }
+
+  async listOrders(accessToken, { limit = 20, offset = 0 } = {}) {
+    const normalizedLimit = Number(limit);
+    const normalizedOffset = Number(offset);
+    const query = normalizedLimit === 20 && normalizedOffset === 0
+      ? ''
+      : `?${new URLSearchParams({ limit: String(limit), offset: String(offset) }).toString()}`;
+    return this.request(`/v1/orders${query}`, {
+      headers: { authorization: `Bearer ${accessToken}` }
+    });
+  }
+
+  async closeOrder(accessToken, orderId, { reason = 'canceled' } = {}) {
+    return this.request(`/v1/orders/${encodeURIComponent(orderId)}/close`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${accessToken}` },
+      body: { reason }
+    });
+  }
+
   async createManualPayment(accessToken, orderId) {
     return this.request(`/v1/orders/${encodeURIComponent(orderId)}/payments/manual`, {
       method: 'POST',
@@ -106,20 +132,36 @@ class CloudApiClient {
       'content-type': 'application/json',
       ...(options.headers || {})
     };
-    const response = await this.fetchImpl(`${this.baseUrl}${path}`, {
-      method: options.method || 'GET',
-      headers,
-      body: options.body ? JSON.stringify(options.body) : undefined
-    });
-    const payload = await response.json();
-    if (!response.ok) {
-      const msg = payload && payload.error ? payload.error : `CLOUD_API_${response.status}`;
-      const detail = payload && payload.cause ? ` (cause: ${payload.cause})` : '';
-      const error = new Error(`${msg}${detail}`);
-      error.status = response.status;
+    const controller = typeof AbortController === 'function' ? new AbortController() : null;
+    const timer = controller
+      ? setTimeout(() => controller.abort(), this.requestTimeoutMs)
+      : null;
+    try {
+      const response = await this.fetchImpl(`${this.baseUrl}${path}`, {
+        method: options.method || 'GET',
+        headers,
+        body: options.body ? JSON.stringify(options.body) : undefined,
+        signal: controller ? controller.signal : undefined
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        const msg = payload && payload.error ? payload.error : `CLOUD_API_${response.status}`;
+        const detail = payload && payload.cause ? ` (cause: ${payload.cause})` : '';
+        const error = new Error(`${msg}${detail}`);
+        error.status = response.status;
+        throw error;
+      }
+      return payload;
+    } catch (error) {
+      if (error && error.name === 'AbortError') {
+        const timeoutError = new Error('CLOUD_API_TIMEOUT');
+        timeoutError.status = 504;
+        throw timeoutError;
+      }
       throw error;
+    } finally {
+      if (timer) clearTimeout(timer);
     }
-    return payload;
   }
 }
 

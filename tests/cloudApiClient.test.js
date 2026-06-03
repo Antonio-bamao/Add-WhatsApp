@@ -366,6 +366,88 @@ test('creates a cloud order and requests a WeChat Native pay code url with beare
   ]);
 });
 
+test('reads and closes a cloud payment order with bearer auth', async () => {
+  const requests = [];
+  const client = new CloudApiClient({
+    baseUrl: 'http://127.0.0.1:4110/',
+    fetchImpl: async (url, options = {}) => {
+      requests.push({ url, options });
+      assert.equal(options.headers.authorization, 'Bearer access-1');
+      if (url.endsWith('/v1/orders/order-wechat-1') && options.method === 'GET') {
+        return response(200, {
+          id: 'order-wechat-1',
+          orderNo: '202606030001',
+          status: 'created',
+          expiresAt: '2026-06-03T07:25:00.000Z'
+        });
+      }
+      if (url.endsWith('/v1/orders/order-wechat-1/close')) {
+        assert.equal(options.method, 'POST');
+        assert.deepEqual(JSON.parse(options.body), { reason: 'canceled' });
+        return response(200, {
+          id: 'order-wechat-1',
+          orderNo: '202606030001',
+          status: 'canceled',
+          closedAt: '2026-06-03T07:21:00.000Z'
+        });
+      }
+      throw new Error(`unexpected url: ${url}`);
+    }
+  });
+
+  const status = await client.getOrderStatus('access-1', 'order-wechat-1');
+  const closed = await client.closeOrder('access-1', 'order-wechat-1', { reason: 'canceled' });
+
+  assert.equal(status.expiresAt, '2026-06-03T07:25:00.000Z');
+  assert.equal(closed.status, 'canceled');
+  assert.deepEqual(requests.map(item => item.url), [
+    'http://127.0.0.1:4110/v1/orders/order-wechat-1',
+    'http://127.0.0.1:4110/v1/orders/order-wechat-1/close'
+  ]);
+});
+
+test('lists billing orders and times out stuck cloud API requests', async () => {
+  const requests = [];
+  const client = new CloudApiClient({
+    baseUrl: 'http://127.0.0.1:4110/',
+    requestTimeoutMs: 25,
+    fetchImpl: async (url, options = {}) => {
+      requests.push({ url, options });
+      assert.equal(options.headers.authorization, 'Bearer access-1');
+      if (url.endsWith('/v1/orders') && options.method === 'GET') {
+        return response(200, {
+          items: [
+            { orderNo: '202606030001', status: 'canceled', amountCents: 150000, closedAt: '2026-06-03T07:21:00.000Z' }
+          ],
+          total: 1
+        });
+      }
+      if (url.endsWith('/v1/orders/order-stuck/close')) {
+        return new Promise((resolve, reject) => {
+          options.signal.addEventListener('abort', () => {
+            const error = new Error('aborted');
+            error.name = 'AbortError';
+            reject(error);
+          });
+        });
+      }
+      throw new Error(`unexpected url: ${url}`);
+    }
+  });
+
+  const history = await client.listOrders('access-1');
+  await assert.rejects(
+    () => client.closeOrder('access-1', 'order-stuck', { reason: 'canceled' }),
+    /CLOUD_API_TIMEOUT/
+  );
+
+  assert.equal(history.items[0].status, 'canceled');
+  assert.deepEqual(requests.map(item => item.url), [
+    'http://127.0.0.1:4110/v1/orders',
+    'http://127.0.0.1:4110/v1/orders/order-stuck/close'
+  ]);
+});
+
 function response(status, payload) {
   return {
     ok: status >= 200 && status < 300,
