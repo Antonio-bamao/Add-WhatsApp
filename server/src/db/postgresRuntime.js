@@ -10,6 +10,7 @@ function isoNow() {
 }
 
 const ORDER_PAYMENT_TTL_MS = 5 * 60 * 1000;
+const CONTACT_IMPORT_MAX_BYTES = 25 * 1024 * 1024;
 const migratedOrderLifecyclePools = new WeakSet();
 
 function hashPassword(password) {
@@ -139,6 +140,102 @@ function paymentEventRows(rows) {
     event.order_id,
     event.processed_at || "pending"
   ]);
+}
+
+function safeFileName(value, fallback = "contact-import") {
+  const clean = String(value || fallback)
+    .replace(/[\\/:*?"<>|]/g, "-")
+    .replace(/\s+/g, " ")
+    .trim();
+  return clean || fallback;
+}
+
+function normalizeOriginalFormat(value, fileName) {
+  const explicit = String(value || "").trim().toLowerCase().replace(/^\./, "");
+  if (explicit) return explicit.slice(0, 16);
+  const match = /\.([a-z0-9]+)$/i.exec(String(fileName || ""));
+  return match ? match[1].toLowerCase() : "unknown";
+}
+
+function normalizeContactImportBody(body = {}) {
+  const originalFileName = safeFileName(body.originalFileName, "contact-import");
+  const originalFormat = normalizeOriginalFormat(body.originalFormat, originalFileName);
+  const originalMimeType = String(body.originalMimeType || "application/octet-stream").slice(0, 200);
+  const originalBytes = Buffer.from(String(body.originalBase64 || ""), "base64");
+  if (!originalBytes.length) throw new Error("CONTACT_IMPORT_FILE_REQUIRED");
+  if (originalBytes.length > CONTACT_IMPORT_MAX_BYTES) throw new Error("CONTACT_IMPORT_FILE_TOO_LARGE");
+  const originalSizeBytes = Number(body.originalSizeBytes || originalBytes.length);
+  if (originalSizeBytes !== originalBytes.length) throw new Error("CONTACT_IMPORT_SIZE_MISMATCH");
+  const originalSha256 = crypto.createHash("sha256").update(originalBytes).digest("hex");
+  const expectedSha256 = String(body.originalSha256 || originalSha256).trim().toLowerCase();
+  if (expectedSha256 && expectedSha256 !== originalSha256) throw new Error("CONTACT_IMPORT_SHA_MISMATCH");
+  return {
+    originalFileName,
+    originalFormat,
+    originalMimeType,
+    originalSizeBytes: originalBytes.length,
+    originalSha256,
+    originalBytes,
+    columns: body.columns || {},
+    stats: body.stats || {},
+    importOptions: body.importOptions || {},
+    parsedRows: Array.isArray(body.parsedRows) ? body.parsedRows : []
+  };
+}
+
+function publicContactImport(row) {
+  const parsedRows = safeJsonParse(row.parsed_rows_json, []);
+  return {
+    id: row.id,
+    userId: row.user_id,
+    account: row.username || row.user_id,
+    originalFileName: row.original_file_name,
+    originalFormat: row.original_format,
+    originalMimeType: row.original_mime_type,
+    originalSizeBytes: Number(row.original_size_bytes),
+    originalSha256: row.original_sha256,
+    parsedRowCount: parsedRows.length,
+    stats: safeJsonParse(row.stats_json, {}),
+    columns: safeJsonParse(row.columns_json, {}),
+    createdAt: row.created_at,
+    originalDownloadUrl: `/v1/admin/contact-imports/${row.id}/download?kind=original`,
+    parsedDownloadUrl: `/v1/admin/contact-imports/${row.id}/download?kind=parsed`
+  };
+}
+
+function safeJsonParse(value, fallback) {
+  try {
+    return value ? JSON.parse(value) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function csvEscape(value) {
+  const text = value === undefined || value === null ? "" : String(value);
+  return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+}
+
+function parsedRowsCsv(rows = []) {
+  const sourceKeys = [];
+  for (const row of rows) {
+    for (const key of Object.keys(row && row.source ? row.source : {})) {
+      if (!sourceKeys.includes(key)) sourceKeys.push(key);
+    }
+  }
+  const headers = ["rowNumber", "status", "e164", "countryIso", "language", ...sourceKeys.map((key) => `source_${key}`)];
+  const lines = [headers.join(",")];
+  for (const row of rows) {
+    lines.push(headers.map((header) => {
+      if (header.startsWith("source_")) return csvEscape(row.source?.[header.slice(7)]);
+      return csvEscape(row[header]);
+    }).join(","));
+  }
+  return `${lines.join("\r\n")}\r\n`;
+}
+
+function parsedDownloadFileName(originalFileName) {
+  return `${safeFileName(originalFileName.replace(/\.[^.]+$/, ""), "contact-import")}-parsed.csv`;
 }
 
 async function requireActiveUser(client, userId) {
@@ -831,6 +928,119 @@ export function createPostgresRuntime({ databaseUrl, pool } = {}) {
       };
     },
 
+    async createContactImport(body) {
+      const userId = body.userId;
+      const normalized = normalizeContactImportBody(body);
+      const client = await db.connect();
+      try {
+        await requireActiveUser(client, userId);
+        const record = {
+          id: createId("contact_import"),
+          userId,
+          createdAt: isoNow(),
+          ...normalized
+        };
+        await client.query(
+          `INSERT INTO contact_imports (
+            id,
+            user_id,
+            original_file_name,
+            original_format,
+            original_mime_type,
+            original_size_bytes,
+            original_sha256,
+            original_file_bytes,
+            columns_json,
+            stats_json,
+            import_options_json,
+            parsed_rows_json,
+            created_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+          [
+            record.id,
+            record.userId,
+            record.originalFileName,
+            record.originalFormat,
+            record.originalMimeType,
+            record.originalSizeBytes,
+            record.originalSha256,
+            record.originalBytes,
+            JSON.stringify(record.columns),
+            JSON.stringify(record.stats),
+            JSON.stringify(record.importOptions),
+            JSON.stringify(record.parsedRows),
+            record.createdAt
+          ]
+        );
+        return publicContactImport({
+          id: record.id,
+          user_id: record.userId,
+          username: (await requireActiveUser(client, userId)).username,
+          original_file_name: record.originalFileName,
+          original_format: record.originalFormat,
+          original_mime_type: record.originalMimeType,
+          original_size_bytes: record.originalSizeBytes,
+          original_sha256: record.originalSha256,
+          columns_json: JSON.stringify(record.columns),
+          stats_json: JSON.stringify(record.stats),
+          parsed_rows_json: JSON.stringify(record.parsedRows),
+          created_at: record.createdAt
+        });
+      } finally {
+        client.release();
+      }
+    },
+
+    async listContactImports({ q, limit = 50, offset = 0 } = {}) {
+      const numericLimit = Math.min(Math.max(Number(limit) || 50, 1), 100);
+      const numericOffset = Math.max(Number(offset) || 0, 0);
+      const values = [];
+      const conditions = [];
+      if (q) {
+        values.push(`%${String(q).toLowerCase()}%`);
+        const index = `$${values.length}`;
+        conditions.push(`LOWER(u.username || ' ' || ci.user_id || ' ' || ci.original_file_name || ' ' || ci.original_format || ' ' || ci.original_sha256) LIKE ${index}`);
+      }
+      const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+      const count = await db.query(
+        `SELECT COUNT(*)::int AS total FROM contact_imports ci JOIN users u ON u.id = ci.user_id ${where}`,
+        values
+      );
+      const rows = await db.query(
+        `SELECT ci.*, u.username
+         FROM contact_imports ci
+         JOIN users u ON u.id = ci.user_id
+         ${where}
+         ORDER BY ci.created_at DESC
+         LIMIT $${values.length + 1} OFFSET $${values.length + 2}`,
+        [...values, numericLimit, numericOffset]
+      );
+      return {
+        total: Number(count.rows[0]?.total || 0),
+        limit: numericLimit,
+        offset: numericOffset,
+        items: rows.rows.map(publicContactImport)
+      };
+    },
+
+    async getContactImportDownload({ importId, kind = "original" }) {
+      const result = await db.query("SELECT * FROM contact_imports WHERE id = $1", [importId]);
+      const record = result.rows[0];
+      if (!record) throw new Error("CONTACT_IMPORT_NOT_FOUND");
+      if (kind === "parsed") {
+        return {
+          body: Buffer.from(parsedRowsCsv(safeJsonParse(record.parsed_rows_json, [])), "utf8"),
+          contentType: "text/csv; charset=utf-8",
+          fileName: parsedDownloadFileName(record.original_file_name)
+        };
+      }
+      return {
+        body: Buffer.isBuffer(record.original_file_bytes) ? record.original_file_bytes : Buffer.from(record.original_file_bytes),
+        contentType: record.original_mime_type || "application/octet-stream",
+        fileName: record.original_file_name
+      };
+    },
+
     async issueWorkspaceLease({ userId, deviceId, workspaceKind, processNonce }) {
       const client = await db.connect();
       try {
@@ -1001,6 +1211,13 @@ export function createPostgresRuntime({ databaseUrl, pool } = {}) {
         const dailyUsage = await client.query("SELECT * FROM usage_daily ORDER BY business_date DESC LIMIT 50");
         const orders = await client.query("SELECT * FROM orders ORDER BY created_at DESC LIMIT 50");
         const paymentEvents = await client.query("SELECT * FROM payment_events ORDER BY created_at DESC LIMIT 50");
+        const contactImports = await client.query(
+          `SELECT ci.*, u.username
+           FROM contact_imports ci
+           JOIN users u ON u.id = ci.user_id
+           ORDER BY ci.created_at DESC
+           LIMIT 50`
+        );
         const referralCodes = await client.query("SELECT * FROM referral_codes ORDER BY created_at DESC LIMIT 50");
         const leases = await client.query("SELECT * FROM workspace_leases ORDER BY created_at DESC LIMIT 50");
         const auditLogs = await client.query("SELECT * FROM admin_audit_logs ORDER BY created_at DESC LIMIT 50");
@@ -1015,6 +1232,7 @@ export function createPostgresRuntime({ databaseUrl, pool } = {}) {
             creditEntries: ledger.rows.length,
             orders: orders.rows.length,
             paymentEvents: paymentEvents.rows.length,
+            contactImports: contactImports.rows.length,
             activeLeases: leases.rows.filter((lease) => lease.status === "active").length,
             auditLogs: auditLogs.rows.length
           },
@@ -1053,6 +1271,19 @@ export function createPostgresRuntime({ databaseUrl, pool } = {}) {
               status: "PostgreSQL 已接",
               records: tableRows(orders.rows, (order) => [order.order_no, order.status, `${order.credits} credits`, order.provider_trade_no || "manual"]),
               paymentEvents: paymentEventRows(paymentEvents.rows)
+            },
+            imports: {
+              metric: String(contactImports.rows.length),
+              status: "PostgreSQL 已接",
+              recordHeaders: ["上传时间", "账号", "原始文件", "格式", "行数", "SHA256"],
+              records: tableRows(contactImports.rows.map(publicContactImport), (record) => [
+                record.createdAt,
+                record.account,
+                record.originalFileName,
+                record.originalFormat,
+                String(record.parsedRowCount),
+                record.originalSha256.slice(0, 16)
+              ])
             },
             referrals: {
               metric: String(referralCodes.rows.length),

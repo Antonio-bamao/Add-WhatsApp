@@ -55,6 +55,17 @@ export const adminModules = [
     guards: ["支付回调幂等", "paid_pending_credit 可补偿", "退款写负向账本"]
   },
   {
+    key: "imports",
+    title: "名单审计",
+    owner: "Contact Import Audit Module",
+    desktopSurface: "导入名单、原始表格和解析结果",
+    primaryAction: "下载原始文件或解析结果",
+    metric: "0",
+    metricLabel: "上传名单",
+    status: "待接 API",
+    guards: ["只允许管理员下载", "记录账号、格式、SHA256 和上传时间", "桌面端导入失败不上传"]
+  },
+  {
     key: "referrals",
     title: "推荐审核",
     owner: "Referral Module",
@@ -172,6 +183,20 @@ const modulePageConfig = {
       ["mock_alipay", "payment_ignored", "mock_alipay:notify-002:WAIT_BUYER_PAY", "order_preview_003", "pending"]
     ]
   },
+  imports: {
+    route: "#/imports",
+    pageTitle: "名单审计",
+    pageDescription: "查看桌面端上传的客户名单原始文件和解析结果，按注册账号追踪上传时间、格式、行数和 SHA256。",
+    sections: [
+      { title: "原始文件", body: "保留用户在软件里导入的原始 CSV、XLS 或 XLSX 文件，后台可按原格式下载复核。" },
+      { title: "解析结果", body: "保留软件解析后的标准结果，用于核对有效号码、国家、语言和重复/无效状态。" },
+      { title: "审计边界", body: "下载动作必须携带管理员 token；桌面端不新增界面提示，上传失败不影响本地检测。" }
+    ],
+    recordHeaders: ["上传时间", "账号", "原始文件", "格式", "行数", "SHA256"],
+    records: [
+      ["等待 API", "empty", "导入名单后出现", "csv/xlsx", "0", "-"]
+    ]
+  },
   referrals: {
     route: "#/referrals",
     pageTitle: "推荐审核",
@@ -247,6 +272,12 @@ export const desktopAdminMappings = [
     adminModule: "订单与入账",
     sourceOfTruth: "orders + payment_events",
     adminChecks: ["人工收款是否可入账", "paid_pending_credit 是否有补偿入口", "退款是否生成负向账本"]
+  },
+  {
+    desktopPage: "导入名单",
+    adminModule: "名单审计",
+    sourceOfTruth: "contact_imports",
+    adminChecks: ["上传账号和时间是否可追溯", "原始格式是否可下载", "解析结果是否和软件识别一致"]
   },
   {
     desktopPage: "推荐奖励页",

@@ -105,6 +105,19 @@ function createCloudDesktopController({ client, sessionStore, deviceId = 'deskto
     }
   }
 
+  async function createContactImport(payload) {
+    const session = sessionStore.load();
+    if (!session.authenticated || !session.accessToken) {
+      return { ok: true, skipped: true, authRequired: true };
+    }
+    try {
+      const contactImport = await client.createContactImport(session.accessToken, payload);
+      return { ok: true, contactImport };
+    } catch (error) {
+      return handleCloudError(error);
+    }
+  }
+
   async function issueWorkspaceLease({ workspaceKind = 'secondary', processNonce }) {
     const session = sessionStore.load();
     if (!session.authenticated || !session.accessToken) {
@@ -354,6 +367,7 @@ function createCloudDesktopController({ client, sessionStore, deviceId = 'deskto
 
   return {
     getState,
+    createContactImport,
     consumeSuccessfulAdds,
     issueWorkspaceLease,
     renewWorkspaceLease,

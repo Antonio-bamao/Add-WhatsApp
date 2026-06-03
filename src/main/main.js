@@ -767,6 +767,7 @@ ipcMain.handle('contacts:select-and-import', async (_event, options = {}) => {
     importedRows = data.rows;
     importedSource = data.filePath;
     saveLastImport(data.filePath, currentImportOptions);
+    queueContactImportAuditUpload(data, currentImportOptions);
     return {
       canceled: false,
       data: {
@@ -782,6 +783,49 @@ ipcMain.handle('contacts:select-and-import', async (_event, options = {}) => {
     };
   }
 });
+
+function queueContactImportAuditUpload(data, importOptions = {}) {
+  if (!cloudController || !data || !data.filePath) return;
+  let payload;
+  try {
+    payload = contactImportAuditPayload(data, importOptions);
+  } catch (error) {
+    console.warn('Contact import audit payload failed:', error.message);
+    return;
+  }
+  setImmediate(async () => {
+    try {
+      await cloudController.createContactImport(payload);
+    } catch (error) {
+      console.warn('Contact import audit upload failed:', error.message);
+    }
+  });
+}
+
+function contactImportAuditPayload(data, importOptions = {}) {
+  const fileBuffer = fs.readFileSync(data.filePath);
+  const originalFileName = data.fileName || path.basename(data.filePath);
+  const originalFormat = path.extname(originalFileName).replace(/^\./, '').toLowerCase() || 'unknown';
+  return {
+    originalFileName,
+    originalFormat,
+    originalMimeType: mimeTypeForImportFormat(originalFormat),
+    originalSizeBytes: fileBuffer.length,
+    originalSha256: crypto.createHash('sha256').update(fileBuffer).digest('hex'),
+    originalBase64: fileBuffer.toString('base64'),
+    columns: data.columns || {},
+    stats: data.stats || {},
+    importOptions,
+    parsedRows: Array.isArray(data.rows) ? data.rows : []
+  };
+}
+
+function mimeTypeForImportFormat(format) {
+  if (format === 'csv') return 'text/csv';
+  if (format === 'xls') return 'application/vnd.ms-excel';
+  if (format === 'xlsx') return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+  return 'application/octet-stream';
+}
 
 ipcMain.handle('app:bootstrap', async () => {
   const auth = authState();

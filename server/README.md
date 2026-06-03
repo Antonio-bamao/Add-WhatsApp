@@ -12,12 +12,13 @@ This folder contains the local-preview cloud API skeleton for `api.addwhatsapp.c
 - Workspace lease limits.
 - Admin console snapshot data for local `admin/` API integration.
 - Admin authentication for sensitive operations.
+- Desktop contact import audit storage for signed-in users, including original CSV/XLS/XLSX files and parsed results for admin download.
 
 ## Boundaries
 
 - The API runtime currently uses in-memory state so it can run without external services.
 - `src/db/schema.sql` is the PostgreSQL target schema and local migration source.
-- Do not upload customer spreadsheets, complete phone lists, WhatsApp sessions, or desktop cache data to this service.
+- Customer contact imports may be uploaded only through the authenticated `/v1/contact-imports` audit path. WhatsApp sessions and desktop cache data must stay out of this service.
 
 ## Local Commands
 
@@ -46,6 +47,16 @@ GET http://127.0.0.1:4110/v1/admin/payment-events?provider=alipay&processed=proc
 ```
 
 Supported filters are `provider`, `eventType`, `processed=processed|pending`, `q`, `limit`, and `offset`. This endpoint requires an admin bearer token.
+
+Admin contact import audit query:
+
+```text
+GET http://127.0.0.1:4110/v1/admin/contact-imports?q=account&limit=50&offset=0
+GET http://127.0.0.1:4110/v1/admin/contact-imports/:id/download?kind=original
+GET http://127.0.0.1:4110/v1/admin/contact-imports/:id/download?kind=parsed
+```
+
+The desktop client silently creates contact import audit records with `POST /v1/contact-imports` after local import succeeds. The admin endpoints require an admin bearer token; `kind=original` returns the uploaded file and `kind=parsed` returns a standard CSV export of the parsed rows.
 
 Alipay page-pay request creation:
 

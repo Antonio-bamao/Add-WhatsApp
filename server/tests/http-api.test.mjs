@@ -863,6 +863,79 @@ describe("cloud API skeleton", () => {
     });
   });
 
+  it("stores desktop contact imports for admin audit and artifact downloads", async () => {
+    await withServer(async (baseUrl) => {
+      const registered = await request(baseUrl, "/v1/auth/register", {
+        method: "POST",
+        body: { username: "import-user", password: "StrongPass123", planId: "advanced" }
+      });
+      assert.equal(registered.response.status, 201);
+      const auth = { authorization: `Bearer ${registered.payload.accessToken}` };
+      const original = Buffer.from("raw workbook bytes");
+      const originalSha256 = crypto.createHash("sha256").update(original).digest("hex");
+
+      const created = await request(baseUrl, "/v1/contact-imports", {
+        method: "POST",
+        headers: auth,
+        body: {
+          originalFileName: "customers.xlsx",
+          originalFormat: "xlsx",
+          originalMimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          originalSizeBytes: original.length,
+          originalSha256,
+          originalBase64: original.toString("base64"),
+          columns: { phoneColumn: "phone", countryColumn: "country", languageColumn: "language" },
+          stats: { total: 1, valid: 1, invalid: 0 },
+          importOptions: { skipChinaNumbers: true },
+          parsedRows: [
+            {
+              rowNumber: 2,
+              status: "valid",
+              e164: "+15551234567",
+              countryIso: "US",
+              language: "en",
+              source: { phone: "5551234567", country: "US" }
+            }
+          ]
+        }
+      });
+      assert.equal(created.response.status, 201);
+      assert.equal(created.payload.originalFormat, "xlsx");
+      assert.equal(created.payload.parsedRowCount, 1);
+
+      const rejectedList = await request(baseUrl, "/v1/admin/contact-imports");
+      assert.equal(rejectedList.response.status, 401);
+
+      const adminLogin = await request(baseUrl, "/v1/admin/auth/login", {
+        method: "POST",
+        body: { username: "admin-preview", password: "AdminPass123" }
+      });
+      const adminAuth = { authorization: `Bearer ${adminLogin.payload.adminAccessToken}` };
+
+      const list = await request(baseUrl, "/v1/admin/contact-imports?q=import-user", { headers: adminAuth });
+      assert.equal(list.response.status, 200);
+      assert.equal(list.payload.total, 1);
+      assert.equal(list.payload.items[0].account, "import-user");
+      assert.equal(list.payload.items[0].originalFileName, "customers.xlsx");
+      assert.equal(list.payload.items[0].originalSha256, originalSha256);
+
+      const originalDownload = await requestText(baseUrl, `/v1/admin/contact-imports/${created.payload.id}/download?kind=original`, {
+        headers: adminAuth
+      });
+      assert.equal(originalDownload.response.status, 200);
+      assert.equal(originalDownload.text, "raw workbook bytes");
+      assert.match(originalDownload.response.headers.get("content-disposition"), /customers\.xlsx/);
+
+      const parsedDownload = await requestText(baseUrl, `/v1/admin/contact-imports/${created.payload.id}/download?kind=parsed`, {
+        headers: adminAuth
+      });
+      assert.equal(parsedDownload.response.status, 200);
+      assert.match(parsedDownload.response.headers.get("content-type"), /text\/csv/);
+      assert.match(parsedDownload.text, /rowNumber,status,e164,countryIso,language,source_phone,source_country/);
+      assert.match(parsedDownload.text, /\+15551234567/);
+    });
+  });
+
   it("routes through an async billing runtime instead of a hard-coded memory store", async () => {
     const runtime = {
       mode: "test-runtime",

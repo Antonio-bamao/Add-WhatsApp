@@ -24,8 +24,8 @@ Add-WhatsApp/
 - `server/` owns the API skeleton, billing rules, audit rules, local admin auth/snapshot API, and PostgreSQL schema/migration entrypoint.
 - Website code must not import desktop internals directly.
 - Website code must not hold admin secrets, database URLs, customer data, WhatsApp sessions, or imported spreadsheets.
-- Admin preview code must not store customer spreadsheets, full phone lists, local task files, WhatsApp login/cache data, or production credentials.
-- Server code must keep customer spreadsheets, full phone lists, WhatsApp sessions, and desktop cache data out of cloud storage by default.
+- Admin preview code must not embed customer spreadsheets, full phone lists, local task files, WhatsApp login/cache data, or production credentials; customer list downloads must be fetched through authenticated admin API calls.
+- Server code may store authenticated contact import audit records, including original CSV/XLS/XLSX files and parsed results, but WhatsApp sessions and desktop cache data must stay out of cloud storage.
 - Local PostgreSQL runs as `add-whatsapp-postgres` on port `55433`; `server/` uses the in-memory preview store by default and switches to PostgreSQL when `DATABASE_URL` is set.
 
 ## Future Split Criteria

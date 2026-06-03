@@ -38,6 +38,7 @@ describe("admin console structure", () => {
       "credits",
       "usage",
       "orders",
+      "imports",
       "referrals",
       "workspaces",
       "audit"
@@ -61,7 +62,7 @@ describe("admin console structure", () => {
 
     assert.deepEqual(
       desktopAdminMappings.map((mapping) => mapping.desktopPage),
-      ["套餐页", "用量页", "额度页", "账单页", "推荐奖励页"]
+      ["套餐页", "用量页", "额度页", "账单页", "导入名单", "推荐奖励页"]
     );
 
     for (const mapping of desktopAdminMappings) {
@@ -161,6 +162,21 @@ describe("admin console structure", () => {
     assert.match(css, /\.operation-status/);
     assert.match(css, /\.event-toolbar/);
     assert.match(css, /\.copy-button/);
+  });
+
+  it("adds a customer import audit module backed by the admin contact-imports API", async () => {
+    const { adminModules, desktopAdminMappings } = await import(pathToFileURL(path.join(adminRoot, "public/admin-data.js")));
+    const js = readText("public/admin.js");
+    const css = readText("public/admin.css");
+    const imports = adminModules.find((module) => module.key === "imports");
+
+    assert.equal(imports.title, "名单审计");
+    assert.match(imports.pageDescription, /原始文件/);
+    assert.ok(desktopAdminMappings.some((mapping) => mapping.desktopPage === "导入名单"));
+    assert.match(js, /\/v1\/admin\/contact-imports/);
+    assert.match(js, /downloadContactImportArtifact/);
+    assert.match(js, /data-contact-import-download/);
+    assert.match(css, /\.contact-imports-panel/);
   });
 
   it("uses the admin payment-events API for the orders event table", () => {

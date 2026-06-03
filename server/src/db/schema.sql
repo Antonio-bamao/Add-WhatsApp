@@ -113,6 +113,22 @@ CREATE TABLE IF NOT EXISTS payment_events (
   created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS contact_imports (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id),
+  original_file_name TEXT NOT NULL,
+  original_format TEXT NOT NULL,
+  original_mime_type TEXT NOT NULL,
+  original_size_bytes INTEGER NOT NULL,
+  original_sha256 TEXT NOT NULL,
+  original_file_bytes BYTEA NOT NULL,
+  columns_json TEXT NOT NULL,
+  stats_json TEXT NOT NULL,
+  import_options_json TEXT NOT NULL,
+  parsed_rows_json TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS referral_codes (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL REFERENCES users(id),

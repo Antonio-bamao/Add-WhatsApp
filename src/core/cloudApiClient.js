@@ -40,6 +40,14 @@ class CloudApiClient {
     });
   }
 
+  async createContactImport(accessToken, payload) {
+    return this.request('/v1/contact-imports', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${accessToken}` },
+      body: payload
+    });
+  }
+
   async createOrder(accessToken, payload) {
     return this.request('/v1/orders', {
       method: 'POST',

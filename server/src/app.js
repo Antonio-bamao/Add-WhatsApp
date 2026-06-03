@@ -45,6 +45,17 @@ function textResponse(response, statusCode, text) {
   response.end(text);
 }
 
+function fileResponse(response, statusCode, { body, contentType, fileName }) {
+  response.writeHead(statusCode, {
+    "content-type": contentType || "application/octet-stream",
+    "content-disposition": `attachment; filename="${String(fileName || "download").replaceAll('"', "")}"`,
+    "access-control-allow-origin": "*",
+    "access-control-allow-headers": "content-type, authorization",
+    "access-control-allow-methods": "GET, POST, OPTIONS"
+  });
+  response.end(body);
+}
+
 async function readText(request) {
   const chunks = [];
   for await (const chunk of request) chunks.push(chunk);
@@ -127,7 +138,7 @@ function errorStatus(error) {
   if (/UNAUTHORIZED|AUTH_FAILED|NOT_ACTIVE/.test(error.message)) return 401;
   if (/NOT_FOUND/.test(error.message)) return 404;
   if (/LIMIT|INSUFFICIENT|NO_AVAILABLE|ALREADY_PAID|CLOSED/.test(error.message)) return 409;
-  if (/INVALID|REQUIRED|WEAK|EXISTS/.test(error.message)) return 400;
+  if (/INVALID|REQUIRED|WEAK|EXISTS|MISMATCH|TOO_LARGE/.test(error.message)) return 400;
   return 500;
 }
 
@@ -158,6 +169,23 @@ export function createAppServer(options = {}) {
       if (request.method === "GET" && url.pathname === "/v1/admin/payment-events") {
         await authAdminId(runtime, request);
         jsonResponse(response, 200, await runtime.listPaymentEvents(Object.fromEntries(url.searchParams.entries())));
+        return;
+      }
+
+      if (request.method === "GET" && url.pathname === "/v1/admin/contact-imports") {
+        await authAdminId(runtime, request);
+        jsonResponse(response, 200, await runtime.listContactImports(Object.fromEntries(url.searchParams.entries())));
+        return;
+      }
+
+      if (request.method === "GET" && /^\/v1\/admin\/contact-imports\/[^/]+\/download$/.test(url.pathname)) {
+        await authAdminId(runtime, request);
+        const importId = decodeURIComponent(url.pathname.split("/")[4]);
+        const download = await runtime.getContactImportDownload({
+          importId,
+          kind: url.searchParams.get("kind") || "original"
+        });
+        fileResponse(response, 200, download);
         return;
       }
 
@@ -202,6 +230,13 @@ export function createAppServer(options = {}) {
         const userId = await authUserId(runtime, request);
         const body = await readJson(request);
         jsonResponse(response, 200, await runtime.consumeCredit({ ...body, userId }));
+        return;
+      }
+
+      if (request.method === "POST" && url.pathname === "/v1/contact-imports") {
+        const userId = await authUserId(runtime, request);
+        const body = await readJson(request);
+        jsonResponse(response, 201, await runtime.createContactImport({ ...body, userId }));
         return;
       }
 

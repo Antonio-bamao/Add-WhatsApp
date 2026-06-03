@@ -35,6 +35,21 @@ let paymentEventsState = {
   items: []
 };
 
+let contactImportsQuery = {
+  q: "",
+  limit: 20,
+  offset: 0
+};
+
+let contactImportsState = {
+  source: "snapshot",
+  loaded: false,
+  loading: false,
+  error: "",
+  total: 0,
+  items: []
+};
+
 function resolveApiBaseUrl() {
   if (window.ADD_WHATSAPP_API_URL) return window.ADD_WHATSAPP_API_URL;
   if (window.location.hostname === "admin.addwhatsapp.com") return "https://api.addwhatsapp.com";
@@ -135,6 +150,17 @@ function resetPaymentEventsState() {
   };
 }
 
+function resetContactImportsState() {
+  contactImportsState = {
+    source: "snapshot",
+    loaded: false,
+    loading: false,
+    error: "",
+    total: 0,
+    items: []
+  };
+}
+
 function paymentEventRowsFromApi(items) {
   return items.map((event) => [
     event.provider,
@@ -220,6 +246,61 @@ function renderPaymentEvents(module) {
   `;
 }
 
+function contactImportSummary(module, rows) {
+  if (contactImportsState.loading) return "正在读取名单审计 API...";
+  if (contactImportsState.error) return `名单审计 API 读取失败，显示快照：${contactImportsState.error}`;
+  if (!adminAccessToken) return "未登录管理员，显示当前快照。";
+  if (!contactImportsState.loaded) return `等待名单审计 API，当前显示快照 ${rows.length} 条。`;
+  const pageIndex = Math.floor(contactImportsQuery.offset / contactImportsQuery.limit) + 1;
+  const pageCount = Math.max(1, Math.ceil(contactImportsState.total / contactImportsQuery.limit));
+  return `名单审计 API：第 ${pageIndex}/${pageCount} 页，共 ${contactImportsState.total} 条。`;
+}
+
+function contactImportRows(module) {
+  if (contactImportsState.loaded) {
+    return contactImportsState.items.map((item) => [
+      item.createdAt,
+      item.account,
+      item.originalFileName,
+      item.originalFormat,
+      String(item.parsedRowCount),
+      `<code>${String(item.originalSha256 || "").slice(0, 16)}</code>`,
+      `<button type="button" data-contact-import-download="${item.id}" data-contact-import-kind="original">原始</button><button type="button" data-contact-import-download="${item.id}" data-contact-import-kind="parsed">解析</button>`
+    ]);
+  }
+  return (module.records || []).map((row) => [...row, "登录后可下载"]);
+}
+
+function renderContactImports(module) {
+  const rows = contactImportRows(module);
+  const canPageBack = contactImportsState.loaded && contactImportsQuery.offset > 0;
+  const canPageNext = contactImportsState.loaded && contactImportsQuery.offset + contactImportsQuery.limit < contactImportsState.total;
+  return `
+    <section class="section-block contact-imports-panel">
+      <div class="event-toolbar">
+        <div>
+          <h2>上传名单审计</h2>
+          <p>按账号核对桌面端导入的原始文件、解析行数、格式和 SHA256。</p>
+        </div>
+        <div class="event-filters">
+          <label>
+            <span>搜索</span>
+            <input data-contact-import-filter value="${contactImportsQuery.q}" placeholder="账号 / 文件名 / SHA256" />
+          </label>
+        </div>
+      </div>
+      <div class="event-summary">
+        <span>${contactImportSummary(module, rows)}</span>
+        <div class="event-pagination">
+          <button type="button" data-contact-imports-page="prev" ${canPageBack ? "" : "disabled"}>上一页</button>
+          <button type="button" data-contact-imports-page="next" ${canPageNext ? "" : "disabled"}>下一页</button>
+        </div>
+      </div>
+      ${table(["上传时间", "账号", "原始文件", "格式", "行数", "SHA256", "下载"], rows)}
+    </section>
+  `;
+}
+
 async function loadPaymentEvents(nextQuery = {}) {
   if (!adminAccessToken) {
     resetPaymentEventsState();
@@ -270,6 +351,54 @@ async function loadPaymentEvents(nextQuery = {}) {
   renderRoute();
 }
 
+async function loadContactImports(nextQuery = {}) {
+  if (!adminAccessToken) {
+    resetContactImportsState();
+    renderRoute();
+    return;
+  }
+  contactImportsQuery = {
+    ...contactImportsQuery,
+    ...nextQuery
+  };
+  contactImportsState = {
+    ...contactImportsState,
+    loading: true,
+    error: ""
+  };
+  renderRoute();
+  try {
+    const params = new URLSearchParams({
+      limit: String(contactImportsQuery.limit),
+      offset: String(contactImportsQuery.offset)
+    });
+    if (contactImportsQuery.q) params.set("q", contactImportsQuery.q);
+    const response = await fetch(`${API_BASE_URL}/v1/admin/contact-imports?${params.toString()}`, {
+      headers: adminHeaders()
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || `CONTACT_IMPORTS_${response.status}`);
+    contactImportsState = {
+      source: "api",
+      loaded: true,
+      loading: false,
+      error: "",
+      total: payload.total,
+      items: payload.items || []
+    };
+  } catch (error) {
+    contactImportsState = {
+      source: "snapshot",
+      loaded: false,
+      loading: false,
+      error: error.message,
+      total: 0,
+      items: []
+    };
+  }
+  renderRoute();
+}
+
 function filterPaymentEvents(event) {
   const input = event.target.closest("[data-payment-event-filter]");
   if (!input) return;
@@ -283,6 +412,22 @@ function filterPaymentEvents(event) {
   }
   panel.outerHTML = renderPaymentEvents(module);
   const nextInput = pageOutlet.querySelector("[data-payment-event-filter]");
+  nextInput?.focus();
+}
+
+function filterContactImports(event) {
+  const input = event.target.closest("[data-contact-import-filter]");
+  if (!input) return;
+  contactImportsQuery.q = input.value;
+  const module = getRuntimeModuleByKey("imports");
+  const panel = pageOutlet.querySelector(".contact-imports-panel");
+  if (!panel || !module) return;
+  if (adminAccessToken) {
+    loadContactImports({ q: input.value, offset: 0 });
+    return;
+  }
+  panel.outerHTML = renderContactImports(module);
+  const nextInput = pageOutlet.querySelector("[data-contact-import-filter]");
   nextInput?.focus();
 }
 
@@ -311,6 +456,15 @@ function paginatePaymentEvents(event) {
   loadPaymentEvents({ offset });
 }
 
+function paginateContactImports(event) {
+  const button = event.target.closest("[data-contact-imports-page]");
+  if (!button) return;
+  const direction = button.dataset.contactImportsPage;
+  const delta = direction === "next" ? contactImportsQuery.limit : -contactImportsQuery.limit;
+  const offset = Math.max(0, contactImportsQuery.offset + delta);
+  loadContactImports({ offset });
+}
+
 async function copyPaymentToken(event) {
   const button = event.target.closest("[data-copy-value]");
   if (!button) return;
@@ -320,6 +474,40 @@ async function copyPaymentToken(event) {
     button.textContent = "已复制";
   } catch {
     button.textContent = value;
+  }
+}
+
+async function downloadContactImportArtifact(event) {
+  const button = event.target.closest("[data-contact-import-download]");
+  if (!button) return;
+  const importId = button.dataset.contactImportDownload;
+  const kind = button.dataset.contactImportKind || "original";
+  button.disabled = true;
+  const originalText = button.textContent;
+  button.textContent = "下载中";
+  try {
+    const response = await fetch(`${API_BASE_URL}/v1/admin/contact-imports/${encodeURIComponent(importId)}/download?kind=${encodeURIComponent(kind)}`, {
+      headers: adminHeaders()
+    });
+    if (!response.ok) throw new Error(`CONTACT_IMPORT_DOWNLOAD_${response.status}`);
+    const blob = await response.blob();
+    const disposition = response.headers.get("content-disposition") || "";
+    const match = /filename="([^"]+)"/.exec(disposition);
+    const fileName = match ? match[1] : `contact-import-${kind}.csv`;
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = fileName;
+    link.click();
+    URL.revokeObjectURL(url);
+    button.textContent = "已下载";
+  } catch (error) {
+    button.textContent = error.message === "ADMIN_LOGIN_REQUIRED" ? "请登录" : "失败";
+  } finally {
+    setTimeout(() => {
+      button.disabled = false;
+      button.textContent = originalText;
+    }, 1600);
   }
 }
 
@@ -410,12 +598,12 @@ function renderDashboard() {
     ${headerTemplate({
       eyebrow: "Admin console v0",
       title: "运营首页",
-      description: "这里保留全局摘要和待处理事项。具体管理动作已经拆到左侧每一个模块页里，不再把 8 个模块详情堆在同一个长页面。",
+      description: `这里保留全局摘要和待处理事项。具体管理动作已经拆到左侧每一个模块页里，不再把 ${runtimeState.adminModules.length} 个模块详情堆在同一个长页面。`,
       status: runtimeState.environmentStatus
     })}
 
     <section class="summary-grid" aria-label="运营摘要">
-      <div class="summary-tile"><span>管理模块</span><strong>8</strong></div>
+      <div class="summary-tile"><span>管理模块</span><strong>${runtimeState.adminModules.length}</strong></div>
       <div class="summary-tile"><span>桌面端页面对应</span><strong>5</strong></div>
       <div class="summary-tile"><span>敏感动作留痕</span><strong>100%</strong></div>
       <div class="summary-tile"><span>公开官网耦合</span><strong>0</strong></div>
@@ -506,6 +694,7 @@ function renderModulePage(module) {
     </div>
 
     ${module.key === "orders" ? renderPaymentEvents(module) : ""}
+    ${module.key === "imports" ? renderContactImports(module) : ""}
 
     ${
       module.key === "audit"
@@ -641,6 +830,7 @@ function renderRoute() {
 
   window.scrollTo({ top: 0, left: 0 });
   maybeLoadPaymentEvents(activeKey);
+  maybeLoadContactImports(activeKey);
 }
 
 function maybeLoadPaymentEvents(activeKey) {
@@ -648,6 +838,13 @@ function maybeLoadPaymentEvents(activeKey) {
   if (!adminAccessToken) return;
   if (paymentEventsState.loaded || paymentEventsState.loading) return;
   loadPaymentEvents();
+}
+
+function maybeLoadContactImports(activeKey) {
+  if (activeKey !== "imports") return;
+  if (!adminAccessToken) return;
+  if (contactImportsState.loaded || contactImportsState.loading) return;
+  loadContactImports();
 }
 
 routeButtons.forEach((button) => {
@@ -667,6 +864,7 @@ renderRoute();
 
 function applyConsoleSnapshot(snapshot) {
   resetPaymentEventsState();
+  resetContactImportsState();
   runtimeState = {
     adminModules: adminModules.map((module) => ({
       ...module,
@@ -723,9 +921,12 @@ async function loginAdmin(event) {
 adminLoginForm.addEventListener("submit", loginAdmin);
 pageOutlet.addEventListener("submit", handleOperationSubmit);
 pageOutlet.addEventListener("input", filterPaymentEvents);
+pageOutlet.addEventListener("input", filterContactImports);
 pageOutlet.addEventListener("change", handlePaymentEventControlChange);
 pageOutlet.addEventListener("click", paginatePaymentEvents);
+pageOutlet.addEventListener("click", paginateContactImports);
 pageOutlet.addEventListener("click", copyPaymentToken);
+pageOutlet.addEventListener("click", downloadContactImportArtifact);
 
 Object.assign(window, {
   applyConsoleSnapshot,
@@ -734,14 +935,19 @@ Object.assign(window, {
   loginAdmin,
   loadConsoleSnapshot,
   loadPaymentEvents,
+  loadContactImports,
   renderDashboard,
   renderMappings,
   renderModulePage,
   renderOperationPanel,
   renderPaymentEvents,
+  renderContactImports,
   filterPaymentEvents,
+  filterContactImports,
   paginatePaymentEvents,
+  paginateContactImports,
   copyPaymentToken,
+  downloadContactImportArtifact,
   submitCreditAdjustment,
   submitOrderMarkPaid,
   submitOrderCompensation,

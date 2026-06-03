@@ -48,6 +48,7 @@ function isoNow(store) {
 }
 
 const ORDER_PAYMENT_TTL_MS = 5 * 60 * 1000;
+const CONTACT_IMPORT_MAX_BYTES = 25 * 1024 * 1024;
 
 function createId(prefix) {
   return `${prefix}_${crypto.randomUUID()}`;
@@ -154,6 +155,149 @@ function appendAuditLog(store, { adminUserId, action, targetType, targetId, befo
   return entry;
 }
 
+function safeFileName(value, fallback = "contact-import") {
+  const clean = String(value || fallback)
+    .replace(/[\\/:*?"<>|]/g, "-")
+    .replace(/\s+/g, " ")
+    .trim();
+  return clean || fallback;
+}
+
+function normalizeOriginalFormat(value, fileName) {
+  const explicit = String(value || "").trim().toLowerCase().replace(/^\./, "");
+  if (explicit) return explicit.slice(0, 16);
+  const match = /\.([a-z0-9]+)$/i.exec(String(fileName || ""));
+  return match ? match[1].toLowerCase() : "unknown";
+}
+
+function normalizeContactImportPayload(store, body = {}) {
+  const originalFileName = safeFileName(body.originalFileName, "contact-import");
+  const originalFormat = normalizeOriginalFormat(body.originalFormat, originalFileName);
+  const originalMimeType = String(body.originalMimeType || "application/octet-stream").slice(0, 200);
+  const originalBytes = Buffer.from(String(body.originalBase64 || ""), "base64");
+  if (!originalBytes.length) throw new Error("CONTACT_IMPORT_FILE_REQUIRED");
+  if (originalBytes.length > CONTACT_IMPORT_MAX_BYTES) throw new Error("CONTACT_IMPORT_FILE_TOO_LARGE");
+  const originalSizeBytes = Number(body.originalSizeBytes || originalBytes.length);
+  if (originalSizeBytes !== originalBytes.length) throw new Error("CONTACT_IMPORT_SIZE_MISMATCH");
+  const originalSha256 = crypto.createHash("sha256").update(originalBytes).digest("hex");
+  const expectedSha256 = String(body.originalSha256 || originalSha256).trim().toLowerCase();
+  if (expectedSha256 && expectedSha256 !== originalSha256) throw new Error("CONTACT_IMPORT_SHA_MISMATCH");
+  const parsedRows = Array.isArray(body.parsedRows) ? body.parsedRows : [];
+  return {
+    id: createId("contact_import"),
+    userId: body.userId,
+    originalFileName,
+    originalFormat,
+    originalMimeType,
+    originalSizeBytes: originalBytes.length,
+    originalSha256,
+    originalBase64: originalBytes.toString("base64"),
+    columns: body.columns || {},
+    stats: body.stats || {},
+    importOptions: body.importOptions || {},
+    parsedRows,
+    createdAt: isoNow(store)
+  };
+}
+
+function publicContactImport(store, record) {
+  const user = store.users.get(record.userId);
+  return {
+    id: record.id,
+    userId: record.userId,
+    account: user ? user.username : record.userId,
+    originalFileName: record.originalFileName,
+    originalFormat: record.originalFormat,
+    originalMimeType: record.originalMimeType,
+    originalSizeBytes: record.originalSizeBytes,
+    originalSha256: record.originalSha256,
+    parsedRowCount: record.parsedRows.length,
+    stats: record.stats,
+    columns: record.columns,
+    createdAt: record.createdAt,
+    originalDownloadUrl: `/v1/admin/contact-imports/${record.id}/download?kind=original`,
+    parsedDownloadUrl: `/v1/admin/contact-imports/${record.id}/download?kind=parsed`
+  };
+}
+
+function createContactImport(store, body) {
+  getUser(store, body.userId);
+  const record = normalizeContactImportPayload(store, body);
+  store.contactImports.set(record.id, record);
+  return publicContactImport(store, record);
+}
+
+function listContactImports(store, { q, limit = 50, offset = 0 } = {}) {
+  const normalizedQ = String(q || "").trim().toLowerCase();
+  const numericLimit = Math.min(Math.max(Number(limit) || 50, 1), 100);
+  const numericOffset = Math.max(Number(offset) || 0, 0);
+  const filtered = [...store.contactImports.values()]
+    .map((record) => publicContactImport(store, record))
+    .filter((record) => {
+      if (!normalizedQ) return true;
+      return [
+        record.account,
+        record.userId,
+        record.originalFileName,
+        record.originalFormat,
+        record.originalSha256
+      ].join(" ").toLowerCase().includes(normalizedQ);
+    })
+    .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+  return {
+    total: filtered.length,
+    limit: numericLimit,
+    offset: numericOffset,
+    items: filtered.slice(numericOffset, numericOffset + numericLimit)
+  };
+}
+
+function csvEscape(value) {
+  const text = value === undefined || value === null ? "" : String(value);
+  return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+}
+
+function parsedRowsCsv(rows = []) {
+  const sourceKeys = [];
+  for (const row of rows) {
+    for (const key of Object.keys(row && row.source ? row.source : {})) {
+      if (!sourceKeys.includes(key)) sourceKeys.push(key);
+    }
+  }
+  const headers = ["rowNumber", "status", "e164", "countryIso", "language", ...sourceKeys.map((key) => `source_${key}`)];
+  const lines = [headers.join(",")];
+  for (const row of rows) {
+    lines.push(headers.map((header) => {
+      if (header.startsWith("source_")) {
+        return csvEscape(row.source?.[header.slice(7)]);
+      }
+      return csvEscape(row[header]);
+    }).join(","));
+  }
+  return `${lines.join("\r\n")}\r\n`;
+}
+
+function parsedDownloadFileName(originalFileName) {
+  return safeFileName(originalFileName.replace(/\.[^.]+$/, ""), "contact-import") + "-parsed.csv";
+}
+
+function getContactImportDownload(store, { importId, kind = "original" }) {
+  const record = store.contactImports.get(importId);
+  if (!record) throw new Error("CONTACT_IMPORT_NOT_FOUND");
+  if (kind === "parsed") {
+    return {
+      body: Buffer.from(parsedRowsCsv(record.parsedRows), "utf8"),
+      contentType: "text/csv; charset=utf-8",
+      fileName: parsedDownloadFileName(record.originalFileName)
+    };
+  }
+  return {
+    body: Buffer.from(record.originalBase64, "base64"),
+    contentType: record.originalMimeType || "application/octet-stream",
+    fileName: record.originalFileName
+  };
+}
+
 function appendLedger(store, { userId, type, amount, idempotencyKey, relatedOrderId, relatedTaskId, relatedContactHash, note }) {
   const existing = store.creditLedger.find((entry) => entry.idempotencyKey === idempotencyKey);
   if (existing) return { entry: existing, idempotentReplay: true };
@@ -230,6 +374,7 @@ export function createCloudStore(options = {}) {
     usageMonthly: new Map(),
     orders: new Map(),
     paymentEvents: new Map(),
+    contactImports: new Map(),
     referralCodes: new Map(),
     workspaceLeases: new Map(),
     auditLogs: [],
@@ -810,6 +955,7 @@ export function getAdminConsoleSnapshot(store) {
   const plans = Object.values(PLAN_CATALOG);
   const orders = [...store.orders.values()];
   const paymentEvents = [...store.paymentEvents.values()];
+  const contactImports = [...store.contactImports.values()];
   const leases = [...store.workspaceLeases.values()];
   const dailyUsage = [...store.usageDaily.values()];
   const referralCodes = [...store.referralCodes.values()];
@@ -875,6 +1021,19 @@ export function getAdminConsoleSnapshot(store) {
       ]),
       paymentEvents: paymentEventRows(paymentEvents)
     },
+    imports: {
+      metric: String(contactImports.length),
+      status: "API 已接",
+      recordHeaders: ["上传时间", "账号", "原始文件", "格式", "行数", "SHA256"],
+      records: tableRows(contactImports.map((record) => publicContactImport(store, record)), (record) => [
+        record.createdAt,
+        record.account,
+        record.originalFileName,
+        record.originalFormat,
+        String(record.parsedRowCount),
+        record.originalSha256.slice(0, 16)
+      ])
+    },
     referrals: {
       metric: String(referralCodes.length),
       status: "API 已接",
@@ -916,6 +1075,7 @@ export function getAdminConsoleSnapshot(store) {
       creditEntries: store.creditLedger.length,
       orders: orders.length,
       paymentEvents: paymentEvents.length,
+      contactImports: contactImports.length,
       activeLeases: leases.filter((lease) => lease.status === "active").length,
       auditLogs: auditTrail.length
     },
@@ -962,6 +1122,9 @@ export function createMemoryRuntime(options = {}) {
     processPaymentEvent: (body) => processPaymentEvent(store, body),
     processPendingOrderCredits: (body) => processPendingOrderCredits(store, body),
     listPaymentEvents: (query) => listPaymentEvents(store, query),
+    createContactImport: (body) => createContactImport(store, body),
+    listContactImports: (query) => listContactImports(store, query),
+    getContactImportDownload: (body) => getContactImportDownload(store, body),
     adjustCredits: (body) => adjustCredits(store, body),
     issueWorkspaceLease: (body) => issueWorkspaceLease(store, body),
     renewWorkspaceLease: (body) => renewWorkspaceLease(store, body),

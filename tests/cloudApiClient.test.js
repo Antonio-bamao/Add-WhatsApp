@@ -129,6 +129,69 @@ test('issues workspace leases with bearer auth', async () => {
   assert.equal(lease.activeCount, 2);
 });
 
+test('uploads contact import audit records with original and parsed artifacts', async () => {
+  const client = new CloudApiClient({
+    baseUrl: 'http://127.0.0.1:4110',
+    fetchImpl: async (url, options = {}) => {
+      assert.equal(url, 'http://127.0.0.1:4110/v1/contact-imports');
+      assert.equal(options.method, 'POST');
+      assert.equal(options.headers.authorization, 'Bearer access-1');
+      assert.deepEqual(JSON.parse(options.body), {
+        originalFileName: 'customers.xlsx',
+        originalFormat: 'xlsx',
+        originalMimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        originalSizeBytes: 12,
+        originalSha256: 'sha256-raw-file',
+        originalBase64: 'cmF3LWNvbnRlbnQ=',
+        columns: { phoneColumn: 'phone', countryColumn: 'country', languageColumn: 'language' },
+        stats: { total: 1, valid: 1, invalid: 0 },
+        importOptions: { skipChinaNumbers: true },
+        parsedRows: [
+          {
+            rowNumber: 2,
+            status: 'valid',
+            e164: '+15551234567',
+            countryIso: 'US',
+            language: 'en',
+            source: { phone: '5551234567', country: 'US' }
+          }
+        ]
+      });
+      return response(201, {
+        id: 'import-1',
+        originalFileName: 'customers.xlsx',
+        originalFormat: 'xlsx',
+        parsedRowCount: 1
+      });
+    }
+  });
+
+  const created = await client.createContactImport('access-1', {
+    originalFileName: 'customers.xlsx',
+    originalFormat: 'xlsx',
+    originalMimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    originalSizeBytes: 12,
+    originalSha256: 'sha256-raw-file',
+    originalBase64: 'cmF3LWNvbnRlbnQ=',
+    columns: { phoneColumn: 'phone', countryColumn: 'country', languageColumn: 'language' },
+    stats: { total: 1, valid: 1, invalid: 0 },
+    importOptions: { skipChinaNumbers: true },
+    parsedRows: [
+      {
+        rowNumber: 2,
+        status: 'valid',
+        e164: '+15551234567',
+        countryIso: 'US',
+        language: 'en',
+        source: { phone: '5551234567', country: 'US' }
+      }
+    ]
+  });
+
+  assert.equal(created.id, 'import-1');
+  assert.equal(created.parsedRowCount, 1);
+});
+
 test('renews and releases workspace leases with bearer auth', async () => {
   const requests = [];
   const client = new CloudApiClient({
