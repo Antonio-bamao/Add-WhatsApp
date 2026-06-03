@@ -53,7 +53,7 @@ describe("admin console structure", () => {
       assert.ok(module.route);
       assert.ok(module.pageTitle);
       assert.ok(module.pageDescription);
-      if (module.key === "users" || module.key === "orders") {
+      if (module.key === "users" || module.key === "orders" || module.key === "imports") {
         assert.equal(module.sections.length, 0);
       } else {
         assert.ok(module.sections.length >= 3);
@@ -186,13 +186,20 @@ describe("admin console structure", () => {
 
     assert.equal(imports.title, "名单审计");
     assert.match(imports.pageDescription, /原始文件/);
+    assert.equal(imports.sections.length, 0);
     assert.ok(desktopAdminMappings.some((mapping) => mapping.desktopPage === "导入名单"));
     assert.match(js, /\/v1\/admin\/contact-imports/);
+    assert.match(js, /renderImportsModulePage/);
+    assert.match(js, /imports-workspace/);
+    const importsRenderer = js.match(/function renderImportsModulePage\(module\) \{[\s\S]*?\n\}/)?.[0] || "";
+    assert.match(importsRenderer, /eyebrow: ""/);
+    assert.doesNotMatch(importsRenderer, /module\.sections|必须遵守|section\.body|module-hero|当前记录/);
     assert.match(js, /downloadContactImportArtifact/);
     assert.match(js, /downloadFileNameFromDisposition/);
     assert.match(js, /filename\\\*/);
     assert.match(js, /data-contact-import-download/);
     assert.match(css, /\.contact-imports-panel/);
+    assert.match(css, /\.imports-workspace/);
   });
 
   it("uses the admin payment-events API for the orders event table", () => {
@@ -243,6 +250,10 @@ describe("admin console structure", () => {
     assert.match(js, /data-user-modal/);
     assert.match(js, /data-user-modal-save/);
     assert.match(js, /data-user-modal-cancel/);
+    assert.match(js, /RECORD_PAGE_SIZE = 8/);
+    assert.match(js, /userPageOffset/);
+    assert.match(js, /paginateUsers/);
+    assert.match(js, /data-users-page/);
     assert.match(js, /保存修改/);
     assert.match(js, /取消/);
     assert.match(js, /data-user-id/);
@@ -250,6 +261,7 @@ describe("admin console structure", () => {
     assert.doesNotMatch(js, /<td><select data-user-plan/);
     assert.doesNotMatch(js, /<span class="credit-balance">.*data-user-credit-amount/s);
     assert.match(css, /\.users-management-table/);
+    assert.match(css, /\.record-pagination/);
     assert.match(css, /\.user-edit-modal/);
     assert.match(css, /\.modal-actions/);
     assert.match(css, /\.modal-card\s*{[^}]*font-size:\s*16px/s);

@@ -517,6 +517,41 @@ h3 {
   font-weight: 700;
 }
 
+.imports-workspace {
+  display: grid;
+  gap: 20px;
+}
+
+.record-pagination {
+  display: inline-flex;
+  gap: 10px;
+  align-items: center;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.record-pagination div {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.record-pagination button {
+  min-height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-muted);
+  color: var(--brand-dark);
+  padding: 6px 10px;
+  font-weight: 800;
+}
+
+.record-pagination button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
 .users-summary {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
@@ -1067,6 +1102,13 @@ code {
   }
 
   .event-summary {
+    align-items: stretch;
+    display: grid;
+  }
+
+  .users-panel-head,
+  .section-head,
+  .record-pagination {
     align-items: stretch;
     display: grid;
   }

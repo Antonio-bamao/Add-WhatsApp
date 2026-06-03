@@ -11,7 +11,9 @@ const adminPasswordInput = document.querySelector("[data-admin-password]");
 const adminLoginStatus = document.querySelector("[data-admin-login-status]");
 const API_BASE_URL = resolveApiBaseUrl();
 const ADMIN_TOKEN_STORAGE_KEY = "addWhatsappAdminAccessToken";
+const RECORD_PAGE_SIZE = 8;
 let adminAccessToken = window.sessionStorage.getItem(ADMIN_TOKEN_STORAGE_KEY) || "";
+let userPageOffset = 0;
 
 let runtimeState = {
   adminModules,
@@ -24,7 +26,7 @@ let paymentEventsQuery = {
   provider: "",
   processed: "",
   q: "",
-  limit: 20,
+  limit: RECORD_PAGE_SIZE,
   offset: 0
 };
 
@@ -39,7 +41,7 @@ let paymentEventsState = {
 
 let contactImportsQuery = {
   q: "",
-  limit: 20,
+  limit: RECORD_PAGE_SIZE,
   offset: 0
 };
 
@@ -106,6 +108,38 @@ function table(headers, rows) {
           }
         </tbody>
       </table>
+    </div>
+  `;
+}
+
+function pageCount(total, pageSize = RECORD_PAGE_SIZE) {
+  return Math.max(1, Math.ceil(total / pageSize));
+}
+
+function pageRows(rows, offset, pageSize = RECORD_PAGE_SIZE) {
+  return rows.slice(offset, offset + pageSize);
+}
+
+function clampOffset(offset, total, pageSize = RECORD_PAGE_SIZE) {
+  if (total <= pageSize) return 0;
+  const maxOffset = (pageCount(total, pageSize) - 1) * pageSize;
+  return Math.min(Math.max(0, offset), maxOffset);
+}
+
+function recordPageSummary(offset, total, pageSize = RECORD_PAGE_SIZE) {
+  return `第 ${Math.floor(offset / pageSize) + 1}/${pageCount(total, pageSize)} 页，共 ${total} 条`;
+}
+
+function renderRecordPagination({ name, offset, total, pageSize = RECORD_PAGE_SIZE }) {
+  const canPageBack = offset > 0;
+  const canPageNext = offset + pageSize < total;
+  return `
+    <div class="record-pagination" data-record-pagination="${name}">
+      <span>${recordPageSummary(offset, total, pageSize)}</span>
+      <div>
+        <button type="button" data-${name}-page="prev" ${canPageBack ? "" : "disabled"}>上一页</button>
+        <button type="button" data-${name}-page="next" ${canPageNext ? "" : "disabled"}>下一页</button>
+      </div>
     </div>
   `;
 }
@@ -199,7 +233,8 @@ function paymentEventRowsFromApi(items) {
 function paymentEventRows(module) {
   if (paymentEventsState.loaded) return paymentEventRowsFromApi(paymentEventsState.items);
   const normalizedFilter = paymentEventsQuery.q.trim().toLowerCase();
-  return (module.paymentEvents || []).filter((row) => row.join(" ").toLowerCase().includes(normalizedFilter));
+  const rows = (module.paymentEvents || []).filter((row) => row.join(" ").toLowerCase().includes(normalizedFilter));
+  return pageRows(rows, clampOffset(paymentEventsQuery.offset, rows.length, paymentEventsQuery.limit), paymentEventsQuery.limit);
 }
 
 function paymentEventSummary(module, rows) {
@@ -208,14 +243,16 @@ function paymentEventSummary(module, rows) {
   if (!adminAccessToken) return "";
   if (!paymentEventsState.loaded) return `等待分页 API，当前显示快照 ${rows.length} 条。`;
   const pageIndex = Math.floor(paymentEventsQuery.offset / paymentEventsQuery.limit) + 1;
-  const pageCount = Math.max(1, Math.ceil(paymentEventsState.total / paymentEventsQuery.limit));
-  return `分页 API：第 ${pageIndex}/${pageCount} 页，共 ${paymentEventsState.total} 条。`;
+  const totalPages = pageCount(paymentEventsState.total, paymentEventsQuery.limit);
+  return `第 ${pageIndex}/${totalPages} 页，共 ${paymentEventsState.total} 条`;
 }
 
 function renderPaymentEvents(module) {
   const rows = paymentEventRows(module);
-  const canPageBack = paymentEventsState.loaded && paymentEventsQuery.offset > 0;
-  const canPageNext = paymentEventsState.loaded && paymentEventsQuery.offset + paymentEventsQuery.limit < paymentEventsState.total;
+  const total = paymentEventsState.loaded ? paymentEventsState.total : (module.paymentEvents || []).length;
+  const offset = clampOffset(paymentEventsQuery.offset, total, paymentEventsQuery.limit);
+  const canPageBack = offset > 0;
+  const canPageNext = offset + paymentEventsQuery.limit < total;
   return `
     <section class="section-block payment-events-panel">
       <div class="event-toolbar">
@@ -379,6 +416,8 @@ function renderUserEditModal() {
 
 function renderUsersModulePage(module) {
   const rows = userRows(module);
+  userPageOffset = clampOffset(userPageOffset, rows.length);
+  const visibleRows = pageRows(rows, userPageOffset);
   const activeCount = rows.filter((row) => row[3] === "active").length;
   const frozenCount = rows.filter((row) => row[3] === "frozen").length;
   const totalBalance = rows.reduce((sum, row) => sum + (Number(row[5]) || 0), 0);
@@ -401,7 +440,7 @@ function renderUsersModulePage(module) {
     <section class="section-block users-management-panel">
       <div class="users-panel-head">
         <h2>账户列表</h2>
-        <span>${rows.length} 条记录</span>
+        ${renderRecordPagination({ name: "users", offset: userPageOffset, total: rows.length })}
       </div>
       <div class="table-wrap users-management-table">
         <table>
@@ -420,7 +459,7 @@ function renderUsersModulePage(module) {
           <tbody>
             ${
               rows.length > 0
-                ? rows.map((row) => {
+                ? visibleRows.map((row) => {
                     const uid = formatUserUid(row[1]);
                     const account = escapeHtml(row[2]);
                     const status = String(row[3] || "active");
@@ -456,13 +495,19 @@ function renderUsersModulePage(module) {
 }
 
 function contactImportSummary(module, rows) {
+  const total = contactImportTotal(module);
+  const offset = clampOffset(contactImportsQuery.offset, total, contactImportsQuery.limit);
   if (contactImportsState.loading) return "正在读取名单审计 API...";
   if (contactImportsState.error) return `名单审计 API 读取失败：${contactImportsState.error}`;
   if (!adminAccessToken) return "";
-  if (!contactImportsState.loaded) return `等待名单审计 API，当前显示快照 ${rows.length} 条。`;
+  if (!contactImportsState.loaded) return recordPageSummary(offset, total, contactImportsQuery.limit);
   const pageIndex = Math.floor(contactImportsQuery.offset / contactImportsQuery.limit) + 1;
-  const pageCount = Math.max(1, Math.ceil(contactImportsState.total / contactImportsQuery.limit));
-  return `名单审计 API：第 ${pageIndex}/${pageCount} 页，共 ${contactImportsState.total} 条。`;
+  const totalPages = pageCount(contactImportsState.total, contactImportsQuery.limit);
+  return `第 ${pageIndex}/${totalPages} 页，共 ${contactImportsState.total} 条`;
+}
+
+function contactImportTotal(module) {
+  return contactImportsState.loaded ? contactImportsState.total : (module.records || []).length;
 }
 
 function contactImportRows(module) {
@@ -477,19 +522,21 @@ function contactImportRows(module) {
       `<button type="button" data-contact-import-download="${item.id}" data-contact-import-kind="original">原始</button><button type="button" data-contact-import-download="${item.id}" data-contact-import-kind="parsed">解析</button>`
     ]);
   }
-  return (module.records || []).map((row) => [...row, ""]);
+  const rows = (module.records || []).map((row) => [...row, ""]);
+  return pageRows(rows, clampOffset(contactImportsQuery.offset, rows.length, contactImportsQuery.limit), contactImportsQuery.limit);
 }
 
 function renderContactImports(module) {
   const rows = contactImportRows(module);
-  const canPageBack = contactImportsState.loaded && contactImportsQuery.offset > 0;
-  const canPageNext = contactImportsState.loaded && contactImportsQuery.offset + contactImportsQuery.limit < contactImportsState.total;
+  const total = contactImportTotal(module);
+  const offset = clampOffset(contactImportsQuery.offset, total, contactImportsQuery.limit);
+  const canPageBack = offset > 0;
+  const canPageNext = offset + contactImportsQuery.limit < total;
   return `
     <section class="section-block contact-imports-panel">
       <div class="event-toolbar">
         <div>
           <h2>上传名单审计</h2>
-          <p>按账号核对桌面端导入的原始文件、解析行数、格式和 SHA256。</p>
         </div>
         <div class="event-filters">
           <label>
@@ -672,6 +719,16 @@ function paginateContactImports(event) {
   const delta = direction === "next" ? contactImportsQuery.limit : -contactImportsQuery.limit;
   const offset = Math.max(0, contactImportsQuery.offset + delta);
   loadContactImports({ offset });
+}
+
+function paginateUsers(event) {
+  const button = event.target.closest("[data-users-page]");
+  if (!button) return;
+  const module = getRuntimeModuleByKey("users");
+  const total = userRows(module).length;
+  const delta = button.dataset.usersPage === "next" ? RECORD_PAGE_SIZE : -RECORD_PAGE_SIZE;
+  userPageOffset = clampOffset(userPageOffset + delta, total);
+  renderUsersModulePage(module);
 }
 
 async function copyPaymentToken(event) {
@@ -900,6 +957,21 @@ function renderOrdersModulePage(module) {
   `;
 }
 
+function renderImportsModulePage(module) {
+  pageOutlet.innerHTML = `
+    ${headerTemplate({
+      eyebrow: "",
+      title: module.pageTitle,
+      description: "",
+      status: module.status
+    })}
+
+    <div class="imports-workspace">
+      ${renderContactImports(module)}
+    </div>
+  `;
+}
+
 function renderModulePage(module) {
   if (module.key === "users") {
     renderUsersModulePage(module);
@@ -907,6 +979,10 @@ function renderModulePage(module) {
   }
   if (module.key === "orders") {
     renderOrdersModulePage(module);
+    return;
+  }
+  if (module.key === "imports") {
+    renderImportsModulePage(module);
     return;
   }
 
@@ -1315,6 +1391,7 @@ pageOutlet.addEventListener("input", filterContactImports);
 pageOutlet.addEventListener("change", handlePaymentEventControlChange);
 pageOutlet.addEventListener("click", paginatePaymentEvents);
 pageOutlet.addEventListener("click", paginateContactImports);
+pageOutlet.addEventListener("click", paginateUsers);
 pageOutlet.addEventListener("click", copyPaymentToken);
 pageOutlet.addEventListener("click", downloadContactImportArtifact);
 pageOutlet.addEventListener("click", openUserEditModal);
