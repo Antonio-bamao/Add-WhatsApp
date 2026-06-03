@@ -23,7 +23,7 @@ dns.lookup = function (hostname, options, callback) {
 };
 import { createPostgresRuntime } from "./db/postgresRuntime.js";
 import { createMemoryRuntime } from "./services/billingService.js";
-import { buildAlipayPagePayRequest, buildWechatCloseOrderRequest, buildWechatNativePayRequest, buildZpayPagePayRequest, parseAlipayNotification, parseMockAlipayNotification, parseWechatNotification, parseZpayNotification, queryAlipayTrade } from "./services/paymentProviders.js";
+import { buildAlipayPagePayRequest, buildWechatCloseOrderRequest, buildWechatNativePayRequest, buildZpayPagePayRequest, parseAlipayNotification, parseMockAlipayNotification, parseWechatNotification, parseZpayNotification, queryAlipayTrade, queryWechatTrade } from "./services/paymentProviders.js";
 
 function jsonResponse(response, statusCode, payload) {
   response.writeHead(statusCode, {
@@ -101,6 +101,12 @@ async function authAdminId(runtime, request) {
   const match = /^Bearer\s+(.+)$/i.exec(header);
   if (!match) throw new Error("ADMIN_UNAUTHORIZED");
   return runtime.authenticateAdminToken(match[1]);
+}
+
+function bearerToken(request) {
+  const header = request.headers.authorization || "";
+  const match = /^Bearer\s+(.+)$/i.exec(header);
+  return match?.[1] || "";
 }
 
 function clientIp(request) {
@@ -231,6 +237,13 @@ export function createAppServer(options = {}) {
       if (request.method === "POST" && url.pathname === "/v1/admin/auth/login") {
         const body = await readJson(request);
         jsonResponse(response, 200, await runtime.loginAdmin(body));
+        return;
+      }
+
+      if (request.method === "POST" && url.pathname === "/v1/admin/auth/logout") {
+        const token = bearerToken(request);
+        await authAdminId(runtime, request);
+        jsonResponse(response, 200, await runtime.logoutAdmin(token));
         return;
       }
 
@@ -424,6 +437,34 @@ export function createAppServer(options = {}) {
         await authAdminId(runtime, request);
         const body = await readJson(request);
         jsonResponse(response, 200, await runtime.processPendingOrderCredits(body));
+        return;
+      }
+
+      if (request.method === "POST" && /^\/v1\/admin\/orders\/[^/]+\/sync-wechat$/.test(url.pathname)) {
+        await authAdminId(runtime, request);
+        const orderId = decodeURIComponent(url.pathname.split("/")[4]);
+        const order = await runtime.getOrderForAdmin({ orderId });
+        const wechat = await queryWechatTrade(order, {
+          gatewayUrl: env.WECHAT_GATEWAY_URL,
+          mchId: env.WECHAT_MCH_ID,
+          merchantSerialNo: env.WECHAT_MERCHANT_SERIAL_NO,
+          merchantPrivateKey: readEnvFileValue(env.WECHAT_MERCHANT_PRIVATE_KEY, env.WECHAT_MERCHANT_PRIVATE_KEY_PATH),
+          fetchImpl
+        });
+        if (wechat.tradeState === "SUCCESS") {
+          const settlement = await runtime.processPaymentEvent({
+            provider: "wechat",
+            providerEventId: `wechat:${wechat.transactionId || wechat.outTradeNo || order.orderNo}:TRANSACTION.SUCCESS`,
+            orderId: order.id,
+            orderNo: order.orderNo,
+            eventType: "payment_succeeded",
+            providerTradeNo: wechat.transactionId,
+            payload: wechat.payload
+          });
+          jsonResponse(response, 200, { synced: true, wechat, settlement });
+          return;
+        }
+        jsonResponse(response, 200, { synced: false, wechat, order });
         return;
       }
 

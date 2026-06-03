@@ -378,6 +378,87 @@ export async function buildWechatCloseOrderRequest(order, options = {}) {
   return { provider: "wechat", orderNo, closed: true };
 }
 
+export async function queryWechatTrade(order, options = {}) {
+  const gatewayUrlOption = options.gatewayUrl ? String(options.gatewayUrl).trim().replace(/\/+$/, "") : "";
+  const gateways = gatewayUrlOption
+    ? [gatewayUrlOption]
+    : [
+        "https://api.mch.weixin.qq.com",
+        "https://apihk.mch.weixin.qq.com",
+        "https://apius.mch.weixin.qq.com",
+        "https://apieu.mch.weixin.qq.com"
+      ];
+  const mchId = String(options.mchId || "").trim();
+  const merchantSerialNo = String(options.merchantSerialNo || "").trim();
+  const merchantPrivateKey = normalizeWechatPrivateKey(options.merchantPrivateKey);
+  const orderNo = String(order?.orderNo || "").trim();
+  if (!mchId) throw new Error("WECHAT_MCH_ID_REQUIRED");
+  if (!merchantSerialNo) throw new Error("WECHAT_MERCHANT_SERIAL_NO_REQUIRED");
+  if (!orderNo) throw new Error("ORDER_NO_REQUIRED");
+
+  const apiPath = `/v3/pay/transactions/out-trade-no/${encodeURIComponent(orderNo)}?mchid=${encodeURIComponent(mchId)}`;
+  const timestamp = String(options.now || Math.floor(Date.now() / 1000));
+  const nonce = String(options.nonce || crypto.randomBytes(16).toString("hex"));
+  const signature = signWechatRequest({
+    method: "GET",
+    pathname: apiPath,
+    body: "",
+    timestamp,
+    nonce,
+    privateKey: merchantPrivateKey
+  });
+  const authorization = [
+    `mchid="${mchId}"`,
+    `nonce_str="${nonce}"`,
+    `timestamp="${timestamp}"`,
+    `serial_no="${merchantSerialNo}"`,
+    `signature="${signature}"`
+  ].join(",");
+  const fetchImpl = options.fetchImpl || globalThis.fetch;
+  if (typeof fetchImpl !== "function") throw new Error("WECHAT_FETCH_UNAVAILABLE");
+
+  let lastError;
+  let response;
+  let responsePayload = {};
+  for (const gateway of gateways) {
+    try {
+      response = await fetchImpl(`${gateway}${apiPath}`, {
+        method: "GET",
+        signal: options.signal,
+        headers: {
+          "Accept": "application/json",
+          "Authorization": `WECHATPAY2-SHA256-RSA2048 ${authorization}`
+        }
+      });
+      responsePayload = await response.json();
+      lastError = null;
+      break;
+    } catch (err) {
+      if (response) {
+        lastError = null;
+        break;
+      }
+      lastError = err;
+    }
+  }
+  if (lastError) throw lastError;
+  if (!response.ok) {
+    throw new Error(`WECHAT_QUERY_ORDER_FAILED:${responsePayload.message || responsePayload.code || response.status}`);
+  }
+
+  return {
+    provider: "wechat",
+    orderNo,
+    tradeState: responsePayload.trade_state,
+    transactionId: responsePayload.transaction_id,
+    outTradeNo: responsePayload.out_trade_no,
+    amountCents: responsePayload.amount?.total,
+    payerOpenId: responsePayload.payer?.openid,
+    successTime: responsePayload.success_time,
+    payload: responsePayload
+  };
+}
+
 export function buildAlipayPagePayRequest(order, options = {}) {
   const appId = String(options.appId || "").trim();
   const appPrivateKey = normalizePem(options.appPrivateKey);

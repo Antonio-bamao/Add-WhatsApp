@@ -78,7 +78,7 @@ button {
 
 .admin-shell {
   display: grid;
-  grid-template-columns: 280px minmax(0, 1fr);
+  grid-template-columns: 240px minmax(0, 1fr);
   min-height: 100vh;
 }
 
@@ -89,8 +89,10 @@ button {
 .sidebar {
   position: sticky;
   top: 0;
+  display: flex;
+  flex-direction: column;
   height: 100vh;
-  padding: 24px;
+  padding: 22px 18px;
   border-right: 1px solid var(--line);
   background: #fbfcfa;
 }
@@ -99,7 +101,7 @@ button {
   display: flex;
   align-items: center;
   gap: 12px;
-  margin-bottom: 28px;
+  margin-bottom: 22px;
 }
 
 .brand-mark {
@@ -129,18 +131,24 @@ button {
 
 .sidebar-nav {
   display: grid;
+  align-content: start;
+  flex: 0 0 auto;
   gap: 6px;
+  min-height: 0;
+  margin-bottom: auto;
+  overflow-y: auto;
+  padding-right: 2px;
 }
 
 .sidebar-nav button {
   width: 100%;
-  min-height: 42px;
+  min-height: 40px;
   border: 1px solid transparent;
   border-radius: 7px;
   background: transparent;
   color: var(--muted);
   text-align: left;
-  padding: 9px 11px;
+  padding: 8px 10px;
 }
 
 .sidebar-nav button:hover,
@@ -152,14 +160,43 @@ button {
   outline: none;
 }
 
-.sidebar-note {
-  margin-top: 28px;
-  padding: 14px;
+.admin-account-panel {
+  display: grid;
+  flex: 0 0 auto;
+  gap: 7px;
+  margin-top: 16px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--surface);
+  padding: 14px;
+}
+
+.admin-account-panel span,
+.admin-account-panel small {
   color: var(--muted);
-  font-size: 13px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.admin-account-panel strong {
+  overflow-wrap: anywhere;
+  font-size: 16px;
+}
+
+.admin-account-panel button {
+  min-height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-muted);
+  color: var(--text);
+  font-weight: 800;
+}
+
+.admin-account-panel button:hover,
+.admin-account-panel button:focus-visible {
+  border-color: var(--brand);
+  background: #ffffff;
+  outline: none;
 }
 
 .admin-login {
@@ -313,17 +350,8 @@ h3 {
 }
 
 .page-layout > *,
-.detail-grid > *,
-.module-hero > *,
 .operation-panel > * {
   min-width: 0;
-}
-
-.detail-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 14px;
-  margin-bottom: 24px;
 }
 
 .module-directory {
@@ -334,8 +362,8 @@ h3 {
 
 .module-link-card {
   display: grid;
-  gap: 12px;
-  min-height: 118px;
+  align-items: center;
+  min-height: 72px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--surface);
@@ -352,44 +380,8 @@ h3 {
   outline: none;
 }
 
-.module-link-card span,
-.module-link-card small {
-  color: var(--muted);
-  font-size: 12px;
-}
-
 .module-link-card strong {
   font-size: 17px;
-}
-
-.module-hero {
-  display: grid;
-  grid-template-columns: 0.8fr 1.2fr 1.2fr;
-  gap: 14px;
-  margin-bottom: 24px;
-}
-
-.module-hero div {
-  min-height: 108px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--surface);
-  box-shadow: var(--shadow);
-  padding: 18px;
-}
-
-.module-hero span {
-  display: block;
-  color: var(--muted);
-  font-size: 13px;
-  margin-bottom: 8px;
-}
-
-.module-hero strong {
-  display: block;
-  font-size: 22px;
-  line-height: 1.25;
-  text-wrap: pretty;
 }
 
 .operation-panel {
@@ -403,11 +395,6 @@ h3 {
   background: var(--surface);
   box-shadow: var(--shadow);
   padding: 20px;
-}
-
-.operation-panel p {
-  margin-bottom: 0;
-  color: var(--muted);
 }
 
 .operation-form {
@@ -473,6 +460,27 @@ h3 {
 .orders-workspace {
   display: grid;
   gap: 20px;
+}
+
+.management-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  align-items: start;
+}
+
+.management-grid > .section-block,
+.management-grid > .stacked-section {
+  min-width: 0;
+}
+
+.stacked-section {
+  display: grid;
+  gap: 18px;
+}
+
+.stacked-section .operation-panel {
+  margin-bottom: 0;
 }
 
 .orders-actions-grid {
@@ -931,51 +939,6 @@ h3 {
   color: var(--muted);
 }
 
-.metric-row {
-  display: flex;
-  gap: 10px;
-  align-items: baseline;
-  margin: 18px 0;
-}
-
-.metric-row strong {
-  font-size: 28px;
-  line-height: 1;
-}
-
-.metric-row span {
-  color: var(--muted);
-}
-
-.module-meta {
-  display: grid;
-  gap: 10px;
-  margin: 0;
-}
-
-.module-meta div {
-  display: grid;
-  gap: 3px;
-}
-
-.module-meta dt {
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.module-meta dd {
-  margin: 0;
-}
-
-.guard-list {
-  display: grid;
-  gap: 7px;
-  margin: 16px 0 0;
-  padding-left: 18px;
-  color: var(--muted);
-}
-
 .table-wrap {
   max-width: 100%;
   overflow-x: auto;
@@ -1069,16 +1032,10 @@ code {
   color: var(--brand-dark);
 }
 
-.footer-note {
-  color: var(--muted);
-  font-size: 13px;
-}
-
 @media (max-width: 1100px) {
   .summary-grid,
   .page-layout,
-  .detail-grid,
-  .module-hero,
+  .management-grid,
   .orders-actions-grid,
   .operation-panel,
   .operation-form,

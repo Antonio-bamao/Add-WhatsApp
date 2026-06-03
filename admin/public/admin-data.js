@@ -182,9 +182,7 @@ const modulePageConfig = {
     pageDescription: "查看桌面端上传的客户名单原始文件和解析结果，按注册账号追踪上传时间、格式、行数和 SHA256。",
     sections: [],
     recordHeaders: ["上传时间", "账号", "原始文件", "格式", "行数", "SHA256"],
-    records: [
-      ["等待 API", "empty", "导入名单后出现", "csv/xlsx", "0", "-"]
-    ]
+    records: []
   },
   referrals: {
     route: "#/referrals",
@@ -197,7 +195,7 @@ const modulePageConfig = {
     ],
     records: [
       ["RF-218", "held_for_review", "同设备", "暂不发放"],
-      ["RF-219", "registered", "未充值", "等待首充"],
+      ["RF-219", "registered", "未充值", "首充未完成"],
       ["RF-220", "rewarded", "首充完成", "+300"]
     ]
   },
@@ -280,13 +278,13 @@ export const actionQueue = [
   {
     label: "人工入账",
     target: "订单 ADWA-20260526-1027",
-    detail: "等待确认收款后写 purchase 账本",
+    detail: "确认收款后写 purchase 账本",
     severity: "warn"
   },
   {
     label: "释放租约",
     target: "workspace lease 34F8",
-    detail: "子工作台进程已断开，等待过期或人工释放",
+    detail: "子工作台进程已断开，可过期释放或人工释放",
     severity: "info"
   },
   {

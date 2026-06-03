@@ -95,6 +95,7 @@ describe("cloud API skeleton", () => {
       });
       assert.equal(adminLogin.response.status, 200);
       assert.ok(adminLogin.payload.adminAccessToken);
+      assert.match(adminLogin.payload.expiresAt, /^20/);
       const adminAuth = { authorization: `Bearer ${adminLogin.payload.adminAccessToken}` };
 
       const adjusted = await request(baseUrl, "/v1/admin/credits/adjust", {
@@ -267,9 +268,19 @@ describe("cloud API skeleton", () => {
       assert.equal(userRow[5], "4399");
       assert.match(userRow[6], /sessions/);
       assert.doesNotMatch(JSON.stringify(consoleSnapshot.payload.modules.users), /password/i);
+      assert.doesNotMatch(JSON.stringify(consoleSnapshot.payload.modules), /等待 API 写入|empty|本地预览|PostgreSQL/);
       assert.equal(consoleSnapshot.payload.modules.plans.records.length, 4);
       assert.ok(consoleSnapshot.payload.modules.orders.paymentEvents.some((row) => row.includes("evt-api-paid-1")));
       assert.ok(consoleSnapshot.payload.auditTrail.some((entry) => entry.action === "credit.adjustment"));
+
+      const loggedOut = await request(baseUrl, "/v1/admin/auth/logout", {
+        method: "POST",
+        headers: adminAuth
+      });
+      assert.equal(loggedOut.response.status, 200);
+      assert.equal(loggedOut.payload.loggedOut, true);
+      const rejectedAfterLogout = await request(baseUrl, "/v1/admin/console", { headers: adminAuth });
+      assert.equal(rejectedAfterLogout.response.status, 401);
     }, { env: { MANUAL_PAYMENT_ALIPAY_QR_URL: "https://addwhatsapp.com/pay/alipay.png" } });
   });
 
@@ -584,6 +595,94 @@ describe("cloud API skeleton", () => {
         };
       }
     });
+  });
+
+  it("lets admins actively sync a WeChat paid order into the ledger", async () => {
+    const { privateKey } = crypto.generateKeyPairSync("rsa", {
+      modulusLength: 2048,
+      publicKeyEncoding: { type: "spki", format: "pem" },
+      privateKeyEncoding: { type: "pkcs8", format: "pem" }
+    });
+    const calls = [];
+    await withServer(async (baseUrl) => {
+      const registered = await request(baseUrl, "/v1/auth/register", {
+        method: "POST",
+        body: { username: "wechat-sync-user", password: "StrongPass123", planId: "advanced" }
+      });
+      const auth = { authorization: `Bearer ${registered.payload.accessToken}` };
+      const adminLogin = await request(baseUrl, "/v1/admin/auth/login", {
+        method: "POST",
+        body: { username: "yojiro", password: "yojiro123" }
+      });
+      const adminAuth = { authorization: `Bearer ${adminLogin.payload.adminAccessToken}` };
+      const order = await request(baseUrl, "/v1/orders", {
+        method: "POST",
+        headers: auth,
+        body: { planId: "professional", credits: 5000, amountCents: 150000 }
+      });
+      await request(baseUrl, `/v1/orders/${order.payload.id}/payments/wechat/native-pay`, {
+        method: "POST",
+        headers: auth,
+        body: {}
+      });
+
+      const synced = await request(baseUrl, `/v1/admin/orders/${order.payload.orderNo}/sync-wechat`, {
+        method: "POST",
+        headers: adminAuth,
+        body: {}
+      });
+      assert.equal(synced.response.status, 200);
+      assert.equal(synced.payload.synced, true);
+      assert.equal(synced.payload.wechat.tradeState, "SUCCESS");
+      assert.equal(synced.payload.settlement.order.status, "paid");
+
+      const balance = await request(baseUrl, "/v1/me/entitlements", { headers: auth });
+      assert.equal(balance.payload.balanceCredits, 5000);
+
+      const duplicate = await request(baseUrl, `/v1/admin/orders/${order.payload.id}/sync-wechat`, {
+        method: "POST",
+        headers: adminAuth,
+        body: {}
+      });
+      assert.equal(duplicate.response.status, 200);
+      assert.equal(duplicate.payload.settlement.idempotentReplay, true);
+    }, {
+      env: {
+        WECHAT_MCH_ID: "1113492162",
+        WECHAT_APP_ID: "wx92f39a8b81948f51",
+        WECHAT_API_V3_KEY: "0123456789abcdef0123456789abcdef",
+        WECHAT_MERCHANT_SERIAL_NO: "6E44BE6FB4CE6CBF496988E993FFE93BD3D692E7",
+        WECHAT_MERCHANT_PRIVATE_KEY: privateKey,
+        WECHAT_NOTIFY_URL: "https://api.addwhatsapp.com/v1/payments/wechat/notify"
+      },
+      fetchImpl: async (url, options = {}) => {
+        calls.push({ url, options });
+        if (url.endsWith("/v3/pay/transactions/native")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ code_url: "weixin://wxpay/bizpayurl?pr=sync-test-token" })
+          };
+        }
+        if (url.includes("/v3/pay/transactions/out-trade-no/000000000001?mchid=1113492162")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              mchid: "1113492162",
+              out_trade_no: "000000000001",
+              transaction_id: "420000000020260603000011",
+              trade_state: "SUCCESS",
+              success_time: "2026-06-03T15:20:00+08:00",
+              amount: { total: 150000, currency: "CNY" }
+            })
+          };
+        }
+        throw new Error(`unexpected wechat fetch ${url}`);
+      }
+    });
+
+    assert.equal(calls.filter((call) => call.url.includes("/v3/pay/transactions/out-trade-no/")).length, 2);
   });
 
   it("shows user order status and closes WeChat Native payment orders on cancel", async () => {

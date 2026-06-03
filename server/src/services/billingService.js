@@ -48,6 +48,7 @@ function isoNow(store) {
 }
 
 const ORDER_PAYMENT_TTL_MS = 5 * 60 * 1000;
+const ADMIN_ACCESS_TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
 const CONTACT_IMPORT_MAX_BYTES = 25 * 1024 * 1024;
 
 function createId(prefix) {
@@ -499,15 +500,24 @@ export function loginAdmin(store, { username, password }) {
     throw new Error("AUTH_FAILED");
   }
   const adminAccessToken = createId("admin_token");
-  store.adminAccessTokens.set(adminAccessToken, admin.id);
-  return { admin: { id: admin.id, username: admin.username, role: admin.role }, adminAccessToken };
+  const expiresAt = new Date(store.now().getTime() + ADMIN_ACCESS_TOKEN_TTL_MS).toISOString();
+  store.adminAccessTokens.set(adminAccessToken, { adminUserId: admin.id, expiresAt });
+  return { admin: { id: admin.id, username: admin.username, role: admin.role }, adminAccessToken, expiresAt };
 }
 
 export function authenticateAdminToken(store, accessToken) {
-  const adminUserId = store.adminAccessTokens.get(accessToken);
-  if (adminUserId) return adminUserId;
+  const session = store.adminAccessTokens.get(accessToken);
+  if (session) {
+    if (new Date(session.expiresAt) > store.now()) return session.adminUserId;
+    store.adminAccessTokens.delete(accessToken);
+  }
   if (store.accessTokens.has(accessToken)) throw new Error("ADMIN_FORBIDDEN");
   throw new Error("ADMIN_UNAUTHORIZED");
+}
+
+export function logoutAdmin(store, accessToken) {
+  store.adminAccessTokens.delete(accessToken);
+  return { loggedOut: true };
 }
 
 export function getEntitlements(store, userId) {
@@ -735,6 +745,12 @@ export function markOrderPaid(store, { orderId, adminUserId, providerTradeNo, ip
   return { ...order, balanceCredits: balanceFor(store, order.userId) };
 }
 
+export function getOrderForAdmin(store, { orderId }) {
+  const order = store.orders.get(orderId) || orderByIdOrNumber(store, { orderNo: orderId });
+  if (!order) throw new Error("ORDER_NOT_FOUND");
+  return { ...order, balanceCredits: balanceFor(store, order.userId) };
+}
+
 export function processPaymentEvent(store, { provider, providerEventId, orderId, orderNo, eventType, providerTradeNo, payload }) {
   const normalizedProvider = String(provider || "").trim().toLowerCase();
   const normalizedEventId = String(providerEventId || "").trim();
@@ -953,7 +969,7 @@ export function listAuditLogs(store) {
 }
 
 function tableRows(items, mapper) {
-  return items.length > 0 ? items.map(mapper) : [["暂无记录", "empty", "等待 API 写入", "本地预览"]];
+  return items.length > 0 ? items.map(mapper) : [];
 }
 
 const USER_RECORD_HEADERS = ["注册时间", "UID", "账号", "状态", "套餐", "余额", "登录会话"];
@@ -1182,6 +1198,7 @@ export function createMemoryRuntime(options = {}) {
     registerUser: (body) => registerUser(store, body),
     loginUser: (body) => loginUser(store, body),
     loginAdmin: (body) => loginAdmin(store, body),
+    logoutAdmin: (accessToken) => logoutAdmin(store, accessToken),
     getEntitlements: (userId) => getEntitlements(store, userId),
     consumeCredit: (body) => consumeCredit(store, body),
     createOrder: (body) => createOrder(store, body),
@@ -1191,6 +1208,7 @@ export function createMemoryRuntime(options = {}) {
     markOrderPaymentProvider: (body) => markOrderPaymentProvider(store, body),
     closeOrder: (body) => closeOrder(store, body),
     expireOrder: (body) => expireOrder(store, body),
+    getOrderForAdmin: (body) => getOrderForAdmin(store, body),
     markOrderPaid: (body) => markOrderPaid(store, body),
     processPaymentEvent: (body) => processPaymentEvent(store, body),
     processPendingOrderCredits: (body) => processPendingOrderCredits(store, body),

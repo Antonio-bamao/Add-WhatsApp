@@ -6,7 +6,7 @@
     <title>Add WhatsApp Admin Preview</title>
     <link rel="icon" href="./favicon.ico" sizes="any" />
     <link rel="icon" type="image/png" href="./favicon.png" />
-    <link rel="stylesheet" href="./admin.css?v=20260603-download-fix" />
+    <link rel="stylesheet" href="./admin.css?v=20260603-admin-session" />
   </head>
   <body class="admin-auth-locked">
     <section class="login-screen" data-login-screen>
@@ -47,25 +47,23 @@
 
         <nav class="sidebar-nav">
           <button type="button" data-route-link="dashboard">运营首页</button>
-          <button type="button" data-module-link="users">注册用户</button>
-          <button type="button" data-module-link="plans">套餐与订阅</button>
-          <button type="button" data-module-link="credits">额度账本</button>
-          <button type="button" data-module-link="usage">用量限额</button>
-          <button type="button" data-module-link="orders">订单与入账</button>
-          <button type="button" data-module-link="imports">名单审计</button>
-          <button type="button" data-module-link="referrals">推荐审核</button>
-          <button type="button" data-module-link="workspaces">设备与工作台</button>
+          <button type="button" data-module-link="users">用户管理</button>
+          <button type="button" data-module-link="orders">财务管理</button>
+          <button type="button" data-module-link="plans">套餐与限额</button>
           <button type="button" data-module-link="audit">审计日志</button>
         </nav>
 
-        <p class="sidebar-note">
-          管理台只放运营与审计能力。公开官网继续留在 website，桌面端继续留在 src，API 后续独立部署到 api.addwhatsapp.com。
-        </p>
+        <section class="admin-account-panel" data-admin-account-panel>
+          <span>管理员账号</span>
+          <strong data-admin-account-name>-</strong>
+          <small data-admin-token-expiry></small>
+          <button type="button" data-admin-logout>退出登录</button>
+        </section>
       </aside>
 
       <main class="main" data-page-outlet></main>
     </div>
 
-    <script type="module" src="./admin.js?v=20260603-download-fix"></script>
+    <script type="module" src="./admin.js?v=20260603-admin-session"></script>
   </body>
 </html>

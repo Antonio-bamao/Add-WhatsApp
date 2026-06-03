@@ -53,11 +53,7 @@ describe("admin console structure", () => {
       assert.ok(module.route);
       assert.ok(module.pageTitle);
       assert.ok(module.pageDescription);
-      if (module.key === "users" || module.key === "orders" || module.key === "imports") {
-        assert.equal(module.sections.length, 0);
-      } else {
-        assert.ok(module.sections.length >= 3);
-      }
+      assert.ok(Array.isArray(module.sections));
     }
   });
 
@@ -81,18 +77,11 @@ describe("admin console structure", () => {
     const css = readText("public/admin.css");
     const js = readText("public/admin.js");
 
-    for (const expectedText of [
-      "注册用户",
-      "套餐与订阅",
-      "额度账本",
-      "用量限额",
-      "订单与入账",
-      "名单审计",
-      "推荐审核",
-      "设备与工作台",
-      "审计日志"
-    ]) {
+    for (const expectedText of ["运营首页", "用户管理", "财务管理", "套餐与限额", "审计日志"]) {
       assert.match(html + js, new RegExp(expectedText));
+    }
+    for (const hiddenTopLevel of ["注册用户", "套餐与订阅", "额度账本", "用量限额", "订单与入账", "名单审计", "推荐审核", "设备与工作台"]) {
+      assert.doesNotMatch(html, new RegExp(`data-module-link="[^"]+">${hiddenTopLevel}<`));
     }
 
     assert.match(html, /data-page-outlet/);
@@ -103,13 +92,30 @@ describe("admin console structure", () => {
     assert.doesNotMatch(js, /renderModules/);
     assert.match(js, /renderMappings/);
     assert.match(css, /\.page-layout/);
-    assert.match(css, /\.detail-grid/);
+    assert.match(css, /\.management-grid/);
+    assert.doesNotMatch(html + js + css, /sidebar-note|detail-grid|module-hero|guard-list|footer-note/);
     assert.match(css, /@media \(max-width: 860px\)/);
+  });
+
+  it("keeps admin pages focused on controls and records without explanatory copy", () => {
+    const html = readText("public/index.html");
+    const js = readText("public/admin.js");
+    const css = readText("public/admin.css");
+    const genericRenderer = js.match(/function renderModulePage\(module\) \{[\s\S]*?\n\}/)?.[0] || "";
+    const dashboardRenderer = js.match(/function renderDashboard\(\) \{[\s\S]*?\n\}/)?.[0] || "";
+
+    assert.doesNotMatch(html, /管理台只放运营与审计能力|sidebar-note/);
+    assert.doesNotMatch(html + js + readText("public/admin-data.js"), /等待 API 写入|等待 API|empty|本地预览/);
+    assert.doesNotMatch(js, /description: module\.pageDescription|<p>|module\.sections|section\.body|desktopSurface|primaryAction/);
+    assert.doesNotMatch(genericRenderer, /eyebrow: module\.owner|module-hero|detail-grid|必须遵守|当前记录/);
+    assert.doesNotMatch(dashboardRenderer, /Admin console v0|桌面端页面对应关系|module\.owner|module\.primaryAction|<small>/);
+    assert.doesNotMatch(css, /sidebar-note|module-hero|detail-grid|guard-list|module-meta|footer-note/);
   });
 
   it("requires a full-screen admin login before loading runtime data", () => {
     const html = readText("public/index.html");
     const js = readText("public/admin.js");
+    const css = readText("public/admin.css");
 
     assert.match(js, /ADD_WHATSAPP_API_URL/);
     assert.match(js, /api\.addwhatsapp\.com/);
@@ -123,10 +129,19 @@ describe("admin console structure", () => {
     assert.match(html, /data-admin-login/);
     assert.match(html, /data-admin-username/);
     assert.match(html, /data-admin-password/);
+    assert.match(html, /data-admin-account-panel/);
+    assert.match(html, /data-admin-account-name/);
+    assert.match(html, /data-admin-token-expiry/);
+    assert.match(html, /data-admin-logout/);
     assert.match(html, /value="yojiro"/);
+    assert.match(js, /ADMIN_PROFILE_STORAGE_KEY/);
+    assert.match(js, /\/v1\/admin\/auth\/logout/);
+    assert.match(js, /logoutAdmin/);
+    assert.match(js, /tokenExpiryLabel/);
     assert.match(js, /setAdminAuthenticated/);
     assert.match(js, /initializeAdminApp/);
     assert.match(js, /adminHeaders\(\)/);
+    assert.match(css, /\.admin-account-panel/);
     assert.match(js, /本地 API 预览/);
     assert.match(js, /API 未连接/);
     assert.doesNotMatch(html + js, /未登录，仅显示预览数据|登录后可下载|未登录管理员，显示当前快照/);
@@ -153,6 +168,7 @@ describe("admin console structure", () => {
       "filterPaymentEvents",
       "copyPaymentToken",
       "submitCreditAdjustment",
+      "submitWechatOrderSync",
       "submitOrderMarkPaid",
       "submitOrderCompensation",
       "submitWorkspaceRelease",
@@ -162,6 +178,7 @@ describe("admin console structure", () => {
     }
 
     assert.match(js, /data-operation-form="credits-adjust"/);
+    assert.match(js, /data-operation-form="order-sync-wechat"/);
     assert.match(js, /data-operation-form="order-mark-paid"/);
     assert.match(js, /账号 \/ 用户 ID/);
     assert.match(js, /订单号 \/ 订单 ID/);
@@ -213,8 +230,10 @@ describe("admin console structure", () => {
     assert.match(js, /orders-workspace/);
     assert.match(js, /orders-actions-grid/);
     assert.match(js, /订单记录/);
+    assert.match(js, /微信主动同步/);
     const ordersRenderer = js.match(/function renderOrdersModulePage\(module\) \{[\s\S]*?\n\}/)?.[0] || "";
     assert.match(ordersRenderer, /订单记录/);
+    assert.match(ordersRenderer, /额度流水/);
     assert.match(ordersRenderer, /eyebrow: ""/);
     assert.doesNotMatch(ordersRenderer, /module\.sections|必须遵守|section\.body|module-hero/);
     assert.match(js, /data-payment-event-provider/);

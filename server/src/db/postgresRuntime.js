@@ -10,6 +10,7 @@ function isoNow() {
 }
 
 const ORDER_PAYMENT_TTL_MS = 5 * 60 * 1000;
+const ADMIN_ACCESS_TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
 const CONTACT_IMPORT_MAX_BYTES = 25 * 1024 * 1024;
 const migratedOrderLifecyclePools = new WeakSet();
 
@@ -136,7 +137,7 @@ function toPaymentEventItem(row) {
 }
 
 function tableRows(items, mapper) {
-  return items.length > 0 ? items.map(mapper) : [["暂无记录", "empty", "等待 API 写入", "PostgreSQL"]];
+  return items.length > 0 ? items.map(mapper) : [];
 }
 
 function paymentEventRows(rows) {
@@ -474,8 +475,11 @@ export function createPostgresRuntime({ databaseUrl, pool } = {}) {
     },
 
     async authenticateAdminToken(accessToken) {
-      const adminUserId = adminAccessTokens.get(accessToken);
-      if (adminUserId) return adminUserId;
+      const session = adminAccessTokens.get(accessToken);
+      if (session) {
+        if (new Date(session.expiresAt) > new Date()) return session.adminUserId;
+        adminAccessTokens.delete(accessToken);
+      }
       if (accessTokens.has(accessToken)) throw new Error("ADMIN_FORBIDDEN");
       throw new Error("ADMIN_UNAUTHORIZED");
     },
@@ -566,7 +570,8 @@ export function createPostgresRuntime({ databaseUrl, pool } = {}) {
 
         const adminAccessToken = createId("admin_token");
         const refreshToken = createId("admin_refresh");
-        adminAccessTokens.set(adminAccessToken, admin.id);
+        const expiresAt = new Date(Date.now() + ADMIN_ACCESS_TOKEN_TTL_MS).toISOString();
+        adminAccessTokens.set(adminAccessToken, { adminUserId: admin.id, expiresAt });
         await client.query(
           `INSERT INTO admin_sessions (id, admin_user_id, refresh_token_hash, expires_at, revoked_at, created_at)
            VALUES ($1, $2, $3, $4, NULL, $5)`,
@@ -574,17 +579,23 @@ export function createPostgresRuntime({ databaseUrl, pool } = {}) {
             createId("admin_session"),
             admin.id,
             crypto.createHash("sha256").update(refreshToken).digest("hex"),
-            new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+            expiresAt,
             isoNow()
           ]
         );
         return {
           admin: { id: admin.id, username: admin.username, role: admin.role },
-          adminAccessToken
+          adminAccessToken,
+          expiresAt
         };
       } finally {
         client.release();
       }
+    },
+
+    async logoutAdmin(accessToken) {
+      adminAccessTokens.delete(accessToken);
+      return { loggedOut: true };
     },
 
     async getEntitlements(userId) {
@@ -844,6 +855,17 @@ export function createPostgresRuntime({ databaseUrl, pool } = {}) {
       } catch (error) {
         await client.query("ROLLBACK");
         throw error;
+      } finally {
+        client.release();
+      }
+    },
+
+    async getOrderForAdmin({ orderId }) {
+      const client = await db.connect();
+      try {
+        const order = await orderByIdOrNumber(client, { orderId });
+        if (!order) throw new Error("ORDER_NOT_FOUND");
+        return toOrder(order, await balanceFor(client, order.user_id));
       } finally {
         client.release();
       }

@@ -11,9 +11,21 @@ const adminPasswordInput = document.querySelector("[data-admin-password]");
 const adminLoginStatus = document.querySelector("[data-admin-login-status]");
 const API_BASE_URL = resolveApiBaseUrl();
 const ADMIN_TOKEN_STORAGE_KEY = "addWhatsappAdminAccessToken";
+const ADMIN_PROFILE_STORAGE_KEY = "addWhatsappAdminProfile";
+const adminAccountName = document.querySelector("[data-admin-account-name]");
+const adminTokenExpiry = document.querySelector("[data-admin-token-expiry]");
+const adminLogoutButton = document.querySelector("[data-admin-logout]");
 const RECORD_PAGE_SIZE = 8;
+const NAV_PAGES = [
+  { key: "users", title: "用户管理" },
+  { key: "orders", title: "财务管理" },
+  { key: "plans", title: "套餐与限额" },
+  { key: "audit", title: "审计日志" }
+];
 let adminAccessToken = window.sessionStorage.getItem(ADMIN_TOKEN_STORAGE_KEY) || "";
+let currentAdmin = JSON.parse(window.sessionStorage.getItem(ADMIN_PROFILE_STORAGE_KEY) || "null");
 let userPageOffset = 0;
+let moduleRecordOffsets = {};
 
 let runtimeState = {
   adminModules,
@@ -75,16 +87,31 @@ function setAdminAuthenticated(authenticated) {
     adminShell.hidden = !authenticated;
     adminShell.style.display = authenticated ? "grid" : "none";
   }
+  renderAdminAccountPanel();
 }
 
 function clearAdminSession(message = "") {
   adminAccessToken = "";
+  currentAdmin = null;
   window.sessionStorage.removeItem(ADMIN_TOKEN_STORAGE_KEY);
+  window.sessionStorage.removeItem(ADMIN_PROFILE_STORAGE_KEY);
   resetPaymentEventsState();
   resetContactImportsState();
   if (pageOutlet) pageOutlet.innerHTML = "";
   if (adminLoginStatus) adminLoginStatus.textContent = message;
   setAdminAuthenticated(false);
+}
+
+function tokenExpiryLabel(expiresAt) {
+  if (!expiresAt) return "有效期 24 小时";
+  const date = new Date(expiresAt);
+  if (Number.isNaN(date.getTime())) return "有效期 24 小时";
+  return `有效至 ${date.toLocaleString("zh-CN", { hour12: false })}`;
+}
+
+function renderAdminAccountPanel() {
+  if (adminAccountName) adminAccountName.textContent = currentAdmin?.username || "-";
+  if (adminTokenExpiry) adminTokenExpiry.textContent = tokenExpiryLabel(currentAdmin?.expiresAt);
 }
 
 function statusTone(status) {
@@ -137,8 +164,8 @@ function renderRecordPagination({ name, offset, total, pageSize = RECORD_PAGE_SI
     <div class="record-pagination" data-record-pagination="${name}">
       <span>${recordPageSummary(offset, total, pageSize)}</span>
       <div>
-        <button type="button" data-${name}-page="prev" ${canPageBack ? "" : "disabled"}>上一页</button>
-        <button type="button" data-${name}-page="next" ${canPageNext ? "" : "disabled"}>下一页</button>
+        <button type="button" data-record-page="${name}" data-record-direction="prev" data-${name}-page="prev" ${canPageBack ? "" : "disabled"}>上一页</button>
+        <button type="button" data-record-page="${name}" data-record-direction="next" data-${name}-page="next" ${canPageNext ? "" : "disabled"}>下一页</button>
       </div>
     </div>
   `;
@@ -178,7 +205,6 @@ function renderActionQueue() {
             <li class="queue-item queue-item--${item.severity}">
               <span>${item.label}</span>
               <strong>${item.target}</strong>
-              <small>${item.detail}</small>
             </li>
           `
         )
@@ -241,7 +267,7 @@ function paymentEventSummary(module, rows) {
   if (paymentEventsState.loading) return "正在读取支付事件分页 API...";
   if (paymentEventsState.error) return `分页 API 读取失败：${paymentEventsState.error}`;
   if (!adminAccessToken) return "";
-  if (!paymentEventsState.loaded) return `等待分页 API，当前显示快照 ${rows.length} 条。`;
+  if (!paymentEventsState.loaded) return `当前记录 ${rows.length} 条`;
   const pageIndex = Math.floor(paymentEventsQuery.offset / paymentEventsQuery.limit) + 1;
   const totalPages = pageCount(paymentEventsState.total, paymentEventsQuery.limit);
   return `第 ${pageIndex}/${totalPages} 页，共 ${paymentEventsState.total} 条`;
@@ -415,6 +441,8 @@ function renderUserEditModal() {
 }
 
 function renderUsersModulePage(module) {
+  const importsModule = getRuntimeModuleByKey("imports");
+  const workspacesModule = getRuntimeModuleByKey("workspaces");
   const rows = userRows(module);
   userPageOffset = clampOffset(userPageOffset, rows.length);
   const visibleRows = pageRows(rows, userPageOffset);
@@ -424,9 +452,9 @@ function renderUsersModulePage(module) {
 
   pageOutlet.innerHTML = `
     ${headerTemplate({
-      eyebrow: module.owner,
-      title: module.pageTitle,
-      description: "注册账号、状态、套餐、余额和登录会话集中管理。",
+      eyebrow: "",
+      title: "用户管理",
+      description: "",
       status: module.status
     })}
 
@@ -490,6 +518,15 @@ function renderUsersModulePage(module) {
         </table>
       </div>
     </section>
+    <div class="management-grid">
+      ${importsModule ? renderContactImports(importsModule) : ""}
+      ${workspacesModule ? `
+        <div class="stacked-section">
+          ${renderOperationPanel("workspaces")}
+          ${renderModuleRecordSection(workspacesModule, "设备与工作台")}
+        </div>
+      ` : ""}
+    </div>
     ${renderUserEditModal()}
   `;
 }
@@ -731,6 +768,21 @@ function paginateUsers(event) {
   renderUsersModulePage(module);
 }
 
+function paginateModuleRecords(event) {
+  const button = event.target.closest("[data-record-page]");
+  if (!button) return;
+  const pageName = button.dataset.recordPage;
+  if (!pageName || pageName === "users") return;
+  if (!pageName.startsWith("module-")) return;
+  const moduleKey = pageName.replace(/^module-/, "");
+  const module = getRuntimeModuleByKey(moduleKey);
+  if (!module) return;
+  const total = moduleRecordRows(module).length;
+  const delta = button.dataset.recordDirection === "next" ? RECORD_PAGE_SIZE : -RECORD_PAGE_SIZE;
+  moduleRecordOffsets[moduleKey] = clampOffset((moduleRecordOffsets[moduleKey] || 0) + delta, total);
+  renderModulePage(module);
+}
+
 async function copyPaymentToken(event) {
   const button = event.target.closest("[data-copy-value]");
   if (!button) return;
@@ -795,7 +847,6 @@ function renderOperationPanel(moduleKey) {
       <section class="operation-panel" aria-label="用户状态操作">
         <div>
           <h2>冻结或恢复账号</h2>
-          <p>输入云端用户 ID，切换账号状态。冻结后用户下一次云端请求会被拒绝。</p>
         </div>
         <form class="operation-form" data-operation-form="user-status">
           <label><span>账号 / 用户 ID</span><input name="account" required placeholder="用户名或 user_..." /></label>
@@ -816,7 +867,6 @@ function renderOperationPanel(moduleKey) {
       <section class="operation-panel" aria-label="人工调账操作">
         <div>
           <h2>人工调账</h2>
-          <p>只写账本流水，不直接改余额。正数补额度，负数扣回额度。</p>
         </div>
         <form class="operation-form" data-operation-form="credits-adjust">
           <label><span>用户 ID</span><input name="userId" required placeholder="user_..." /></label>
@@ -828,6 +878,16 @@ function renderOperationPanel(moduleKey) {
       </section>
     `,
     orders: `
+      <section class="operation-panel" aria-label="微信订单同步">
+        <div>
+          <h2>微信主动同步</h2>
+        </div>
+        <form class="operation-form" data-operation-form="order-sync-wechat">
+          <label><span>订单号 / 订单 ID</span><input name="orderId" required placeholder="订单号或 order_..." /></label>
+          <button type="submit">同步微信订单</button>
+          <small class="operation-status" data-operation-status="order-sync-wechat"></small>
+        </form>
+      </section>
       <section class="operation-panel" aria-label="订单入账操作">
         <div>
           <h2>人工标记已支付</h2>
@@ -854,7 +914,6 @@ function renderOperationPanel(moduleKey) {
       <section class="operation-panel" aria-label="工作台租约操作">
         <div>
           <h2>释放异常租约</h2>
-          <p>用于处理子工作台崩溃、进程已断开但租约仍显示 active 的情况。</p>
         </div>
         <form class="operation-form" data-operation-form="workspace-release">
           <label><span>租约 ID</span><input name="leaseId" required placeholder="lease_..." /></label>
@@ -872,15 +931,15 @@ function renderOperationPanel(moduleKey) {
 function renderDashboard() {
   pageOutlet.innerHTML = `
     ${headerTemplate({
-      eyebrow: "Admin console v0",
+      eyebrow: "",
       title: "运营首页",
-      description: `这里保留全局摘要和待处理事项。具体管理动作已经拆到左侧每一个模块页里，不再把 ${runtimeState.adminModules.length} 个模块详情堆在同一个长页面。`,
+      description: "",
       status: runtimeState.environmentStatus
     })}
 
     <section class="summary-grid" aria-label="运营摘要">
-      <div class="summary-tile"><span>管理模块</span><strong>${runtimeState.adminModules.length}</strong></div>
-      <div class="summary-tile"><span>桌面端页面对应</span><strong>5</strong></div>
+      <div class="summary-tile"><span>管理入口</span><strong>${NAV_PAGES.length}</strong></div>
+      <div class="summary-tile"><span>合并模块</span><strong>4</strong></div>
       <div class="summary-tile"><span>敏感动作留痕</span><strong>100%</strong></div>
       <div class="summary-tile"><span>公开官网耦合</span><strong>0</strong></div>
     </section>
@@ -889,13 +948,11 @@ function renderDashboard() {
       <section class="section-block">
         <h2>模块入口</h2>
         <div class="module-directory">
-          ${runtimeState.adminModules
+          ${NAV_PAGES
             .map(
-              (module) => `
-                <a class="module-link-card" href="${module.route}">
-                  <span>${module.owner}</span>
-                  <strong>${module.title}</strong>
-                  <small>${module.primaryAction}</small>
+              (page) => `
+                <a class="module-link-card" href="#/${page.key}">
+                  <strong>${page.title}</strong>
                 </a>
               `
             )
@@ -909,19 +966,46 @@ function renderDashboard() {
       </aside>
     </div>
 
-    <section class="section-block">
-      <h2>桌面端页面对应关系</h2>
-      ${renderMappings()}
+  `;
+}
+
+function moduleRecordRows(module) {
+  return module.key === "audit"
+    ? runtimeState.auditTrail.map((row) => [row.at, row.actor, `<code>${row.action}</code>`, row.target, row.before, row.after])
+    : module.records || [];
+}
+
+function moduleRecordHeaders(module) {
+  return module.key === "audit" ? ["时间", "管理员", "动作", "对象", "之前", "之后"] : module.recordHeaders || ["对象", "状态", "规则", "备注"];
+}
+
+function renderModuleRecordSection(module, title = "记录") {
+  const rows = moduleRecordRows(module);
+  const paginationName = `module-${module.key}`;
+  const offset = clampOffset(moduleRecordOffsets[module.key] || 0, rows.length);
+  moduleRecordOffsets[module.key] = offset;
+  return `
+    <section class="section-block module-records-panel">
+      <div class="section-head">
+        <h2>${module.key === "audit" ? "审计日志" : title}</h2>
+        ${renderRecordPagination({ name: paginationName, offset, total: rows.length })}
+      </div>
+      ${table(moduleRecordHeaders(module), pageRows(rows, offset))}
     </section>
   `;
 }
 
 function renderOrdersModulePage(module) {
+  const creditsModule = getRuntimeModuleByKey("credits");
   const stats = orderStats(module);
+  const rows = orderRows(module);
+  const paginationName = "module-orders";
+  const offset = clampOffset(moduleRecordOffsets.orders || 0, rows.length);
+  moduleRecordOffsets.orders = offset;
   pageOutlet.innerHTML = `
     ${headerTemplate({
       eyebrow: "",
-      title: module.pageTitle,
+      title: "财务管理",
       description: "",
       status: module.status
     })}
@@ -942,16 +1026,18 @@ function renderOrdersModulePage(module) {
     <div class="orders-workspace">
       <div class="orders-actions-grid">
         ${renderOperationPanel(module.key)}
+        ${renderOperationPanel("credits")}
       </div>
 
       <section class="section-block orders-records-panel">
         <div class="section-head">
           <h2>订单记录</h2>
-          <span>${orderRows(module).length} 条记录</span>
+          ${renderRecordPagination({ name: paginationName, offset, total: rows.length })}
         </div>
-        ${table(module.recordHeaders || ["订单号", "状态", "额度", "入账"], orderRows(module))}
+        ${table(module.recordHeaders || ["订单号", "状态", "额度", "入账"], pageRows(rows, offset))}
       </section>
 
+      ${creditsModule ? renderModuleRecordSection(creditsModule, "额度流水") : ""}
       ${renderPaymentEvents(module)}
     </div>
   `;
@@ -972,9 +1058,36 @@ function renderImportsModulePage(module) {
   `;
 }
 
+function renderPlansModulePage(module) {
+  const usageModule = getRuntimeModuleByKey("usage");
+  pageOutlet.innerHTML = `
+    ${headerTemplate({
+      eyebrow: "",
+      title: "套餐与限额",
+      description: "",
+      status: module.status
+    })}
+
+    <section class="summary-grid module-summary" aria-label="套餐限额统计">
+      <div class="summary-tile"><span>${module.metricLabel}</span><strong>${module.metric}</strong></div>
+      <div class="summary-tile"><span>${usageModule?.metricLabel || "用量"}</span><strong>${usageModule?.metric || "0"}</strong></div>
+      <div class="summary-tile"><span>状态</span><strong>${module.status}</strong></div>
+    </section>
+
+    <div class="management-grid">
+      ${renderModuleRecordSection(module, "套餐列表")}
+      ${usageModule ? renderModuleRecordSection(usageModule, "用量记录") : ""}
+    </div>
+  `;
+}
+
 function renderModulePage(module) {
   if (module.key === "users") {
     renderUsersModulePage(module);
+    return;
+  }
+  if (module.key === "plans") {
+    renderPlansModulePage(module);
     return;
   }
   if (module.key === "orders") {
@@ -988,64 +1101,20 @@ function renderModulePage(module) {
 
   pageOutlet.innerHTML = `
     ${headerTemplate({
-      eyebrow: module.owner,
+      eyebrow: "",
       title: module.pageTitle,
-      description: module.pageDescription,
+      description: "",
       status: module.status
     })}
 
-    <section class="module-hero">
-      <div>
-        <span>${module.metricLabel}</span>
-        <strong>${module.metric}</strong>
-      </div>
-      <div>
-        <span>桌面端对应</span>
-        <strong>${module.desktopSurface}</strong>
-      </div>
-      <div>
-        <span>后台动作</span>
-        <strong>${module.primaryAction}</strong>
-      </div>
+    <section class="summary-grid module-summary" aria-label="${module.pageTitle}统计">
+      <div class="summary-tile"><span>${module.metricLabel}</span><strong>${module.metric}</strong></div>
+      <div class="summary-tile"><span>状态</span><strong>${module.status}</strong></div>
     </section>
 
     ${renderOperationPanel(module.key)}
 
-    <div class="detail-grid">
-      ${module.sections
-        .map(
-          (section) => `
-            <section class="section-block">
-              <h2>${section.title}</h2>
-              <p>${section.body}</p>
-            </section>
-          `
-        )
-        .join("")}
-    </div>
-
-    <div class="page-layout">
-      <section class="section-block">
-        <h2>当前记录</h2>
-        ${table(module.recordHeaders || ["对象", "状态", "规则", "备注"], module.records)}
-      </section>
-
-      <aside class="section-block">
-        <h2>必须遵守</h2>
-        <ul class="guard-list">
-          ${module.guards.map((guard) => `<li>${guard}</li>`).join("")}
-        </ul>
-      </aside>
-    </div>
-
-    ${module.key === "orders" ? renderPaymentEvents(module) : ""}
-    ${module.key === "imports" ? renderContactImports(module) : ""}
-
-    ${
-      module.key === "audit"
-        ? `<section class="section-block"><h2>最近审计日志</h2>${renderAuditTrail()}</section>`
-        : ""
-    }
+    ${renderModuleRecordSection(module)}
   `;
 }
 
@@ -1100,6 +1169,11 @@ async function submitOrderCompensation(form) {
   return postAdminOperation("/v1/admin/orders/compensate", {
     limit: Number(body.limit || 20)
   });
+}
+
+async function submitWechatOrderSync(form) {
+  const body = formPayload(form);
+  return postAdminOperation(`/v1/admin/orders/${encodeURIComponent(body.orderId)}/sync-wechat`, {});
 }
 
 async function submitWorkspaceRelease(form) {
@@ -1225,6 +1299,7 @@ async function handleOperationSubmit(event) {
   const formName = form.dataset.operationForm;
   const handlers = {
     "credits-adjust": submitCreditAdjustment,
+    "order-sync-wechat": submitWechatOrderSync,
     "order-mark-paid": submitOrderMarkPaid,
     "order-compensate": submitOrderCompensation,
     "workspace-release": submitWorkspaceRelease,
@@ -1291,7 +1366,7 @@ function maybeLoadPaymentEvents(activeKey) {
 }
 
 function maybeLoadContactImports(activeKey) {
-  if (activeKey !== "imports") return;
+  if (activeKey !== "imports" && activeKey !== "users") return;
   if (!adminAccessToken) return;
   if (contactImportsState.loaded || contactImportsState.loading) return;
   loadContactImports();
@@ -1347,6 +1422,21 @@ async function loadConsoleSnapshot() {
   }
 }
 
+async function logoutAdmin() {
+  const token = adminAccessToken;
+  try {
+    if (token) {
+      await fetch(`${API_BASE_URL}/v1/admin/auth/logout`, {
+        method: "POST",
+        headers: adminHeaders()
+      });
+    }
+  } catch {
+    // Local logout still clears the browser session if the API is unavailable.
+  }
+  clearAdminSession("已退出管理员账号。");
+}
+
 function initializeAdminApp() {
   if (!adminAccessToken) {
     setAdminAuthenticated(false);
@@ -1373,7 +1463,9 @@ async function loginAdmin(event) {
     if (!response.ok) throw new Error(`ADMIN_LOGIN_${response.status}`);
     const payload = await response.json();
     adminAccessToken = payload.adminAccessToken;
+    currentAdmin = { ...payload.admin, expiresAt: payload.expiresAt };
     window.sessionStorage.setItem(ADMIN_TOKEN_STORAGE_KEY, adminAccessToken);
+    window.sessionStorage.setItem(ADMIN_PROFILE_STORAGE_KEY, JSON.stringify(currentAdmin));
     adminPasswordInput.value = "";
     adminLoginStatus.textContent = `已登录：${payload.admin.username}`;
     setAdminAuthenticated(true);
@@ -1392,10 +1484,12 @@ pageOutlet.addEventListener("change", handlePaymentEventControlChange);
 pageOutlet.addEventListener("click", paginatePaymentEvents);
 pageOutlet.addEventListener("click", paginateContactImports);
 pageOutlet.addEventListener("click", paginateUsers);
+pageOutlet.addEventListener("click", paginateModuleRecords);
 pageOutlet.addEventListener("click", copyPaymentToken);
 pageOutlet.addEventListener("click", downloadContactImportArtifact);
 pageOutlet.addEventListener("click", openUserEditModal);
 pageOutlet.addEventListener("click", closeUserEditModal);
+adminLogoutButton?.addEventListener("click", logoutAdmin);
 
 Object.assign(window, {
   applyConsoleSnapshot,
@@ -1405,6 +1499,8 @@ Object.assign(window, {
   loadConsoleSnapshot,
   loadPaymentEvents,
   loadContactImports,
+  logoutAdmin,
+  renderAdminAccountPanel,
   renderDashboard,
   renderMappings,
   renderModulePage,
@@ -1415,9 +1511,12 @@ Object.assign(window, {
   filterContactImports,
   paginatePaymentEvents,
   paginateContactImports,
+  paginateModuleRecords,
+  moduleRecordRows,
   copyPaymentToken,
   downloadContactImportArtifact,
   submitCreditAdjustment,
+  submitWechatOrderSync,
   submitOrderMarkPaid,
   submitOrderCompensation,
   submitWorkspaceRelease,
