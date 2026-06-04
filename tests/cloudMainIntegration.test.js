@@ -280,7 +280,7 @@ test('cloud controller creates an Alipay top-up payment for the selected package
           orderNo: '202606010001',
           planId: 'professional',
           credits: 5000,
-          amountCents: 150000,
+          amountCents: 150,
           status: 'created'
         });
       }
@@ -424,6 +424,66 @@ test('cloud controller creates a WeChat Native top-up payment for the selected p
   ]);
 });
 
+test('cloud controller creates quota top-ups with current plan pricing and rejects lower package purchases', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'add-whatsapp-cloud-quota-wechat-'));
+  const sessionStore = new CloudSessionStore(path.join(dir, 'cloud-session.json'));
+  sessionStore.save({
+    user: { id: 'user-1', username: 'cloud-user' },
+    accessToken: 'access-1',
+    refreshToken: 'refresh-1',
+    entitlements: { userId: 'user-1', planId: 'business', balanceCredits: 5000 }
+  });
+  const calls = [];
+  const client = new CloudApiClient({
+    baseUrl: 'http://api.test',
+    fetchImpl: async (url, options = {}) => {
+      calls.push({ url, options });
+      assert.equal(options.headers.authorization, 'Bearer access-1');
+      if (url.endsWith('/v1/orders')) {
+        assert.deepEqual(JSON.parse(options.body), {
+          planId: 'business',
+          credits: 2000,
+          amountCents: 40000
+        });
+        return response(201, {
+          id: 'order-wechat-quota-1',
+          orderNo: '202606030004',
+          planId: 'business',
+          credits: 2000,
+          amountCents: 40000,
+          status: 'created'
+        });
+      }
+      if (url.endsWith('/v1/orders/order-wechat-quota-1/payments/wechat/native-pay')) {
+        return response(200, {
+          provider: 'wechat',
+          orderId: 'order-wechat-quota-1',
+          orderNo: '202606030004',
+          amountCents: 40000,
+          codeUrl: 'weixin://wxpay/bizpayurl?pr=quota-token'
+        });
+      }
+      throw new Error(`unexpected ${url}`);
+    }
+  });
+  const { createCloudDesktopController } = require('../src/main/cloudDesktopController');
+  const controller = createCloudDesktopController({ client, sessionStore, deviceId: 'desktop-1' });
+
+  const rejected = await controller.createWechatTopUp({ planId: 'professional' });
+  const quota = await controller.createWechatTopUp({ planId: 'business', credits: 2000 });
+
+  assert.equal(rejected.ok, false);
+  assert.match(rejected.error, /低于当前套餐/);
+  assert.equal(quota.ok, true);
+  assert.equal(quota.plan.id, 'business');
+  assert.equal(quota.plan.credits, 2000);
+  assert.equal(quota.plan.amountCents, 40000);
+  assert.deepEqual(calls.map(call => call.url), [
+    'http://api.test/v1/orders',
+    'http://api.test/v1/orders/order-wechat-quota-1/payments/wechat/native-pay'
+  ]);
+});
+
 test('cloud controller reads and cancels active payment orders', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'add-whatsapp-cloud-order-close-'));
   const sessionStore = new CloudSessionStore(path.join(dir, 'cloud-session.json'));
@@ -547,6 +607,76 @@ test('cloud controller clears expired cloud session when WeChat payment order cr
   assert.equal(sessionStore.load().authenticated, false);
 });
 
+test('cloud controller refreshes an expired session and retries WeChat payment creation once', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'add-whatsapp-cloud-wechat-refresh-'));
+  const sessionStore = new CloudSessionStore(path.join(dir, 'cloud-session.json'));
+  sessionStore.save({
+    user: { id: 'user-1', username: 'cloud-user' },
+    accessToken: 'expired-access',
+    refreshToken: 'refresh-1',
+    entitlements: { userId: 'user-1', planId: 'advanced', balanceCredits: 0 }
+  });
+  const calls = [];
+  const client = new CloudApiClient({
+    baseUrl: 'http://api.test',
+    fetchImpl: async (url, options = {}) => {
+      calls.push({ url, authorization: options.headers && options.headers.authorization });
+      if (url.endsWith('/v1/orders') && options.headers.authorization === 'Bearer expired-access') {
+        return response(401, { error: 'UNAUTHORIZED' });
+      }
+      if (url.endsWith('/v1/auth/refresh')) {
+        assert.deepEqual(JSON.parse(options.body), {
+          refreshToken: 'refresh-1',
+          deviceId: 'desktop-1'
+        });
+        return response(200, {
+          user: { id: 'user-1', username: 'cloud-user' },
+          accessToken: 'access-2',
+          refreshToken: 'refresh-2'
+        });
+      }
+      if (url.endsWith('/v1/orders') && options.headers.authorization === 'Bearer access-2') {
+        return response(201, {
+          id: 'order-wechat-refresh',
+          orderNo: '202606030099',
+          planId: 'advanced',
+          credits: 2000,
+          amountCents: 80000,
+          status: 'created'
+        });
+      }
+      if (url.endsWith('/v1/orders/order-wechat-refresh/payments/wechat/native-pay')) {
+        assert.equal(options.headers.authorization, 'Bearer access-2');
+        return response(200, {
+          provider: 'wechat',
+          orderId: 'order-wechat-refresh',
+          orderNo: '202606030099',
+          paymentUrl: 'weixin://wxpay/bizpayurl?pr=refresh-token',
+          codeUrl: 'weixin://wxpay/bizpayurl?pr=refresh-token',
+          amountCents: 80000
+        });
+      }
+      throw new Error(`unexpected ${url}`);
+    }
+  });
+  const { createCloudDesktopController } = require('../src/main/cloudDesktopController');
+  const controller = createCloudDesktopController({ client, sessionStore, deviceId: 'desktop-1' });
+
+  const result = await controller.createWechatTopUp({ planId: 'advanced' });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.order.orderNo, '202606030099');
+  assert.equal(result.payment.codeUrl, 'weixin://wxpay/bizpayurl?pr=refresh-token');
+  assert.equal(sessionStore.load().accessToken, 'access-2');
+  assert.equal(sessionStore.load().refreshToken, 'refresh-2');
+  assert.deepEqual(calls.map(call => call.authorization || 'none'), [
+    'Bearer expired-access',
+    'none',
+    'Bearer access-2',
+    'Bearer access-2'
+  ]);
+});
+
 test('cloud controller clears expired cloud session when ZPAY cashier creation is unauthorized', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'add-whatsapp-cloud-zpay-expired-'));
   const sessionStore = new CloudSessionStore(path.join(dir, 'cloud-session.json'));
@@ -588,7 +718,8 @@ test('cloud controller clears expired cloud session when ZPAY cashier creation i
   assert.equal(result.error, 'UNAUTHORIZED');
   assert.deepEqual(calls, [
     'http://api.test/v1/orders',
-    'http://api.test/v1/orders/order-zpay-expired/payments/zpay/page-pay'
+    'http://api.test/v1/orders/order-zpay-expired/payments/zpay/page-pay',
+    'http://api.test/v1/auth/refresh'
   ]);
   assert.equal(sessionStore.load().authenticated, false);
 });

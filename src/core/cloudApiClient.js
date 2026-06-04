@@ -1,12 +1,13 @@
-const { createEntitlementState } = require('./billingPlans');
+const { createEntitlementState, planCatalog } = require('./billingPlans');
 
 const DEFAULT_API_BASE_URL = 'https://api.addwhatsapp.com';
 
 class CloudApiClient {
-  constructor({ baseUrl = DEFAULT_API_BASE_URL, fetchImpl = globalThis.fetch, requestTimeoutMs = 12000 } = {}) {
+  constructor({ baseUrl = DEFAULT_API_BASE_URL, fetchImpl = globalThis.fetch, requestTimeoutMs = 12000, paymentRequestTimeoutMs = 30000 } = {}) {
     this.baseUrl = String(baseUrl || DEFAULT_API_BASE_URL).replace(/\/+$/, '');
     this.fetchImpl = fetchImpl;
     this.requestTimeoutMs = Math.max(Number(requestTimeoutMs) || 12000, 1);
+    this.paymentRequestTimeoutMs = Math.max(Number(paymentRequestTimeoutMs) || 30000, this.requestTimeoutMs);
     if (typeof this.fetchImpl !== 'function') {
       throw new Error('当前运行环境不支持云端 API 请求。');
     }
@@ -23,6 +24,13 @@ class CloudApiClient {
     return this.request('/v1/auth/register', {
       method: 'POST',
       body: { username, password, deviceId, planId }
+    });
+  }
+
+  async refreshSession({ refreshToken, deviceId }) {
+    return this.request('/v1/auth/refresh', {
+      method: 'POST',
+      body: { refreshToken, deviceId }
     });
   }
 
@@ -76,7 +84,8 @@ class CloudApiClient {
     return this.request(`/v1/orders/${encodeURIComponent(orderId)}/payments/wechat/native-pay`, {
       method: 'POST',
       headers: { authorization: `Bearer ${accessToken}` },
-      body: {}
+      body: {},
+      timeoutMs: this.paymentRequestTimeoutMs
     });
   }
 
@@ -141,8 +150,9 @@ class CloudApiClient {
       ...(options.headers || {})
     };
     const controller = typeof AbortController === 'function' ? new AbortController() : null;
+    const timeoutMs = Math.max(Number(options.timeoutMs) || this.requestTimeoutMs, 1);
     const timer = controller
-      ? setTimeout(() => controller.abort(), this.requestTimeoutMs)
+      ? setTimeout(() => controller.abort(), timeoutMs)
       : null;
     try {
       const response = await this.fetchImpl(`${this.baseUrl}${path}`, {
@@ -185,6 +195,7 @@ function mapCloudEntitlements(payload = {}) {
     cloudUserId: payload.userId,
     availableNow: Number.isFinite(Number(payload.availableToday)) ? Number(payload.availableToday) : entitlement.availableNow,
     nextResetAt: payload.resetAt || entitlement.nextResetAt,
+    catalog: planCatalog(),
     resetPolicy: '每日上限按服务器 Asia/Shanghai 业务日重置，未使用账户余额长期保留。'
   };
 }

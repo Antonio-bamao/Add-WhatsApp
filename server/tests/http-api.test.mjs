@@ -78,8 +78,24 @@ describe("cloud API skeleton", () => {
       });
       assert.equal(registered.response.status, 201);
       assert.ok(registered.payload.accessToken);
+      assert.ok(registered.payload.refreshToken);
 
-      const token = registered.payload.accessToken;
+      const refreshed = await request(baseUrl, "/v1/auth/refresh", {
+        method: "POST",
+        body: { refreshToken: registered.payload.refreshToken, deviceId: "desktop-refresh" }
+      });
+      assert.equal(refreshed.response.status, 200);
+      assert.equal(refreshed.payload.user.id, registered.payload.user.id);
+      assert.notEqual(refreshed.payload.accessToken, registered.payload.accessToken);
+      assert.notEqual(refreshed.payload.refreshToken, registered.payload.refreshToken);
+
+      const rejectedReusedRefresh = await request(baseUrl, "/v1/auth/refresh", {
+        method: "POST",
+        body: { refreshToken: registered.payload.refreshToken, deviceId: "desktop-refresh" }
+      });
+      assert.equal(rejectedReusedRefresh.response.status, 401);
+
+      const token = refreshed.payload.accessToken;
       const auth = { authorization: `Bearer ${token}` };
 
       const rejectedAdjustment = await request(baseUrl, "/v1/admin/credits/adjust", {
@@ -122,10 +138,11 @@ describe("cloud API skeleton", () => {
       const order = await request(baseUrl, "/v1/orders", {
         method: "POST",
         headers: auth,
-        body: { planId: "advanced", credits: 2000, amountCents: 60000 }
+        body: { planId: "advanced", credits: 2000, amountCents: 1 }
       });
       assert.equal(order.response.status, 201);
       assert.equal(order.payload.status, "created");
+      assert.equal(order.payload.amountCents, 80000);
 
       const manualPayment = await request(baseUrl, `/v1/orders/${order.payload.id}/payments/manual`, {
         method: "POST",
@@ -136,6 +153,7 @@ describe("cloud API skeleton", () => {
       assert.equal(manualPayment.payload.provider, "manual");
       assert.equal(manualPayment.payload.orderId, order.payload.id);
       assert.equal(manualPayment.payload.orderNo, order.payload.orderNo);
+      assert.equal(manualPayment.payload.amountCents, 80000);
       assert.equal(manualPayment.payload.paymentNote, `ADWA-${order.payload.orderNo}`);
       assert.equal(manualPayment.payload.alipayQrImageUrl, "https://addwhatsapp.com/pay/alipay.png");
 
@@ -282,6 +300,49 @@ describe("cloud API skeleton", () => {
       const rejectedAfterLogout = await request(baseUrl, "/v1/admin/console", { headers: adminAuth });
       assert.equal(rejectedAfterLogout.response.status, 401);
     }, { env: { MANUAL_PAYMENT_ALIPAY_QR_URL: "https://addwhatsapp.com/pay/alipay.png" } });
+  });
+
+  it("allows lower package purchases for higher-tier users without downgrading their subscription", async () => {
+    await withServer(async (baseUrl) => {
+      const registered = await request(baseUrl, "/v1/auth/register", {
+        method: "POST",
+        body: { username: "api-business-user", password: "StrongPass123", planId: "business" }
+      });
+      const auth = { authorization: `Bearer ${registered.payload.accessToken}` };
+      const order = await request(baseUrl, "/v1/orders", {
+        method: "POST",
+        headers: auth,
+        body: { planId: "professional", credits: 5000, amountCents: 1 }
+      });
+
+      assert.equal(order.response.status, 201);
+      assert.equal(order.payload.amountCents, 150000);
+
+      const adminLogin = await request(baseUrl, "/v1/admin/auth/login", {
+        method: "POST",
+        body: { username: "yojiro", password: "yojiro123" }
+      });
+      assert.equal(adminLogin.response.status, 200);
+      const adminAuth = { authorization: `Bearer ${adminLogin.payload.adminAccessToken}` };
+
+      const paymentEvent = await request(baseUrl, "/v1/payments/events", {
+        method: "POST",
+        headers: adminAuth,
+        body: {
+          provider: "manual",
+          providerEventId: "evt-business-lower-package-paid",
+          orderId: order.payload.id,
+          eventType: "payment_succeeded",
+          providerTradeNo: "manual-business-lower-package"
+        }
+      });
+      assert.equal(paymentEvent.response.status, 200);
+
+      const entitlements = await request(baseUrl, "/v1/me/entitlements", { headers: auth });
+      assert.equal(entitlements.response.status, 200);
+      assert.equal(entitlements.payload.planId, "business");
+      assert.equal(entitlements.payload.balanceCredits, 5000);
+    });
   });
 
   it("accepts signed mock_alipay notifications and rejects tampered callbacks", async () => {
@@ -577,6 +638,7 @@ describe("cloud API skeleton", () => {
 
       const balance = await request(baseUrl, "/v1/me/entitlements", { headers: auth });
       assert.equal(balance.payload.balanceCredits, 5000);
+      assert.equal(balance.payload.planId, "professional");
     }, {
       env: {
         WECHAT_MCH_ID: "1113492162",
@@ -638,6 +700,7 @@ describe("cloud API skeleton", () => {
 
       const balance = await request(baseUrl, "/v1/me/entitlements", { headers: auth });
       assert.equal(balance.payload.balanceCredits, 5000);
+      assert.equal(balance.payload.planId, "professional");
 
       const duplicate = await request(baseUrl, `/v1/admin/orders/${order.payload.id}/sync-wechat`, {
         method: "POST",
@@ -902,6 +965,57 @@ describe("cloud API skeleton", () => {
         }
         if (url.endsWith("/v3/pay/transactions/out-trade-no/000000000001/close")) {
           closeSignal = options.signal;
+          return new Promise(() => {});
+        }
+        throw new Error(`unexpected wechat fetch ${url}`);
+      }
+    });
+  });
+
+  it("times out slow WeChat Native payment creation without marking the order provider", async () => {
+    const { privateKey } = crypto.generateKeyPairSync("rsa", {
+      modulusLength: 2048,
+      publicKeyEncoding: { type: "spki", format: "pem" },
+      privateKeyEncoding: { type: "pkcs8", format: "pem" }
+    });
+    let nativeSignal;
+    await withServer(async (baseUrl) => {
+      const registered = await request(baseUrl, "/v1/auth/register", {
+        method: "POST",
+        body: { username: "wechat-native-timeout-user", password: "StrongPass123", planId: "advanced" }
+      });
+      const auth = { authorization: `Bearer ${registered.payload.accessToken}` };
+      const order = await request(baseUrl, "/v1/orders", {
+        method: "POST",
+        headers: auth,
+        body: { planId: "professional", credits: 5000, amountCents: 150000 }
+      });
+
+      const payment = await request(baseUrl, `/v1/orders/${order.payload.id}/payments/wechat/native-pay`, {
+        method: "POST",
+        headers: auth,
+        body: {}
+      });
+      assert.equal(payment.response.status, 504);
+      assert.equal(payment.payload.error, "WECHAT_NATIVE_PAY_TIMEOUT");
+      assert.equal(nativeSignal.aborted, true);
+
+      const status = await request(baseUrl, `/v1/orders/${order.payload.id}`, { headers: auth });
+      assert.equal(status.payload.status, "created");
+      assert.equal(status.payload.paymentProvider, "manual");
+    }, {
+      env: {
+        WECHAT_MCH_ID: "1113492162",
+        WECHAT_APP_ID: "wx92f39a8b81948f51",
+        WECHAT_API_V3_KEY: "0123456789abcdef0123456789abcdef",
+        WECHAT_MERCHANT_SERIAL_NO: "6E44BE6FB4CE6CBF496988E993FFE93BD3D692E7",
+        WECHAT_MERCHANT_PRIVATE_KEY: privateKey,
+        WECHAT_NOTIFY_URL: "https://api.addwhatsapp.com/v1/payments/wechat/notify",
+        WECHAT_NATIVE_PAY_TIMEOUT_MS: "25"
+      },
+      fetchImpl: async (url, options = {}) => {
+        if (url.endsWith("/v3/pay/transactions/native")) {
+          nativeSignal = options.signal;
           return new Promise(() => {});
         }
         throw new Error(`unexpected wechat fetch ${url}`);

@@ -427,3 +427,43 @@
 - 注意：生产环境不要设置 `WECHAT_GATEWAY_URL`，否则会覆盖默认 fallback，只走单个网关；保留 `WECHAT_MCH_ID`、`WECHAT_APP_ID`、`WECHAT_API_V3_KEY`、`WECHAT_MERCHANT_SERIAL_NO`、`WECHAT_MERCHANT_PRIVATE_KEY_PATH`、`WECHAT_NOTIFY_URL`。
 - 验证：用户截图显示专业版订单已生成微信扫码支付面板和二维码，订单号 `1780469909751`，金额 `¥1500.00`，状态为等待微信支付回调；本地仓库 `main` 已同步到 `origin/main` 的 `cf20374`，仅剩未跟踪 `server/scratch_db.js` 未处理。
 - 下一步：新窗口继续用实际扫码支付验证微信异步通知 `/v1/payments/wechat/notify`、后台 payment-events、订单状态和用户余额；验证无误后再打包和部署 website 下载包。
+
+## 2026-06-04T03:42:19+08:00｜让每个桌面端用户在自己的设置页看到 UID
+- 目标：让每个桌面端用户在自己的设置页看到 UID
+- 动作：先补 cloudRendererContract 失败测试锁定设置页 UID 容器和渲染逻辑；随后在 src/renderer/index.html 的账号卡新增 UID 行，在 renderer.js 从 cloudUserId/accountId/id 计算显示值，在 styles.css 复用现有淡色边框样式。
+- 结果：桌面端设置页账号卡现在显示当前登录用户 UID；后台用户列表已有 UID，二者可对照。保留工作区里已有的支付/额度相关未提交改动不处理。
+- 验证：node --test tests\\cloudRendererContract.test.js 通过 5/5；npm test 通过 136/136；本机浏览器预览设置页显示 UID 70865138、uidVisible=true、overflowX=false。
+- 下一步：如需要发布给用户，后续应在确认同一工作区其他未提交支付/额度改动后重新打包 EXE 并同步 website 下载包。
+
+## 2026-06-04T03:53:15+08:00｜修正桌面端设置页 UID 必须和后台 8 位 UID 一致
+- 目标：修正桌面端设置页 UID 必须和后台 8 位 UID 一致
+- 动作：按后台实现追踪 UID 来源，确认后台用 shortUserUid(user.id) 生成 8 位数字；先补 tests\\cloudSessionRestorer.test.js 和 tests\\cloudRendererContract.test.js 红灯，复现 user_c74e30f6-9f85-4ca0-a5fd-b1f94400cb50 应显示 70865138；随后在主进程和 cloudSessionRestorer 映射中保存 uid，渲染层只显示 8 位 user.uid。
+- 结果：桌面端设置页不再显示内部 user_... ID；服务端返回 uid 时直接使用，旧缓存缺 uid 时按后台同款 SHA-256 短 UID 规则从内部 user id 计算，保证与后台用户列表对得上。
+- 验证：node --test tests\\cloudSessionRestorer.test.js tests\\cloudRendererContract.test.js 通过 7/7；npm test 通过 138/138。
+- 下一步：如要让当前已打开的客户端看到修复，需要重启/重新加载客户端；发布给用户前仍需结合工作区既有支付/额度改动统一打包 EXE。
+
+## 2026-06-04T04:20:00+08:00｜收紧套餐购买和额度充值规则
+- 目标：支付成功后体验闭环，并禁止高级套餐反向购买低级套餐；额外额度只能在额度页按当前套餐单价购买。
+- 动作：前端套餐页只允许购买高于当前等级的套餐；额度页 2,000/5,000/20,000/自定义额度会传入下单链路；服务端和 PostgreSQL runtime 拒绝低于当前套餐的订单。
+- 结果：支付成功后弹出提示、刷新权益并跳转额度页；购买套餐会同步当前套餐，高级套餐不会被低级订单覆盖；本轮未打包，已撤回误复制的 website 下载产物。
+- 验证：npm test 132/132；server npm test 41/41；admin npm test 10/10；website npm test 6/6；真实 PostgreSQL test:postgres 2/2。
+- 下一步：确认 UI/支付体验后再打包 EXE，并部署 server 让线上套餐规则生效。
+
+## 2026-06-04T16:42:21+08:00｜修正额度页支付订单归属
+- 目标：额度充值的订单/二维码直接显示在额度页，套餐升级订单继续留在套餐页。
+- 动作：新增套餐页和额度页支付槽位，按支付上下文移动微信 Native 订单面板；额度自定义充值失败后重新生成会保留原 credits。
+- 结果：额度支付不再跳到套餐页；套餐支付不再被成功回调带到额度页；本轮按用户要求未打包。
+- 验证：node --test tests\\rendererPlanPayment.test.js 10/10；npm test 140/140。
+
+## 2026-06-04T16:44:00+08:00｜修复套餐页刷新后卡片消失
+- 目标：恢复套餐页套餐卡片，避免刷新云端权益后只剩额度规则。
+- 动作：确认云端权益刷新返回的 subscription 缺少 catalog，导致 renderPlanCards 清空后无数据可渲染；渲染层改为缺 catalog 时保留已有套餐列表，cloudApiClient 映射权益时默认带 planCatalog。
+- 结果：套餐页刷新余额/支付成功后不再丢套餐卡；本轮按用户要求不打包。
+- 验证：node --test tests\\rendererPlanPayment.test.js 7/7；node --test tests\\cloudApiClient.test.js 15/15；npm test 137/137。
+
+## 2026-06-04T16:45:15+08:00｜记录 UID 对齐规则
+- 目标：记录 UID 对齐规则
+- 动作：补充说明：软件设置页 UID 必须和后台用户管理 UID 一致。
+- 结果：UID 以服务端 8 位 user.uid 为准；旧缓存缺 uid 时按后台同款 shortUserUid(user.id) 计算，不显示内部 user_... ID。
+- 验证：此前已验证：node --test tests\\cloudSessionRestorer.test.js tests\\cloudRendererContract.test.js 通过 7/7；npm test 通过 138/138。
+- 下一步：后续注册/修改账号时按后台和软件一致的 8 位 UID 做参考。

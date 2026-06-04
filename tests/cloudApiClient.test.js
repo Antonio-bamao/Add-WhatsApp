@@ -81,6 +81,31 @@ test('registers a database account and returns the issued cloud session', async 
   assert.equal(registered.refreshToken, 'refresh-new');
 });
 
+test('refreshes a cloud session with the saved refresh token', async () => {
+  const client = new CloudApiClient({
+    baseUrl: 'http://127.0.0.1:4110',
+    fetchImpl: async (url, options = {}) => {
+      assert.equal(url, 'http://127.0.0.1:4110/v1/auth/refresh');
+      assert.equal(options.method, 'POST');
+      assert.deepEqual(JSON.parse(options.body), {
+        refreshToken: 'refresh-1',
+        deviceId: 'desktop-1'
+      });
+      return response(200, {
+        user: { id: 'user-1', username: 'cloud-user', status: 'active' },
+        accessToken: 'access-2',
+        refreshToken: 'refresh-2'
+      });
+    }
+  });
+
+  const refreshed = await client.refreshSession({ refreshToken: 'refresh-1', deviceId: 'desktop-1' });
+
+  assert.equal(refreshed.user.username, 'cloud-user');
+  assert.equal(refreshed.accessToken, 'access-2');
+  assert.equal(refreshed.refreshToken, 'refresh-2');
+});
+
 test('maps cloud entitlements into desktop subscription state shape', () => {
   const mapped = mapCloudEntitlements({
     planId: 'business',
@@ -428,6 +453,35 @@ test('creates a cloud order and requests a WeChat Native pay code url with beare
     'http://127.0.0.1:4110/v1/orders/order-wechat-1/payments/wechat/native-pay'
   ]);
 });
+
+test('uses an extended timeout for slow WeChat Native pay code generation', async () => {
+  const client = new CloudApiClient({
+    baseUrl: 'http://127.0.0.1:4110',
+    requestTimeoutMs: 5,
+    paymentRequestTimeoutMs: 35,
+    fetchImpl: async (url, options = {}) => {
+      assert.equal(url, 'http://127.0.0.1:4110/v1/orders/order-slow/payments/wechat/native-pay');
+      assert.equal(options.headers.authorization, 'Bearer access-1');
+      assert.equal(options.method, 'POST');
+      return new Promise((resolve, reject) => {
+        options.signal.addEventListener('abort', () => {
+          const error = new Error('aborted');
+          error.name = 'AbortError';
+          reject(error);
+        });
+      });
+    }
+  });
+  const startedAt = Date.now();
+
+  await assert.rejects(
+    () => client.createWechatNativePay('access-1', 'order-slow'),
+    /CLOUD_API_TIMEOUT/
+  );
+
+  assert.ok(Date.now() - startedAt >= 25);
+});
+
 
 test('reads and closes a cloud payment order with bearer auth', async () => {
   const requests = [];

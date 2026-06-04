@@ -406,33 +406,35 @@
           <span>生成订单后会显示微信支付二维码，付款成功后系统自动给账号入账。</span>
           <p id="planPaymentState" class="plan-payment-state" role="status"></p>
           </section>
-          <section id="manualPaymentPanel" class="panel manual-payment-panel" hidden aria-label="支付订单">
-            <div class="manual-payment-copy">
-              <p class="eyebrow">微信扫码支付</p>
-              <h3 id="manualPaymentTitle">等待生成订单</h3>
-              <p id="manualPaymentDescription">点击购买后这里会显示金额、订单号和微信支付二维码。</p>
-              <div class="manual-payment-facts">
-                <div><span>订单号</span><strong id="manualPaymentOrderNo">-</strong></div>
-                <div><span>付款金额</span><strong id="manualPaymentAmount">-</strong></div>
-                <div><span>支付状态</span><strong id="manualPaymentNote">-</strong></div>
+          <div id="planPaymentSlot">
+            <section id="manualPaymentPanel" class="panel manual-payment-panel" hidden aria-label="支付订单">
+              <div class="manual-payment-copy">
+                <p class="eyebrow">微信扫码支付</p>
+                <h3 id="manualPaymentTitle">等待生成订单</h3>
+                <p id="manualPaymentDescription">点击购买后这里会显示金额、订单号和微信支付二维码。</p>
+                <div class="manual-payment-facts">
+                  <div><span>订单号</span><strong id="manualPaymentOrderNo">-</strong></div>
+                  <div><span>付款金额</span><strong id="manualPaymentAmount">-</strong></div>
+                  <div><span>支付状态</span><strong id="manualPaymentNote">-</strong></div>
+                </div>
+                <div class="payment-action-row">
+                  <span id="paymentCountdown" class="payment-countdown">订单生成后 5 分钟内有效</span>
+                  <button id="paymentCancelButton" class="text-button danger" type="button" hidden>取消支付</button>
+                  <button id="paymentRetryButton" class="text-button" type="button" hidden>重新生成</button>
+                </div>
+                <div id="paymentLinkBox" class="payment-link-box" hidden>
+                  <span>支付链接</span>
+                  <button id="paymentOpenButton" class="text-button" type="button">打开支付链接</button>
+                  <button id="paymentCopyButton" class="text-button" type="button">复制链接</button>
+                  <code id="paymentLink">-</code>
+                </div>
               </div>
-              <div class="payment-action-row">
-                <span id="paymentCountdown" class="payment-countdown">订单生成后 5 分钟内有效</span>
-                <button id="paymentCancelButton" class="text-button danger" type="button" hidden>取消支付</button>
-                <button id="paymentRetryButton" class="text-button" type="button" hidden>重新生成</button>
+              <div class="manual-payment-qr">
+                <img id="manualPaymentQr" alt="备用收款码" hidden />
+                <div id="manualPaymentQrFallback">等待支付链接</div>
               </div>
-              <div id="paymentLinkBox" class="payment-link-box" hidden>
-                <span>支付链接</span>
-                <button id="paymentOpenButton" class="text-button" type="button">打开支付链接</button>
-                <button id="paymentCopyButton" class="text-button" type="button">复制链接</button>
-                <code id="paymentLink">-</code>
-              </div>
-            </div>
-            <div class="manual-payment-qr">
-              <img id="manualPaymentQr" alt="备用收款码" hidden />
-              <div id="manualPaymentQrFallback">等待支付链接</div>
-            </div>
-          </section>
+            </section>
+          </div>
           <section id="planCards" class="plan-grid" aria-label="套餐列表"></section>
           <section class="panel rule-panel">
             <div class="panel-head">
@@ -558,17 +560,22 @@
               </div>
             </div>
             <div class="quota-packages" aria-label="额度包">
-              <button class="quota-package active" type="button">2,000</button>
-              <button class="quota-package" type="button">5,000</button>
-              <button class="quota-package" type="button">20,000</button>
-              <button class="quota-package" type="button">自定义</button>
+              <button class="quota-package active" type="button" data-quota-credits="2000">2,000</button>
+              <button class="quota-package" type="button" data-quota-credits="5000">5,000</button>
+              <button class="quota-package" type="button" data-quota-credits="20000">20,000</button>
+              <button class="quota-package" type="button" data-quota-credits="custom">自定义</button>
             </div>
+            <label id="quotaCustomCreditsField" class="quota-custom-field" hidden>
+              <span>自定义额度</span>
+              <input id="quotaCustomCreditsInput" type="number" min="1" step="1" inputmode="numeric" placeholder="输入额度数量" />
+            </label>
             <div class="purchase-total">
               <span>预计金额按当前套餐单价计算</span>
               <strong id="quotaEstimate">¥600.00</strong>
               <button id="quotaPayButton" class="button primary" type="button">微信支付</button>
             </div>
           </section>
+          <div id="quotaPaymentSlot"></div>
 
           <section class="panel">
             <div class="panel-head">
@@ -696,6 +703,12 @@
                 </div>
                 <span id="accountNameBadge" class="table-state">-</span>
               </div>
+              <dl class="account-meta" aria-label="当前账号信息">
+                <div>
+                  <dt>UID</dt>
+                  <dd id="accountUidValue">-</dd>
+                </div>
+              </dl>
               <div class="account-actions">
                 <button id="openWorkspaceButton" class="button primary" type="button">新建工作台 / 打开另一个账号</button>
                 <button id="proxySettingsButton" class="button ghost" type="button" hidden>IP 设置</button>
@@ -738,6 +751,21 @@
       </main>
     </div>
 
+    <div id="paymentSuccessModal" class="modal-backdrop" hidden>
+      <section class="app-modal" role="dialog" aria-modal="true" aria-labelledby="paymentSuccessTitle">
+        <div class="modal-mark" aria-hidden="true">
+          <img src="../../assets/icon.png" alt="" />
+        </div>
+        <div>
+          <p class="eyebrow">微信支付</p>
+          <h3 id="paymentSuccessTitle">支付成功</h3>
+          <p id="paymentSuccessDetail">套餐和额度已同步。</p>
+        </div>
+        <div class="modal-actions">
+          <button id="paymentSuccessConfirmButton" class="button primary" type="button">查看额度</button>
+        </div>
+      </section>
+    </div>
     <div id="closeModal" class="modal-backdrop" hidden>
       <section class="app-modal" role="dialog" aria-modal="true" aria-labelledby="closeModalTitle">
         <div class="modal-mark" aria-hidden="true">

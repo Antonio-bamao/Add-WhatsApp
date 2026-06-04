@@ -87,5 +87,13 @@
 - 阻塞项：管理员登录方式、支付渠道/人工收款流程、生产域名和部署平台还未最终确定。
 - 已完成：微信 Native 在 RackNerd 境外服务器上 `fetch failed` 的根因已确认并修复；服务端对微信支付官方 API 加入 IPv4 强制和多区域 fallback，默认依次尝试 `api.mch.weixin.qq.com`、`apihk.mch.weixin.qq.com`、`apius.mch.weixin.qq.com`、`apieu.mch.weixin.qq.com`，生产截图已显示专业版微信扫码二维码成功生成。
 - 已完成：复制支付链接在 Electron sandbox 下的安全异常已修复，`copyText` 改为 renderer 通过 IPC 让 main process 写入剪贴板。
-- 当前状态：本地 `main` 与 `origin/main` 均在 `cf20374`；支付相关关键提交包括 `33916ac`、`26bd29b`、`e4c1580`、`e7913f4`、`cf20374`。工作区只有未跟踪 `server/scratch_db.js`，这是临时文件，交接时不要误提交。
+- 已完成：桌面端设置页账号卡新增当前用户 8 位 UID 展示；渲染层只显示 `user.uid` 形式的 8 位数字，不再把内部 `user_...` ID 当 UID。主进程优先使用服务端返回的 `user.uid`，旧登录缓存缺少 `uid` 时按后台同款 `shortUserUid(user.id)` SHA-256 规则计算，截图里的 `user_c74e30f6-9f85-4ca0-a5fd-b1f94400cb50` 会显示为后台同款 `70865138`。
+- 验证：`node --test tests\cloudSessionRestorer.test.js tests\cloudRendererContract.test.js` 通过 7/7；根项目 `npm test` 通过 138/138。
+- 当前状态：本地 `main` 与 `origin/main` 均在 `cf20374`；支付相关关键提交包括 `33916ac`、`26bd29b`、`e4c1580`、`e7913f4`、`cf20374`。当前工作区除本轮 UID 展示改动外，已有多处未提交的支付/额度/云端同步相关改动和未跟踪文件；交接或提交前需要用 `git status --short` 与 `git diff` 区分本轮改动和既有改动。
 - 下一步：不要在生产环境设置 `WECHAT_GATEWAY_URL`，避免覆盖默认 fallback；继续用真实微信扫码付款验证 notify、后台 payment-events、订单状态和用户余额，全部确认后再重新打包和发布官网 latest EXE。
+- 已完成：支付成功后桌面端会提示成功、刷新权益并跳转额度页；套餐页只允许购买高于当前等级的套餐，服务端和 PostgreSQL runtime 也拒绝低于当前套餐的订单；额度页按当前套餐单价购买额外额度。本轮按用户要求未打包，website 下载产物已恢复。
+- 验证：`npm test` 132/132；`server npm test` 41/41；`admin npm test` 10/10；`website npm test` 6/6；真实 PostgreSQL `server npm run test:postgres` 2/2。
+- 下一步：先让用户确认套餐页/额度页/支付成功体验；确认后再打包 EXE、同步 website 下载包并部署 server。
+- 已完成：额度页微信支付订单/二维码现在直接显示在额度页，套餐升级支付订单继续留在套餐页；自定义额度失败后重新生成仍保留原额度数。本轮按用户要求未打包。
+- 验证：`node --test tests\rendererPlanPayment.test.js` 10/10；`npm test` 140/140。
+- 下一步：用户确认 UI 体验后，再决定是否统一打包 EXE、同步 website 下载包并部署 server。

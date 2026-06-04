@@ -130,8 +130,15 @@ function table(headers, rows) {
         <tbody>
           ${
             rows.length > 0
-              ? rows.map((row) => `<tr>${row.map((cell) => `<td>${cell}</td>`).join("")}</tr>`).join("")
-              : `<tr><td colspan="${headers.length}">暂无记录</td></tr>`
+              ? rows
+                  .map(
+                    (row) =>
+                      `<tr>${row
+                        .map((cell, index) => `<td data-label="${escapeHtml(headers[index] || "")}">${cell}</td>`)
+                        .join("")}</tr>`
+                  )
+                  .join("")
+              : `<tr><td data-label="" colspan="${headers.length}">暂无记录</td></tr>`
           }
         </tbody>
       </table>
@@ -496,14 +503,14 @@ function renderUsersModulePage(module) {
                     const sessions = String(row[6] || "0 sessions");
                     return `
                       <tr data-user-row data-user-id="${escapeHtml(row[1])}" data-user-uid="${uid}" data-user-account="${account}" data-user-created="${escapeHtml(row[0])}" data-user-current-status="${escapeHtml(status)}" data-user-current-plan="${escapeHtml(plan)}" data-user-balance="${escapeHtml(balance)}" data-user-sessions="${escapeHtml(sessions)}">
-                        <td><code>${uid}</code></td>
-                        <td><strong>${account}</strong></td>
-                        <td>${escapeHtml(row[0])}</td>
-                        <td><span class="status-pill status-pill--${status === "active" ? "good" : "warn"}">${status === "active" ? "正常" : "封禁"}</span></td>
-                        <td>${escapeHtml(plan)}</td>
-                        <td><strong>${escapeHtml(balance)}</strong></td>
-                        <td>${loginSessionLabel(sessions)}</td>
-                        <td>
+                        <td data-label="UID"><code>${uid}</code></td>
+                        <td data-label="账号"><strong>${account}</strong></td>
+                        <td data-label="注册时间">${escapeHtml(row[0])}</td>
+                        <td data-label="状态"><span class="status-pill status-pill--${status === "active" ? "good" : "warn"}">${status === "active" ? "正常" : "封禁"}</span></td>
+                        <td data-label="套餐">${escapeHtml(plan)}</td>
+                        <td data-label="余额"><strong>${escapeHtml(balance)}</strong></td>
+                        <td data-label="登录会话">${loginSessionLabel(sessions)}</td>
+                        <td data-label="修改">
                           <div class="user-actions">
                             <button type="button" data-user-edit>修改</button>
                             <small data-user-action-status></small>

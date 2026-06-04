@@ -36,3 +36,19 @@
 - 根因：RackNerd 生产服务器到微信支付主域名 `api.mch.weixin.qq.com` 的出口线路不可用；这不是套餐按钮禁用、token、微信环境变量或订单创建逻辑的问题。ZPAY 之前能通，是因为它走 ZPAY 第三方网关，网络路径不同。
 - 处理：服务端先增强错误输出，暴露 `AggregateError` 细节；随后对微信支付相关域名强制 IPv4；最终在微信 Native 下单 provider 中加入多区域官方网关 fallback，依次尝试主域名、香港/东南亚、美国、欧洲接入点。
 - 预防：以后接入支付、短信、邮件、对象存储等第三方服务时，如果生产服务器出现连接超时，必须先查官方备用域名、区域 endpoint、SDK 自动重试机制和出口防火墙/DNS 行为，不能只停在“服务器网络不通”。
+
+## 桌面端设置页误显示内部用户 ID 作为 UID
+- 现象：设置页 UID 显示 user_c74e30f6-9f85-4ca0-a5fd-b1f94400cb50，而后台用户列表同一账号显示 70865138。
+- 触发条件：新增设置页 UID 展示时直接从 cloudUserId/accountId/id fallback，而没有沿用后台的 8 位 shortUserUid。
+- 影响：后续管理员按 UID 修改账号时会无法和用户自己设置页对照，容易选错参考标识。
+- 根因：主进程 desktopUserFromCloudUser 映射丢掉服务端 public user.uid，渲染层又把内部数据库 ID 当作 UID fallback。
+- 解决方案：主进程和 cloudSessionRestorer 保留/计算 uid；渲染层只接受 8 位数字 user.uid，否则显示 -。
+- 预防措施：契约测试锁定设置页 UID 只从 user.uid 展示，并用截图里的内部 ID 样本验证可计算出 70865138。
+- 状态：fixed
+
+## 2026-06-04: 套餐页刷新权益后卡片被清空
+- 现象：套餐页只显示额度规则，套餐卡片区域为空。
+- 根因：云端权益刷新返回的 subscription 没有 catalog，renderPlanCards 先清空 planCards 后遍历空 catalog。
+- 处理：renderSubscriptionState 缺 catalog 时继承现有 catalog；mapCloudEntitlements 默认带 planCatalog。
+- 预防：新增 renderer 回归测试，覆盖刷新权益缺 catalog 时套餐卡仍可见。
+- 状态：fixed

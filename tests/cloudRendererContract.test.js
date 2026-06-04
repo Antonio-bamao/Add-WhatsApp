@@ -31,6 +31,28 @@ test('auth surface uses one database account and removes the secondary cloud log
   assert.match(main, /cloudController\.register/);
 });
 
+test('account settings shows the current database user uid', () => {
+  const html = fs.readFileSync(path.join(root, 'src', 'renderer', 'index.html'), 'utf-8');
+  const renderer = fs.readFileSync(path.join(root, 'src', 'renderer', 'renderer.js'), 'utf-8');
+  const main = fs.readFileSync(path.join(root, 'src', 'main', 'main.js'), 'utf-8');
+  const restorer = fs.readFileSync(path.join(root, 'src', 'main', 'cloudSessionRestorer.js'), 'utf-8');
+
+  assert.match(html, /id="accountUidValue"/);
+  assert.match(html, />UID</);
+  assert.match(renderer, /accountUidValue: document\.getElementById\('accountUidValue'\)/);
+  assert.match(renderer, /function displayUserUid\(user = {}\)/);
+  assert.match(renderer, /user\.uid/);
+  assert.doesNotMatch(renderer, /user\.cloudUserId \|\| user\.accountId \|\| user\.id/);
+  assert.match(renderer, /const uid = authenticated \? displayUserUid\(state\.auth\.user\) : '-'/);
+  assert.match(renderer, /elements\.accountUidValue\.textContent = uid/);
+  assert.match(main, /function shortUserUid\(userId\)/);
+  assert.match(main, /const uidSource = user\.id \|\| user\.cloudUserId \|\| user\.accountId/);
+  assert.match(main, /uid: user\.uid \|\| \(uidSource \? shortUserUid\(uidSource\) : null\)/);
+  assert.match(restorer, /function shortUserUid\(userId\)/);
+  assert.match(restorer, /const uidSource = user\.id \|\| user\.cloudUserId \|\| user\.accountId/);
+  assert.match(restorer, /uid: user\.uid \|\| \(uidSource \? shortUserUid\(uidSource\) : null\)/);
+});
+
 test('pricing page exposes official WeChat Native payment actions instead of maintenance copy', () => {
   const html = fs.readFileSync(path.join(root, 'src', 'renderer', 'index.html'), 'utf-8');
   const renderer = fs.readFileSync(path.join(root, 'src', 'renderer', 'renderer.js'), 'utf-8');

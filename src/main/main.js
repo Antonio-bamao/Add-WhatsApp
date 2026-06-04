@@ -28,8 +28,10 @@ const {
 } = require('../core/billingPlans');
 const { CloudApiClient, DEFAULT_API_BASE_URL, mapCloudEntitlements } = require('../core/cloudApiClient');
 const { CloudSessionStore } = require('../core/cloudSessionStore');
+const { PendingCloudSyncStore } = require('../core/pendingCloudSyncStore');
 const { createWhatsAppService } = require('./whatsappService');
 const { createCloudDesktopController } = require('./cloudDesktopController');
+const { restoreAuthenticatedSession: restoreAuthenticatedCloudSession } = require('./cloudSessionRestorer');
 const { WhatsAppSessionManager } = require('./whatsappSessionManager');
 const { LocalProxyBridge } = require('./proxyBridge');
 const {
@@ -73,6 +75,7 @@ let proxySettingsStore = null;
 let whatsappSessionManager = null;
 let templateStore = null;
 let historyStore = null;
+let pendingCloudSyncStore = null;
 let activeRun = null;
 let proxyMonitorTimer = null;
 let activeProxyBridge = null;
@@ -159,10 +162,13 @@ app.on('window-all-closed', () => {
 });
 
 function restoreAuthenticatedSession() {
-  const cloud = cloudState();
-  if (!cloud.authenticated || !cloud.user) return;
-  accountContext.setCurrentUser(desktopUserFromCloudUser(cloud.user));
-  initializeAccountStores();
+  restoreAuthenticatedCloudSession({
+    cloudState,
+    accountContext,
+    initializeAccountStores,
+    schedulePendingCloudSyncRetry,
+    mapCloudUser: desktopUserFromCloudUser
+  });
 }
 
 function initializeAccountStores() {
@@ -172,6 +178,7 @@ function initializeAccountStores() {
   });
   templateStore = new JsonTemplateStore(accountContext.accountPath('templates.json'));
   historyStore = new JsonHistoryStore(accountContext.accountPath('history', 'runs.json'));
+  pendingCloudSyncStore = new PendingCloudSyncStore(accountContext.accountPath('cloud-sync-pending.json'));
   historyStore.markOpenInterrupted();
   restoreLastImport();
 }
@@ -179,6 +186,7 @@ function initializeAccountStores() {
 function clearAccountState() {
   templateStore = null;
   historyStore = null;
+  pendingCloudSyncStore = null;
   importedRows = [];
   importedSource = null;
   currentImportOptions = { skipChinaNumbers: true };
@@ -205,11 +213,19 @@ function cloudState() {
     : { authenticated: false, user: null, entitlements: null };
 }
 
+function shortUserUid(userId) {
+  const digest = crypto.createHash('sha256').update(String(userId || '')).digest('hex');
+  const number = Number.parseInt(digest.slice(0, 12), 16) % 100000000;
+  return String(number).padStart(8, '0');
+}
+
 function desktopUserFromCloudUser(user = {}) {
+  const uidSource = user.id || user.cloudUserId || user.accountId;
   return {
     accountId: user.id || user.accountId || user.username,
     username: user.username || user.email || user.id,
-    cloudUserId: user.id || user.cloudUserId || null
+    cloudUserId: user.id || user.cloudUserId || null,
+    uid: user.uid || (uidSource ? shortUserUid(uidSource) : null)
   };
 }
 
@@ -341,6 +357,7 @@ ipcMain.handle('auth:register', async (_event, payload = {}) => {
     const user = desktopUserFromCloudUser(result.cloud.user);
     accountContext.setCurrentUser(user);
     initializeAccountStores();
+    schedulePendingCloudSyncRetry();
     const auth = authState();
     sendToRenderer('auth:changed', auth);
     return { ok: true, user, auth, cloud: result.cloud, subscription: publicSubscriptionState() };
@@ -360,6 +377,7 @@ ipcMain.handle('auth:login', async (_event, payload = {}) => {
     const user = desktopUserFromCloudUser(result.cloud.user);
     accountContext.setCurrentUser(user);
     initializeAccountStores();
+    schedulePendingCloudSyncRetry();
     const auth = authState();
     sendToRenderer('auth:changed', auth);
     return { ok: true, user, auth, cloud: result.cloud, subscription: publicSubscriptionState() };
@@ -369,7 +387,7 @@ ipcMain.handle('auth:login', async (_event, payload = {}) => {
 });
 
 ipcMain.handle('auth:logout', async () => {
-  if (currentTask) return { ok: false, error: '当前任务正在运行，请先暂停或等待结束后再退出账号。' };
+  if (currentTask) return { ok: false, currentTaskRunning: true, error: '当前任务正在运行，请先暂停或等待结束后再退出账号。' };
   cloudController.logout();
   subscriptionState = defaultSubscriptionState();
   accountContext.clear();
@@ -452,7 +470,7 @@ ipcMain.handle('cloud:zpay-top-up', async (_event, payload = {}) => {
 
 ipcMain.handle('cloud:wechat-top-up', async (_event, payload = {}) => {
   try {
-    const result = await cloudController.createWechatTopUp({ planId: payload.planId });
+    const result = await cloudController.createWechatTopUp({ planId: payload.planId, credits: payload.credits });
     if (result.ok && result.payment && (result.payment.codeUrl || result.payment.paymentUrl)) {
       result.payment.qrImageDataUrl = await QRCode.toDataURL(result.payment.codeUrl || result.payment.paymentUrl, {
         margin: 1,
@@ -1032,12 +1050,68 @@ async function syncCloudUsageAfterTask({ taskId, result, sentBeforeCount, sentAt
         type: 'cloud:usage-synced',
         message: `云端已同步 ${cloudResult.consumed || sentRows.length} 个成功添加额度。`
       });
+      return;
     }
+    recordPendingCloudSync({ taskId, sentRows, workspaceId: workspaceId || 'main', sentAt, reason: cloudResult.error || 'AUTH_REQUIRED' });
+    sendToRenderer('task:event', {
+      type: 'cloud:usage-sync-failed',
+      message: '云端额度同步暂未完成，已保存到本地，重新登录后会自动补同步。'
+    });
+  } catch (error) {
+    recordPendingCloudSync({ taskId, sentRows, workspaceId: workspaceId || 'main', sentAt, reason: error.message });
+    sendToRenderer('task:event', {
+      type: 'cloud:usage-sync-failed',
+      message: `云端额度同步失败，已保存到本地待重试：${error.message}`
+    });
+  }
+}
+
+function recordPendingCloudSync(item) {
+  if (!pendingCloudSyncStore) return;
+  try {
+    pendingCloudSyncStore.upsert(item);
   } catch (error) {
     sendToRenderer('task:event', {
       type: 'cloud:usage-sync-failed',
-      message: `云端额度同步失败：${error.message}`
+      message: `本地待同步记录保存失败：${error.message}`
     });
+  }
+}
+
+function schedulePendingCloudSyncRetry() {
+  setImmediate(() => {
+    retryPendingCloudSyncs().catch(error => {
+      sendToRenderer('task:event', {
+        type: 'cloud:usage-sync-failed',
+        message: `待同步额度重试失败：${error.message}`
+      });
+    });
+  });
+}
+
+async function retryPendingCloudSyncs() {
+  if (!pendingCloudSyncStore || !cloudController) return;
+  const items = pendingCloudSyncStore.list();
+  for (const item of items) {
+    if (!item.sentRows || !item.sentRows.length) {
+      pendingCloudSyncStore.remove(item.taskId);
+      continue;
+    }
+    const cloudResult = await cloudController.consumeSuccessfulAdds({
+      taskId: item.taskId,
+      sentRows: item.sentRows,
+      workspaceId: item.workspaceId || 'main',
+      sentAt: item.sentAt
+    });
+    if (cloudResult.ok && cloudResult.subscription) {
+      subscriptionState = cloudResult.subscription;
+      pendingCloudSyncStore.remove(item.taskId);
+      sendToRenderer('auth:changed', authState());
+      sendToRenderer('task:event', {
+        type: 'cloud:usage-synced',
+        message: `已补同步任务 ${item.taskId} 的 ${cloudResult.consumed || item.sentRows.length} 个成功添加额度。`
+      });
+    }
   }
 }
 

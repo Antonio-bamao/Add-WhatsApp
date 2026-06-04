@@ -5,8 +5,14 @@ const state = {
   templates: { en: [], es: [], fr: [] },
   taskStats: { sent: 0, failed: 0, unregistered: 0, invalid: 0 },
   activeTemplateLanguage: 'en',
-  activePayment: null
+  activePayment: null,
+  paymentRequestInFlight: false,
+  selectedQuotaCredits: 2000
 };
+
+const CLOUD_ENTITLEMENT_REFRESH_MIN_INTERVAL_MS = 30 * 1000;
+let cloudEntitlementRefreshInFlight = null;
+let lastCloudEntitlementRefreshAt = 0;
 
 const elements = {
   authGate: document.getElementById('authGate'),
@@ -79,6 +85,7 @@ const elements = {
   closeCancelButton: document.getElementById('closeCancelButton'),
   currentAccountBadge: document.getElementById('currentAccountBadge'),
   accountNameBadge: document.getElementById('accountNameBadge'),
+  accountUidValue: document.getElementById('accountUidValue'),
   openWorkspaceButton: document.getElementById('openWorkspaceButton'),
   proxySettingsButton: document.getElementById('proxySettingsButton'),
   logoutButton: document.getElementById('logoutButton'),
@@ -123,6 +130,9 @@ const elements = {
   quotaCardPlanSubtitle: document.getElementById('quotaCardPlanSubtitle'),
   quotaEstimate: document.getElementById('quotaEstimate'),
   quotaPayButton: document.getElementById('quotaPayButton'),
+  quotaCreditButtons: [...document.querySelectorAll('[data-quota-credits]')],
+  quotaCustomCreditsField: document.getElementById('quotaCustomCreditsField'),
+  quotaCustomCreditsInput: document.getElementById('quotaCustomCreditsInput'),
   manualPaymentPanel: document.getElementById('manualPaymentPanel'),
   manualPaymentTitle: document.getElementById('manualPaymentTitle'),
   manualPaymentDescription: document.getElementById('manualPaymentDescription'),
@@ -138,6 +148,11 @@ const elements = {
   paymentCountdown: document.getElementById('paymentCountdown'),
   paymentCancelButton: document.getElementById('paymentCancelButton'),
   paymentRetryButton: document.getElementById('paymentRetryButton'),
+  paymentSuccessModal: document.getElementById('paymentSuccessModal'),
+  paymentSuccessDetail: document.getElementById('paymentSuccessDetail'),
+  paymentSuccessConfirmButton: document.getElementById('paymentSuccessConfirmButton'),
+  planPaymentSlot: document.getElementById('planPaymentSlot'),
+  quotaPaymentSlot: document.getElementById('quotaPaymentSlot'),
   billingPlanDescription: document.getElementById('billingPlanDescription'),
   billingPayButton: document.getElementById('billingPayButton'),
   billingIncludedList: document.getElementById('billingIncludedList'),
@@ -182,6 +197,11 @@ function setAuthMessage(message, tone = '') {
   elements.authMessage.classList.toggle('strong', tone === 'strong');
 }
 
+function displayUserUid(user = {}) {
+  const uid = String(user.uid || '').trim();
+  return /^\d{8}$/.test(uid) ? uid : '-';
+}
+
 function applyAuthState(auth) {
   state.auth = auth || { authenticated: false, user: null };
   if (state.auth.subscription) renderSubscriptionState(state.auth.subscription);
@@ -189,8 +209,10 @@ function applyAuthState(auth) {
   elements.authGate.hidden = authenticated;
   elements.appShell.hidden = !authenticated;
   const username = authenticated ? state.auth.user.username : '未登录';
+  const uid = authenticated ? displayUserUid(state.auth.user) : '-';
   elements.currentAccountBadge.textContent = username;
   elements.accountNameBadge.textContent = username;
+  elements.accountUidValue.textContent = uid;
   if (elements.quotaCardUserName) elements.quotaCardUserName.textContent = username;
   const isSecondaryWorkspace = Boolean(state.auth.workspace && state.auth.workspace.isSecondary);
   elements.openWorkspaceButton.hidden = isSecondaryWorkspace;
@@ -211,15 +233,74 @@ function formatCredits(value) {
 
 function formatPlanPrice(plan) {
   if (!plan.unitPriceCents) return '¥0';
-  return `¥${(plan.unitPriceCents / 100).toFixed(plan.unitPriceCents % 100 === 0 ? 0 : 2)}`;
+  const unitPriceYuan = Number(plan.unitPriceCents) / 100;
+  if (unitPriceYuan > 0 && unitPriceYuan < 0.01) return `¥${unitPriceYuan.toFixed(4)}`;
+  return `¥${unitPriceYuan.toFixed(plan.unitPriceCents % 100 === 0 ? 0 : 2)}`;
+}
+
+function planRank(catalog = [], planId = '') {
+  const index = catalog.findIndex(plan => plan.id === planId);
+  return index >= 0 ? index : -1;
+}
+
+function updateQuotaEstimate(subscription = state.subscription) {
+  if (!elements.quotaEstimate || !subscription || !subscription.plan) return;
+  const credits = Math.max(0, Number(state.selectedQuotaCredits || 0));
+  const amountCents = Math.round(credits * Number(subscription.plan.unitPriceCents || 0));
+  elements.quotaEstimate.textContent = `¥${(amountCents / 100).toFixed(2)}`;
+}
+
+function applySelectedQuotaCredits(credits) {
+  const normalized = Math.floor(Number(credits || 0));
+  state.selectedQuotaCredits = Number.isInteger(normalized) && normalized > 0 ? normalized : 0;
+  updateQuotaEstimate();
+  updateActionLocks();
+  return state.selectedQuotaCredits;
+}
+
+function setCustomQuotaVisible(visible) {
+  if (!elements.quotaCustomCreditsField) return;
+  elements.quotaCustomCreditsField.hidden = !visible;
+  if (visible && elements.quotaCustomCreditsInput) {
+    elements.quotaCustomCreditsInput.value = state.selectedQuotaCredits > 0
+      ? String(state.selectedQuotaCredits)
+      : '';
+    elements.quotaCustomCreditsInput.focus();
+  }
+}
+
+function selectQuotaCredits(button) {
+  if (!button) return;
+  const value = button.dataset.quotaCredits;
+  const isCustom = value === 'custom';
+  const credits = isCustom ? state.selectedQuotaCredits : Number(value);
+  state.selectedQuotaCredits = credits;
+  for (const item of elements.quotaCreditButtons) {
+    item.classList.toggle('active', item === button);
+  }
+  setCustomQuotaVisible(isCustom);
+  if (!isCustom) applySelectedQuotaCredits(credits);
+  else updateQuotaEstimate();
+}
+
+function handleCustomQuotaInput() {
+  const credits = applySelectedQuotaCredits(elements.quotaCustomCreditsInput.value);
+  if (!credits) {
+    elements.syncState.textContent = '请输入有效的充值额度。';
+  } else {
+    elements.syncState.textContent = '自定义额度已更新。';
+  }
 }
 
 function renderPlanCards(subscription) {
   if (!elements.planCards) return;
   const activePlanId = subscription.plan && subscription.plan.id;
+  const activeRank = planRank(subscription.catalog || [], activePlanId);
   elements.planCards.innerHTML = '';
   for (const plan of subscription.catalog || []) {
     const isActive = plan.id === activePlanId;
+    const isHigherPlan = planRank(subscription.catalog || [], plan.id) > activeRank;
+    const isLowerPlan = !isActive && !isHigherPlan;
     const card = document.createElement('article');
     card.className = `plan-card ${isActive ? 'active' : ''} ${plan.recommended ? 'recommended' : ''}`.trim();
     const topUp = plan.minimumTopUpCredits
@@ -227,8 +308,8 @@ function renderPlanCards(subscription) {
       : '无需充值';
     const templateLimit = plan.templateLimit ? `自定义文案模板 X${plan.templateLimit}` : '自定义文案模板不限';
     const lockedItems = lockedFeatureList(plan);
-    const canTopUp = Boolean(!isActive && plan.capabilities && plan.capabilities.onlinePayment && Number(plan.minimumTopUpCredits || 0) > 0);
-    const actionText = isActive ? '当前套餐' : (canTopUp ? '微信支付' : '暂不支持');
+    const canTopUp = Boolean(isHigherPlan && plan.capabilities && plan.capabilities.onlinePayment && Number(plan.minimumTopUpCredits || 0) > 0);
+    const actionText = isActive ? '当前套餐' : (isLowerPlan ? '低于当前套餐' : (canTopUp ? '微信支付' : '暂不支持'));
     const disabled = !canTopUp;
     card.innerHTML = `
       <div class="plan-card-head">
@@ -262,6 +343,7 @@ function renderPlanCards(subscription) {
       planId: plan.id,
       activePlanId,
       isActive,
+      isHigherPlan,
       canTopUp,
       disabled,
       actionText
@@ -294,7 +376,11 @@ function lockedFeatureList(plan = {}) {
 }
 
 function renderSubscriptionState(subscription) {
-  state.subscription = subscription;
+  const catalog = Array.isArray(subscription.catalog) && subscription.catalog.length
+    ? subscription.catalog
+    : (state.subscription && Array.isArray(state.subscription.catalog) ? state.subscription.catalog : []);
+  state.subscription = { ...subscription, catalog };
+  subscription = state.subscription;
   const plan = subscription.plan || {};
   const usage = subscription.usage || {};
   const today = usage.today || { used: subscription.usedToday || 0, limit: plan.dailyLimit || 0, percent: 0 };
@@ -314,7 +400,7 @@ function renderSubscriptionState(subscription) {
   elements.monthlyUsageBar.style.width = `${month.percent || 0}%`;
   elements.workspaceUsageBar.style.width = `${workspacePercent}%`;
   renderMembershipCard(plan);
-  elements.quotaEstimate.textContent = plan.unitPriceCents ? `¥${((plan.minimumTopUpCredits || 0) * plan.unitPriceCents / 100).toFixed(2)}` : '¥0.00';
+  updateQuotaEstimate(subscription);
   elements.billingPlanDescription.textContent = `${plan.name || '-'}：每日可用上限 ${formatCredits(plan.dailyLimit)}，工作台 ${formatCredits(plan.workspaceLimit)} 个。`;
   renderUsageLedger(subscription);
   renderBillingFeatureLists(plan);
@@ -520,27 +606,36 @@ function updateActionLocks() {
     && state.activePayment.orderId
     && ['pending', 'closing'].includes(state.activePayment.status)
   );
+  const paymentBusy = hasOpenPayment || state.paymentRequestInFlight;
+  const quotaCreditsValid = Number(state.selectedQuotaCredits || 0) > 0;
   for (const button of [elements.quotaPayButton, elements.billingPayButton]) {
     if (!button) continue;
-    button.disabled = !canPay || hasOpenPayment;
+    const invalidQuota = button === elements.quotaPayButton && !quotaCreditsValid;
+    button.disabled = !canPay || paymentBusy || invalidQuota;
     button.title = paymentAccess.ok
-      ? (hasOpenPayment ? '请先取消或完成当前支付订单。' : (canPay ? '' : '请先登录账号。'))
+      ? (invalidQuota ? '请输入有效的充值额度。' : (paymentBusy ? '请先等待当前支付订单生成完成，或取消/完成当前订单。' : (canPay ? '' : '请先登录账号。')))
       : paymentAccess.message;
   }
   const activePlanId = state.subscription && state.subscription.plan && state.subscription.plan.id;
   const catalog = state.subscription && state.subscription.catalog ? state.subscription.catalog : [];
+  const activeRank = planRank(catalog, activePlanId);
   for (const button of document.querySelectorAll('[data-plan-pay]')) {
     const plan = catalog.find(item => item.id === button.dataset.planPay);
     const isActivePlan = button.dataset.planPay === activePlanId;
-    const planCanPay = Boolean(plan && !isActivePlan && plan.capabilities && plan.capabilities.onlinePayment && Number(plan.minimumTopUpCredits || 0) > 0);
-    button.disabled = !planCanPay || !canPay || hasOpenPayment;
+    const isHigherPlan = Boolean(plan && planRank(catalog, plan.id) > activeRank);
+    const isLowerPlan = Boolean(plan && !isActivePlan && !isHigherPlan);
+    const planCanPay = Boolean(plan && isHigherPlan && plan.capabilities && plan.capabilities.onlinePayment && Number(plan.minimumTopUpCredits || 0) > 0);
+    button.disabled = !planCanPay || !canPay || paymentBusy;
     button.title = isActivePlan
       ? ''
-      : (hasOpenPayment ? '请先取消或完成当前支付订单。' : (planCanPay ? (canPay ? '' : '请先登录账号。') : '该套餐无需线上充值。'));
+      : (isLowerPlan
+        ? '当前已是更高套餐，如需增加额度请到额度页购买。'
+        : (paymentBusy ? '请先等待当前支付订单生成完成，或取消/完成当前订单。' : (planCanPay ? (canPay ? '' : '请先登录账号。') : '该套餐无需线上充值。')));
     debugPayment('plan button lock state', {
       planId: button.dataset.planPay,
       activePlanId,
       isActivePlan,
+      isHigherPlan,
       planCanPay,
       canPay,
       disabled: button.disabled,
@@ -617,30 +712,65 @@ async function logoutAccount() {
 
 async function handleApiError(response) {
   if (response && !response.ok && (response.authRequired || response.error === 'UNAUTHORIZED')) {
-    alert('您的登录会话已失效（由于服务器重启或 Token 过期），已自动为您退出，请重新登录。');
-    await window.addWhatsapp.logoutAccount();
+    const logout = await window.addWhatsapp.logoutAccount();
+    if (logout && logout.ok) {
+      clearPaymentTimers();
+      applyAuthState({ authenticated: false, user: null });
+      switchAuthMode('login');
+      setAuthMessage('云端登录已失效，请重新登录。', 'error');
+      return true;
+    }
+    const runningTask = logout && (logout.currentTaskRunning || /任务正在运行/.test(logout.error || ''));
+    if (runningTask) {
+      elements.syncState.textContent = '云端登录已失效，当前任务会继续运行；任务结束后请重新登录同步额度。';
+      addLog('云端登录已失效，当前任务会继续运行；任务结束后请重新登录同步额度。', 'error');
+      return true;
+    }
     applyAuthState({ authenticated: false, user: null });
     switchAuthMode('login');
+    setAuthMessage((logout && logout.error) || '云端登录已失效，请重新登录。', 'error');
     return true;
   }
   return false;
 }
 
-async function refreshCloudEntitlements() {
-  elements.refreshEntitlementsButton.disabled = true;
-  elements.syncState.textContent = '正在刷新套餐...';
+async function refreshCloudEntitlements(options = {}) {
+  if (typeof window.addWhatsapp.refreshCloudEntitlements !== 'function') {
+    return { ok: true, skipped: true };
+  }
+  const quiet = Boolean(options.quiet);
+  if (!quiet) {
+    elements.refreshEntitlementsButton.disabled = true;
+    elements.syncState.textContent = '正在刷新套餐...';
+  }
   const response = await window.addWhatsapp.refreshCloudEntitlements();
-  elements.refreshEntitlementsButton.disabled = false;
+  if (!quiet) elements.refreshEntitlementsButton.disabled = false;
   if (await handleApiError(response)) {
-    return;
+    return response;
   }
   if (response.ok && response.subscription) {
     renderSubscriptionState(response.subscription);
     await refreshBillingOrders({ quiet: true });
-    elements.syncState.textContent = '套餐余额已刷新。';
-  } else {
+    if (!quiet) elements.syncState.textContent = '套餐余额已刷新。';
+  } else if (!quiet) {
     elements.syncState.textContent = response.error || '刷新套餐失败。';
   }
+  return response;
+}
+
+async function refreshCloudEntitlementsIfStale({ force = false } = {}) {
+  if (!state.auth.authenticated) return { ok: true, skipped: true };
+  const now = Date.now();
+  if (!force && now - lastCloudEntitlementRefreshAt < CLOUD_ENTITLEMENT_REFRESH_MIN_INTERVAL_MS) {
+    return { ok: true, skipped: true };
+  }
+  if (cloudEntitlementRefreshInFlight) return cloudEntitlementRefreshInFlight;
+  lastCloudEntitlementRefreshAt = now;
+  cloudEntitlementRefreshInFlight = refreshCloudEntitlements({ quiet: true })
+    .finally(() => {
+      cloudEntitlementRefreshInFlight = null;
+    });
+  return cloudEntitlementRefreshInFlight;
 }
 
 function clearPaymentTimers() {
@@ -671,6 +801,13 @@ function setPaymentControls({ canCancel = false, canRetry = false, cancelText = 
     elements.paymentCancelButton.textContent = cancelText;
   }
   if (elements.paymentRetryButton) elements.paymentRetryButton.hidden = !canRetry;
+}
+
+function placePaymentPanel(context = 'plan') {
+  const slot = context === 'quota' ? elements.quotaPaymentSlot : elements.planPaymentSlot;
+  if (slot && elements.manualPaymentPanel && elements.manualPaymentPanel.parentNode !== slot) {
+    slot.appendChild(elements.manualPaymentPanel);
+  }
 }
 
 function updatePaymentCountdown() {
@@ -766,9 +903,15 @@ async function pollActivePayment() {
     if (!response.ok || !response.order) return;
     const order = response.order;
     if (order.status === 'paid') {
+      const paymentContext = state.activePayment && state.activePayment.context === 'quota' ? 'quota' : 'plan';
       renderClosedPayment('paid', '支付成功，额度已自动入账。');
-      await refreshCloudEntitlements();
+      const entitlements = await refreshCloudEntitlements();
       await refreshBillingOrders({ quiet: true });
+      switchPage(paymentContext === 'quota' ? 'quotaPage' : 'planPage');
+      const synced = entitlements && entitlements.ok && entitlements.subscription;
+      showPaymentSuccessModal(synced
+        ? '支付成功，套餐和额度已同步。'
+        : '支付成功，额度已入账；套餐同步失败时可稍后手动刷新。');
       return;
     }
     if (order.status === 'canceled' || order.status === 'expired' || order.closedAt) {
@@ -856,12 +999,13 @@ function renderZpayPayment(paymentResult) {
   setPaymentControls({ canCancel: false, canRetry: false });
 }
 
-function renderWechatPaymentLoading(plan = {}) {
+function renderWechatPaymentLoading(plan = {}, creditsOverride = null, context = 'plan') {
   if (!elements.manualPaymentPanel) return;
+  placePaymentPanel(context);
   clearPaymentTimers();
   state.activePayment = null;
-  const credits = Number(plan.minimumTopUpCredits || 0);
-  const amountCents = credits * Number(plan.unitPriceCents || 0);
+  const credits = Number(creditsOverride || plan.minimumTopUpCredits || 0);
+  const amountCents = Math.round(credits * Number(plan.unitPriceCents || 0));
   elements.manualPaymentPanel.hidden = false;
   elements.manualPaymentTitle.textContent = `${plan.name || '套餐'} ${credits ? formatCredits(credits) : ''} 额度`;
   elements.manualPaymentDescription.textContent = '正在向服务端生成订单，并连接微信支付获取专属二维码。';
@@ -869,7 +1013,12 @@ function renderWechatPaymentLoading(plan = {}) {
   elements.manualPaymentAmount.textContent = amountCents ? `¥${(amountCents / 100).toFixed(2)}` : '计算中';
   elements.manualPaymentNote.textContent = '支付链路正在加载中';
   if (elements.paymentCountdown) elements.paymentCountdown.textContent = '支付链路正在加载中';
-  if (elements.paymentRetryButton && plan.id) elements.paymentRetryButton.dataset.planId = plan.id;
+  if (elements.paymentRetryButton && plan.id) {
+    elements.paymentRetryButton.dataset.planId = plan.id;
+    elements.paymentRetryButton.dataset.paymentContext = context;
+    if (context === 'quota' && credits) elements.paymentRetryButton.dataset.credits = String(credits);
+    else delete elements.paymentRetryButton.dataset.credits;
+  }
   if (elements.manualPaymentQr) {
     elements.manualPaymentQr.hidden = true;
     elements.manualPaymentQr.removeAttribute('src');
@@ -904,7 +1053,9 @@ function renderPaymentLoadFailed(message) {
 function renderWechatPayment(paymentResult) {
   if (!elements.manualPaymentPanel || !paymentResult || !paymentResult.payment) return;
   const { order, payment, plan } = paymentResult;
+  const context = paymentResult.paymentContext || 'plan';
   const payUrl = payment.codeUrl || payment.paymentUrl || '';
+  placePaymentPanel(context);
   elements.manualPaymentPanel.hidden = false;
   elements.manualPaymentTitle.textContent = `${plan.name} ${formatCredits(plan.credits)} 额度`;
   elements.manualPaymentDescription.textContent = '请用微信扫描右侧二维码付款。付款成功后系统会自动入账，稍后点击刷新套餐。';
@@ -915,10 +1066,20 @@ function renderWechatPayment(paymentResult) {
     orderId: order.id || payment.orderId,
     orderNo: order.orderNo || payment.orderNo,
     planId: plan.id,
+    context,
+    credits: Number(plan.credits || paymentResult.requestedCredits || 0),
     status: 'pending',
     expiresAt: paymentExpiryFor(order)
   };
-  if (elements.paymentRetryButton) elements.paymentRetryButton.dataset.planId = plan.id;
+  if (elements.paymentRetryButton) {
+    elements.paymentRetryButton.dataset.planId = plan.id;
+    elements.paymentRetryButton.dataset.paymentContext = context;
+    if (context === 'quota' && state.activePayment.credits) {
+      elements.paymentRetryButton.dataset.credits = String(state.activePayment.credits);
+    } else {
+      delete elements.paymentRetryButton.dataset.credits;
+    }
+  }
   if (payment.qrImageDataUrl) {
     elements.manualPaymentQr.hidden = false;
     elements.manualPaymentQr.src = payment.qrImageDataUrl;
@@ -999,7 +1160,11 @@ async function startZpayTopUp(planId = null, sourceButton = null) {
   }
 }
 
-async function startWechatTopUp(planId = null, sourceButton = null) {
+async function startWechatTopUp(planId = null, sourceButton = null, options = {}) {
+  if (state.paymentRequestInFlight) {
+    setPaymentState('微信支付订单正在生成，请稍候。');
+    return;
+  }
   if (state.activePayment && state.activePayment.status === 'pending') {
     setPaymentState('请先完成或取消当前支付订单。');
     return;
@@ -1008,21 +1173,38 @@ async function startWechatTopUp(planId = null, sourceButton = null) {
     ? (state.subscription && state.subscription.catalog || []).find(item => item.id === planId)
     : state.subscription && state.subscription.plan;
   const targetPlanId = plan && plan.id ? plan.id : (state.subscription && state.subscription.plan && state.subscription.plan.id);
+  const hasCreditsOverride = Object.prototype.hasOwnProperty.call(options, 'credits');
+  const requestedCredits = hasCreditsOverride && Number.isInteger(Number(options.credits)) && Number(options.credits) > 0
+    ? Math.floor(Number(options.credits))
+    : null;
+  if (hasCreditsOverride && !requestedCredits) {
+    setPaymentState('请输入有效的充值额度。');
+    return;
+  }
+  const paymentContext = hasCreditsOverride ? 'quota' : 'plan';
   const buttons = [sourceButton, elements.quotaPayButton, elements.billingPayButton].filter(Boolean);
   debugPayment('startWechatTopUp entered', {
     requestedPlanId: planId,
     targetPlanId,
+    requestedCredits,
     sourceButtonText: sourceButton ? sourceButton.textContent : null,
     sourceButtonDisabled: sourceButton ? sourceButton.disabled : null,
     authenticated: Boolean(state.auth && state.auth.authenticated),
     activePlanId: state.subscription && state.subscription.plan && state.subscription.plan.id
   });
+  state.paymentRequestInFlight = true;
   for (const button of buttons) button.disabled = true;
   setPaymentState('正在生成微信支付订单...');
-  renderWechatPaymentLoading(plan || { id: targetPlanId, name: '微信支付' });
+  if (paymentContext === 'quota') switchPage('quotaPage');
+  if (paymentContext === 'plan') switchPage('planPage');
+  renderWechatPaymentLoading(plan || { id: targetPlanId, name: '微信支付' }, requestedCredits, paymentContext);
+  updateActionLocks();
 
   try {
-    const response = await window.addWhatsapp.startWechatTopUp({ planId: targetPlanId });
+    const response = await window.addWhatsapp.startWechatTopUp({
+      planId: targetPlanId,
+      ...(requestedCredits ? { credits: requestedCredits } : {})
+    });
     debugPayment('startWechatTopUp ipc response', {
       targetPlanId,
       ok: response && response.ok,
@@ -1043,7 +1225,7 @@ async function startWechatTopUp(planId = null, sourceButton = null) {
       return;
     }
 
-    renderWechatPayment(response);
+    renderWechatPayment({ ...response, paymentContext, requestedCredits });
     setPaymentState(`订单 ${response.order.orderNo} 已生成，请扫码付款，付款后会自动入账。`);
     await refreshBillingOrders({ quiet: true });
   } catch (error) {
@@ -1055,6 +1237,7 @@ async function startWechatTopUp(planId = null, sourceButton = null) {
     renderPaymentLoadFailed(message);
     setPaymentState(message);
   } finally {
+    state.paymentRequestInFlight = false;
     debugPayment('startWechatTopUp finally update locks', { targetPlanId });
     updateActionLocks();
   }
@@ -1292,6 +1475,7 @@ function switchPage(pageId) {
   const isPlanPage = ['planPage', 'usagePage', 'quotaPage', 'billingPage', 'referralPage'].includes(pageId);
   elements.plansToggle.classList.toggle('active', isPlanPage);
   if (isPlanPage) setPlansExpanded(true);
+  if (isPlanPage) refreshCloudEntitlementsIfStale().catch(() => {});
   if (pageId === 'historyPage') loadHistory();
 }
 
@@ -1773,6 +1957,7 @@ async function loadAuthenticatedWorkspace(bootstrap = null) {
   }
   if (data.history) renderHistory(data.history);
   await loadTemplates();
+  await refreshCloudEntitlementsIfStale({ force: true });
   await refreshBillingOrders({ quiet: true });
 }
 
@@ -1794,6 +1979,17 @@ function showCloseModal(payload = {}) {
   elements.closeMinimizeButton.focus();
 }
 
+function showPaymentSuccessModal(detail = '支付成功，套餐和额度已同步。') {
+  if (!elements.paymentSuccessModal) return;
+  elements.paymentSuccessModal.hidden = false;
+  if (elements.paymentSuccessDetail) elements.paymentSuccessDetail.textContent = detail;
+  if (elements.paymentSuccessConfirmButton) elements.paymentSuccessConfirmButton.focus();
+}
+
+function hidePaymentSuccessModal() {
+  if (elements.paymentSuccessModal) elements.paymentSuccessModal.hidden = true;
+}
+
 async function handleCloseChoice(action) {
   elements.closeModal.hidden = true;
   await window.addWhatsapp.closeChoiceAction(action);
@@ -1812,19 +2008,34 @@ for (const tab of elements.authTabs) {
 elements.loginForm.addEventListener('submit', handleLogin);
 elements.registerForm.addEventListener('submit', handleRegister);
 elements.refreshEntitlementsButton.addEventListener('click', refreshCloudEntitlements);
-elements.quotaPayButton.addEventListener('click', () => startWechatTopUp());
+elements.quotaPayButton.addEventListener('click', () => startWechatTopUp(null, elements.quotaPayButton, { credits: state.selectedQuotaCredits }));
 elements.billingPayButton.addEventListener('click', () => startWechatTopUp());
+for (const button of elements.quotaCreditButtons) {
+  button.addEventListener('click', () => selectQuotaCredits(button));
+}
+if (elements.quotaCustomCreditsInput) {
+  elements.quotaCustomCreditsInput.addEventListener('input', handleCustomQuotaInput);
+}
 if (elements.paymentCancelButton) {
   elements.paymentCancelButton.addEventListener('click', () => closeActivePayment('canceled'));
 }
 if (elements.paymentRetryButton) {
   elements.paymentRetryButton.addEventListener('click', () => {
-    const planId = elements.paymentRetryButton.dataset.planId || (state.activePayment && state.activePayment.planId);
+    const activePayment = state.activePayment || {};
+    const planId = elements.paymentRetryButton.dataset.planId || activePayment.planId;
+    const paymentContext = activePayment.context || elements.paymentRetryButton.dataset.paymentContext;
+    const credits = Number(activePayment.credits || elements.paymentRetryButton.dataset.credits || 0);
+    const retryOptions = paymentContext === 'quota' && credits
+      ? { credits }
+      : {};
     clearPaymentTimers();
     state.activePayment = null;
     setPaymentControls({ canCancel: false, canRetry: false });
-    startWechatTopUp(planId || null, elements.paymentRetryButton);
+    startWechatTopUp(planId || null, elements.paymentRetryButton, retryOptions);
   });
+}
+if (elements.paymentSuccessConfirmButton) {
+  elements.paymentSuccessConfirmButton.addEventListener('click', hidePaymentSuccessModal);
 }
 if (elements.paymentOpenButton) {
   elements.paymentOpenButton.addEventListener('click', async () => {
@@ -1874,10 +2085,16 @@ for (const button of document.querySelectorAll('[data-proxy-lookup]')) {
 elements.proxySettingsModal.addEventListener('click', event => {
   if (event.target === elements.proxySettingsModal) hideProxySettings();
 });
+if (elements.paymentSuccessModal) {
+  elements.paymentSuccessModal.addEventListener('click', event => {
+    if (event.target === elements.paymentSuccessModal) hidePaymentSuccessModal();
+  });
+}
 elements.closeModal.addEventListener('click', event => {
   if (event.target === elements.closeModal) handleCloseChoice('cancel');
 });
 window.addEventListener('keydown', event => {
+  if (event.key === 'Escape' && elements.paymentSuccessModal && !elements.paymentSuccessModal.hidden) hidePaymentSuccessModal();
   if (event.key === 'Escape' && !elements.closeModal.hidden) handleCloseChoice('cancel');
   if (event.key === 'Escape' && !elements.workspaceRiskModal.hidden) hideWorkspaceRiskModal();
   if (event.key === 'Escape' && !elements.proxySettingsModal.hidden) hideProxySettings();
@@ -1903,7 +2120,13 @@ for (const button of elements.templateAddButtons) {
 window.addWhatsapp.onTaskEvent(handleTaskEvent);
 window.addWhatsapp.onHistoryUpdated(renderHistory);
 window.addWhatsapp.onShowCloseChoice(showCloseModal);
-window.addWhatsapp.onAuthChanged(applyAuthState);
+window.addWhatsapp.onAuthChanged(auth => {
+  applyAuthState(auth);
+  refreshCloudEntitlementsIfStale({ force: true }).catch(() => {});
+});
+window.addEventListener('focus', () => {
+  refreshCloudEntitlementsIfStale().catch(() => {});
+});
 loadImportOptions();
 elements.skipChinaNumbersToggle.addEventListener('change', saveImportOptions);
 bootstrapApp();

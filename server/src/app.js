@@ -156,7 +156,7 @@ function errorStatus(error) {
   if (/SIGNATURE/.test(error.message)) return 401;
   if (/UNAUTHORIZED|AUTH_FAILED|NOT_ACTIVE/.test(error.message)) return 401;
   if (/NOT_FOUND/.test(error.message)) return 404;
-  if (/LIMIT|INSUFFICIENT|NO_AVAILABLE|ALREADY_PAID|CLOSED/.test(error.message)) return 409;
+  if (/LIMIT|INSUFFICIENT|NO_AVAILABLE|ALREADY_PAID|CLOSED|DOWNGRADE/.test(error.message)) return 409;
   if (/INVALID|REQUIRED|WEAK|EXISTS|MISMATCH|TOO_LARGE/.test(error.message)) return 400;
   return 500;
 }
@@ -231,6 +231,13 @@ export function createAppServer(options = {}) {
       if (request.method === "POST" && url.pathname === "/v1/auth/login") {
         const body = await readJson(request);
         jsonResponse(response, 200, await runtime.loginUser(body));
+        return;
+      }
+
+      if (request.method === "POST" && url.pathname === "/v1/auth/refresh") {
+        const body = await readJson(request);
+        if (typeof runtime.refreshUserSession !== "function") throw new Error("UNAUTHORIZED");
+        jsonResponse(response, 200, await runtime.refreshUserSession(body));
         return;
       }
 
@@ -352,16 +359,21 @@ export function createAppServer(options = {}) {
         const userId = await authUserId(runtime, request);
         const orderId = url.pathname.split("/")[3];
         const order = await runtime.getOrderForPayment({ userId, orderId });
-        const payment = await buildWechatNativePayRequest(order, {
-          gatewayUrl: env.WECHAT_GATEWAY_URL,
-          mchId: env.WECHAT_MCH_ID,
-          appId: env.WECHAT_APP_ID,
-          apiV3Key: env.WECHAT_API_V3_KEY,
-          merchantSerialNo: env.WECHAT_MERCHANT_SERIAL_NO,
-          merchantPrivateKey: readEnvFileValue(env.WECHAT_MERCHANT_PRIVATE_KEY, env.WECHAT_MERCHANT_PRIVATE_KEY_PATH),
-          notifyUrl: env.WECHAT_NOTIFY_URL,
-          fetchImpl
-        });
+        const nativeTimeoutMs = Math.max(Number(env.WECHAT_NATIVE_PAY_TIMEOUT_MS || env.WECHAT_NATIVE_TIMEOUT_MS || 20000), 1);
+        const payment = await withTimeoutSignal((signal) => buildWechatNativePayRequest(order, {
+            gatewayUrl: env.WECHAT_GATEWAY_URL,
+            mchId: env.WECHAT_MCH_ID,
+            appId: env.WECHAT_APP_ID,
+            apiV3Key: env.WECHAT_API_V3_KEY,
+            merchantSerialNo: env.WECHAT_MERCHANT_SERIAL_NO,
+            merchantPrivateKey: readEnvFileValue(env.WECHAT_MERCHANT_PRIVATE_KEY, env.WECHAT_MERCHANT_PRIVATE_KEY_PATH),
+            notifyUrl: env.WECHAT_NOTIFY_URL,
+            fetchImpl,
+            signal
+          }),
+          nativeTimeoutMs,
+          "WECHAT_NATIVE_PAY_TIMEOUT"
+        );
         await runtime.markOrderPaymentProvider({ userId, orderId, provider: "wechat" });
         jsonResponse(response, 200, payment);
         return;

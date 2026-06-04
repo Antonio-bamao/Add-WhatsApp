@@ -172,6 +172,29 @@ describe("cloud billing service", () => {
     assert.equal(store.orders.get(order.id).status, "paid");
   });
 
+  it("prices orders on the server and keeps a higher current plan when a lower package is paid", () => {
+    const store = createCloudStore();
+    const advancedUser = registerUser(store, { username: "upgrade-user", password: "StrongPass123", planId: "advanced" });
+    const upgradeOrder = createOrder(store, { userId: advancedUser.id, planId: "professional", credits: 5000, amountCents: 1 });
+
+    assert.equal(upgradeOrder.amountCents, 150000);
+    markOrderPaid(store, { orderId: upgradeOrder.id, adminUserId: "admin-1", providerTradeNo: "upgrade-paid-1", ip: "127.0.0.1" });
+    assert.equal(getEntitlements(store, advancedUser.id).planId, "professional");
+
+    const businessUser = registerUser(store, { username: "no-downgrade-user", password: "StrongPass123", planId: "business" });
+    const lowerPackageOrder = createOrder(store, { userId: businessUser.id, planId: "professional", credits: 5000, amountCents: 1 });
+    const topUpOrder = createOrder(store, { userId: businessUser.id, planId: "business", credits: 5000, amountCents: 1 });
+
+    assert.equal(lowerPackageOrder.amountCents, 150000);
+    markOrderPaid(store, { orderId: lowerPackageOrder.id, adminUserId: "admin-1", providerTradeNo: "lower-package-paid-1", ip: "127.0.0.1" });
+    assert.equal(getEntitlements(store, businessUser.id).planId, "business");
+    assert.equal(getEntitlements(store, businessUser.id).balanceCredits, 5000);
+    assert.equal(topUpOrder.amountCents, 100000);
+    markOrderPaid(store, { orderId: topUpOrder.id, adminUserId: "admin-1", providerTradeNo: "top-up-paid-1", ip: "127.0.0.1" });
+    assert.equal(getEntitlements(store, businessUser.id).planId, "business");
+    assert.equal(getEntitlements(store, businessUser.id).balanceCredits, 10000);
+  });
+
   it("processes paid payment callbacks idempotently before crediting orders", () => {
     const store = createCloudStore();
     const user = registerUser(store, { username: "callback-user", password: "StrongPass123", planId: "advanced" });
@@ -229,7 +252,7 @@ describe("cloud billing service", () => {
     const user = registerUser(store, { username: "history-user", password: "StrongPass123", planId: "professional" });
     const otherUser = registerUser(store, { username: "history-other", password: "StrongPass123", planId: "advanced" });
     const canceled = createOrder(store, { userId: user.id, planId: "professional", credits: 5000, amountCents: 150000 });
-    const expired = createOrder(store, { userId: user.id, planId: "advanced", credits: 2000, amountCents: 80000 });
+    const expired = createOrder(store, { userId: user.id, planId: "professional", credits: 5000, amountCents: 150000 });
     const paid = createOrder(store, { userId: user.id, planId: "business", credits: 20000, amountCents: 400000 });
     createOrder(store, { userId: otherUser.id, planId: "advanced", credits: 2000, amountCents: 80000 });
 

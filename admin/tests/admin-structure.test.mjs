@@ -292,4 +292,19 @@ describe("admin console structure", () => {
     assert.doesNotMatch(data, /password_hash|passwordHash|明文密码|密码哈希/i);
     assert.doesNotMatch(js, /password_hash|passwordHash|明文密码|密码哈希/i);
   });
+
+  it("keeps the admin console usable on phone-sized viewports", () => {
+    const js = readText("public/admin.js");
+    const css = readText("public/admin.css");
+
+    assert.match(js, /data-label="\$\{escapeHtml\(headers\[index\] \|\| ""\)\}"/);
+    assert.match(js, /data-label="UID"/);
+    assert.match(js, /data-label="修改"/);
+    assert.match(css, /@media \(max-width: 700px\)/);
+    assert.match(css, /\.table-wrap\s*{[^}]*overflow-x:\s*visible/s);
+    assert.match(css, /td::before\s*{[^}]*content:\s*attr\(data-label\)/s);
+    assert.match(css, /\.sidebar-nav\s*{[^}]*overflow-x:\s*auto/s);
+    assert.match(css, /\.modal-user-summary\s*{[^}]*grid-template-columns:\s*1fr/s);
+    assert.match(css, /min-height:\s*44px/);
+  });
 });

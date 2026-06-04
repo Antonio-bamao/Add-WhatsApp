@@ -2080,6 +2080,39 @@ td {
   outline: none;
 }
 
+.quota-custom-field {
+  display: grid;
+  max-width: 300px;
+  gap: 8px;
+}
+
+.quota-custom-field[hidden] {
+  display: none;
+}
+
+.quota-custom-field span {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.quota-custom-field input {
+  width: 100%;
+  height: 44px;
+  padding: 0 14px;
+  color: var(--ink);
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  font-size: 16px;
+  font-weight: 800;
+  outline: none;
+}
+
+.quota-custom-field input:focus {
+  box-shadow: var(--ring-shadow);
+}
+
 .purchase-total {
   display: flex;
   align-items: center;
@@ -2223,6 +2256,43 @@ td {
 
 .account-panel {
   min-height: 190px;
+}
+
+.account-meta {
+  display: grid;
+  gap: 10px;
+  margin: 0 0 16px;
+}
+
+.account-meta div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px 14px;
+  background: var(--paper-soft);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.account-meta dt,
+.account-meta dd {
+  margin: 0;
+}
+
+.account-meta dt {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.account-meta dd {
+  color: var(--wa-green-deep);
+  font-family: ui-monospace, "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 14px;
+  font-weight: 900;
+  word-break: break-all;
+  text-align: right;
 }
 
 .sync-panel {

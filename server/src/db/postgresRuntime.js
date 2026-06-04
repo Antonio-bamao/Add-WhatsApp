@@ -13,6 +13,25 @@ const ORDER_PAYMENT_TTL_MS = 5 * 60 * 1000;
 const ADMIN_ACCESS_TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
 const CONTACT_IMPORT_MAX_BYTES = 25 * 1024 * 1024;
 const migratedOrderLifecyclePools = new WeakSet();
+const PLAN_RANKS = Object.freeze({
+  free: 0,
+  advanced: 1,
+  professional: 2,
+  business: 3
+});
+
+function planRank(planId) {
+  return PLAN_RANKS[planId] ?? PLAN_RANKS.free;
+}
+
+function calculateOrderAmountCents(plan, credits) {
+  const normalizedCredits = Number(credits);
+  if (!Number.isInteger(normalizedCredits) || normalizedCredits <= 0) throw new Error("ORDER_CREDITS_INVALID");
+  const unitPriceCents = Number(plan?.unitPriceCents || 0);
+  const amountCents = Math.round(normalizedCredits * unitPriceCents);
+  if (!Number.isInteger(amountCents) || amountCents <= 0) throw new Error("ORDER_AMOUNT_INVALID");
+  return amountCents;
+}
 
 function hashPassword(password) {
   const salt = crypto.randomBytes(16).toString("hex");
@@ -449,6 +468,19 @@ async function creditPaidOrder(client, order, { providerTradeNo, notePrefix = "p
     await client.query("UPDATE orders SET status = 'paid_pending_credit' WHERE id = $1", [order.id]);
     throw error;
   }
+  const currentSubscription = await getSubscription(client, order.user_id);
+  const currentPlanId = currentSubscription?.plan_id || "free";
+  if (planRank(order.plan_id) > planRank(currentPlanId)) {
+    await client.query(
+      "UPDATE subscriptions SET status = 'inactive', ends_at = $1, changed_at = $1 WHERE user_id = $2 AND status = 'active'",
+      [now, order.user_id]
+    );
+    await client.query(
+      `INSERT INTO subscriptions (id, user_id, plan_id, status, started_at, ends_at, changed_at)
+       VALUES ($1, $2, $3, 'active', $4, NULL, $4)`,
+      [createId("sub"), order.user_id, order.plan_id, now]
+    );
+  }
   const updated = await client.query("SELECT * FROM orders WHERE id = $1", [order.id]);
   return updated.rows[0];
 }
@@ -555,6 +587,59 @@ export function createPostgresRuntime({ databaseUrl, pool } = {}) {
           ]
         );
         return { user: publicUser(user), accessToken, refreshToken };
+      } finally {
+        client.release();
+      }
+    },
+
+    async refreshUserSession({ refreshToken, deviceId = "unknown-device" }) {
+      const refreshTokenHash = crypto.createHash("sha256").update(String(refreshToken || "")).digest("hex");
+      const client = await db.connect();
+      try {
+        await client.query("BEGIN");
+        const sessionResult = await client.query(
+          `SELECT sessions.*, users.username, users.status, users.created_at
+           FROM sessions
+           JOIN users ON users.id = sessions.user_id
+           WHERE sessions.refresh_token_hash = $1
+           FOR UPDATE`,
+          [refreshTokenHash]
+        );
+        const session = sessionResult.rows[0];
+        if (!session || session.revoked_at || new Date(session.expires_at) <= new Date()) throw new Error("UNAUTHORIZED");
+        if (session.status !== "active") throw new Error("USER_NOT_ACTIVE");
+
+        const accessToken = createId("token");
+        const nextRefreshToken = createId("refresh");
+        const now = isoNow();
+        accessTokens.set(accessToken, session.user_id);
+        await client.query("UPDATE sessions SET revoked_at = $1 WHERE id = $2", [now, session.id]);
+        await client.query(
+          `INSERT INTO sessions (id, user_id, refresh_token_hash, device_id, expires_at, revoked_at, created_at)
+           VALUES ($1, $2, $3, $4, $5, NULL, $6)`,
+          [
+            createId("session"),
+            session.user_id,
+            crypto.createHash("sha256").update(nextRefreshToken).digest("hex"),
+            deviceId || session.device_id || "unknown-device",
+            new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+            now
+          ]
+        );
+        await client.query("COMMIT");
+        return {
+          user: publicUser({
+            id: session.user_id,
+            username: session.username,
+            status: session.status,
+            created_at: session.created_at
+          }),
+          accessToken,
+          refreshToken: nextRefreshToken
+        };
+      } catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
       } finally {
         client.release();
       }
@@ -709,20 +794,19 @@ export function createPostgresRuntime({ databaseUrl, pool } = {}) {
         await ensureOrderLifecycleColumns(client, db);
         await requireActiveUser(client, userId);
         const plan = await getPlan(client, planId);
+        const normalizedCredits = Number(credits);
         const order = {
           id: createId("order"),
           orderNo: `${Date.now()}`,
           userId,
           planId: plan.id,
-          credits: Number(credits),
-          amountCents: Number(amountCents),
+          credits: normalizedCredits,
+          amountCents: calculateOrderAmountCents(plan, normalizedCredits),
           status: "created",
           paymentProvider: "manual",
           createdAt: isoNow()
         };
         order.expiresAt = new Date(new Date(order.createdAt).getTime() + ORDER_PAYMENT_TTL_MS).toISOString();
-        if (!Number.isInteger(order.credits) || order.credits <= 0) throw new Error("ORDER_CREDITS_INVALID");
-        if (!Number.isInteger(order.amountCents) || order.amountCents < 0) throw new Error("ORDER_AMOUNT_INVALID");
         await client.query(
           `INSERT INTO orders (id, order_no, user_id, plan_id, credits, amount_cents, status, payment_provider, provider_trade_no, created_at, expires_at, paid_at, closed_at)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULL, $9, $10, NULL, NULL)`,

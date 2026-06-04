@@ -43,6 +43,13 @@ export const PLAN_CATALOG = Object.freeze({
   }
 });
 
+const PLAN_RANKS = Object.freeze({
+  free: 0,
+  advanced: 1,
+  professional: 2,
+  business: 3
+});
+
 function isoNow(store) {
   return store.now().toISOString();
 }
@@ -106,6 +113,19 @@ function normalizeUsername(username) {
 function getPlan(planId) {
   const plan = PLAN_CATALOG[planId] || PLAN_CATALOG.free;
   return plan;
+}
+
+function planRank(planId) {
+  return PLAN_RANKS[planId] ?? PLAN_RANKS.free;
+}
+
+function calculateOrderAmountCents(plan, credits) {
+  const normalizedCredits = Number(credits);
+  if (!Number.isInteger(normalizedCredits) || normalizedCredits <= 0) throw new Error("ORDER_CREDITS_INVALID");
+  const unitPriceCents = Number(plan?.unitPriceCents || 0);
+  const amountCents = Math.round(normalizedCredits * unitPriceCents);
+  if (!Number.isInteger(amountCents) || amountCents <= 0) throw new Error("ORDER_AMOUNT_INVALID");
+  return amountCents;
 }
 
 function getUser(store, userId) {
@@ -486,6 +506,29 @@ export function loginUser(store, { username, password, deviceId = "unknown-devic
   return { user: publicUser(user), accessToken, refreshToken };
 }
 
+export function refreshUserSession(store, { refreshToken, deviceId = "unknown-device" }) {
+  const session = store.sessions.get(refreshToken);
+  if (!session || session.revokedAt || new Date(session.expiresAt) <= store.now()) throw new Error("UNAUTHORIZED");
+  const user = getUser(store, session.userId);
+  if (user.status !== "active") throw new Error("USER_NOT_ACTIVE");
+
+  const accessToken = createId("token");
+  const nextRefreshToken = createId("refresh");
+  const now = isoNow(store);
+  store.accessTokens.set(accessToken, user.id);
+  store.sessions.set(refreshToken, { ...session, revokedAt: now });
+  store.sessions.set(nextRefreshToken, {
+    id: createId("session"),
+    userId: user.id,
+    refreshTokenHash: crypto.createHash("sha256").update(nextRefreshToken).digest("hex"),
+    deviceId: deviceId || session.deviceId || "unknown-device",
+    expiresAt: new Date(store.now().getTime() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+    revokedAt: null,
+    createdAt: now
+  });
+  return { user: publicUser(user), accessToken, refreshToken: nextRefreshToken };
+}
+
 export function authenticateAccessToken(store, accessToken) {
   const userId = store.accessTokens.get(accessToken);
   if (!userId) throw new Error("UNAUTHORIZED");
@@ -612,13 +655,14 @@ export function consumeCredit(store, { userId, idempotencyKey, taskId, contactHa
 export function createOrder(store, { userId, planId, credits, amountCents }) {
   getUser(store, userId);
   const plan = getPlan(planId);
+  const normalizedCredits = Number(credits);
   const order = {
     id: createId("order"),
     orderNo: `${String(store.orders.size + 1).padStart(12, "0")}`,
     userId,
     planId: plan.id,
-    credits: Number(credits),
-    amountCents: Number(amountCents),
+    credits: normalizedCredits,
+    amountCents: calculateOrderAmountCents(plan, normalizedCredits),
     status: "created",
     paymentProvider: "manual",
     providerTradeNo: null,
@@ -627,8 +671,6 @@ export function createOrder(store, { userId, planId, credits, amountCents }) {
     paidAt: null,
     closedAt: null
   };
-  if (!Number.isInteger(order.credits) || order.credits <= 0) throw new Error("ORDER_CREDITS_INVALID");
-  if (!Number.isInteger(order.amountCents) || order.amountCents < 0) throw new Error("ORDER_AMOUNT_INVALID");
   store.orders.set(order.id, order);
   return { ...order };
 }
@@ -720,6 +762,18 @@ function creditPaidOrder(store, order, { providerTradeNo, notePrefix = "payment"
   } catch (error) {
     order.status = "paid_pending_credit";
     throw error;
+  }
+  const currentSubscription = getSubscription(store, order.userId);
+  if (planRank(order.planId) > planRank(currentSubscription.planId)) {
+    const now = isoNow(store);
+    store.subscriptions.set(order.userId, {
+      ...currentSubscription,
+      id: currentSubscription.id || createId("sub"),
+      userId: order.userId,
+      planId: getPlan(order.planId).id,
+      status: "active",
+      changedAt: now
+    });
   }
   return { beforeStatus, order };
 }
@@ -1197,6 +1251,7 @@ export function createMemoryRuntime(options = {}) {
     authenticateAdminToken: (accessToken) => authenticateAdminToken(store, accessToken),
     registerUser: (body) => registerUser(store, body),
     loginUser: (body) => loginUser(store, body),
+    refreshUserSession: (body) => refreshUserSession(store, body),
     loginAdmin: (body) => loginAdmin(store, body),
     logoutAdmin: (accessToken) => logoutAdmin(store, accessToken),
     getEntitlements: (userId) => getEntitlements(store, userId),

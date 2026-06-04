@@ -99,7 +99,7 @@ describe("PostgreSQL billing runtime", { skip: !databaseUrl }, () => {
       const order = await request(baseUrl, "/v1/orders", {
         method: "POST",
         headers: auth,
-        body: { planId: "advanced", credits: 2000, amountCents: 60000 }
+        body: { planId: "professional", credits: 5000, amountCents: 150000 }
       });
       assert.equal(order.response.status, 201);
 
@@ -127,7 +127,7 @@ describe("PostgreSQL billing runtime", { skip: !databaseUrl }, () => {
         out_trade_no: order.payload.orderNo,
         trade_no: `pg-manual-${Date.now()}`,
         trade_status: "TRADE_SUCCESS",
-        total_amount: "600.00"
+        total_amount: "1500.00"
       };
       const signedPayload = {
         ...payload,
@@ -170,7 +170,8 @@ describe("PostgreSQL billing runtime", { skip: !databaseUrl }, () => {
 
       const afterPaid = await request(baseUrl, "/v1/me/entitlements", { headers: auth });
       assert.equal(afterPaid.response.status, 200);
-      assert.equal(afterPaid.payload.balanceCredits, 2123);
+      assert.equal(afterPaid.payload.balanceCredits, 5123);
+      assert.equal(afterPaid.payload.planId, "professional");
 
       const lease = await request(baseUrl, "/v1/workspaces/leases", {
         method: "POST",
