@@ -3,11 +3,12 @@ export const latestRelease = {
   fileName: "Add-WhatsApp-0.1.3.exe",
   downloadUrl: "/downloads/releases/0.1.3/Add-WhatsApp-0.1.3.exe",
   releaseDate: "2026-06-05",
-  sizeBytes: 78888154,
-  sha256: "7d0e94f39189adc8fba7776827d20bdd560e9ed65fe6764ce663522526c17a34",
+  sizeBytes: 78890507,
+  sha256: "c26f77a52ad8893f2b17c0e7691d1b216aa37ffbfc703468f9dbe6c069d71413",
   highlights: [
     "Windows 便携版，可直接启动使用",
     "WhatsApp 登录失效后自动清理缓存并重新打开扫码窗口",
+    "发送任务页新增登录异常时重新扫码按钮",
     "正式包主窗口禁用开发者工具"
   ]
 };

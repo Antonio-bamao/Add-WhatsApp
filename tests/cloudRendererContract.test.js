@@ -116,6 +116,11 @@ test('pricing page exposes official WeChat Native payment actions instead of mai
   assert.match(main, /devTools:\s*false/);
   assert.match(main, /process\.on\('unhandledRejection'/);
   assert.match(main, /isKnownWhatsAppAutomationRejection/);
+  assert.match(html, /id="resetWhatsAppButton"/);
+  assert.match(html, /登录异常时重新扫码/);
+  assert.match(renderer, /resetWhatsAppLoginFromTask/);
+  assert.match(renderer, /finally\s*{\s*elements\.resetWhatsAppButton\.disabled = false;/);
+  assert.match(renderer, /auth:reset/);
   assert.match(renderer, /lockedFeatureList/);
   assert.match(html, /assets\/icon\.png/);
   assert.ok(fs.existsSync(path.join(root, 'assets', 'icon.png')));

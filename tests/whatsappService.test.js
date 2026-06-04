@@ -69,3 +69,23 @@ test('ensureReady resets stale WhatsApp auth and retries to QR after logout duri
   assert.equal(service.created.length, 2);
   assert.deepEqual(events.map(event => event.type), ['auth:disconnected', 'auth:reset', 'auth:qr', 'auth:ready']);
 });
+
+test('ensureReady does not clear auth for non-stale startup failures', async () => {
+  const sessionPath = fs.mkdtempSync(path.join(os.tmpdir(), 'add-whatsapp-network-error-'));
+  fs.writeFileSync(path.join(sessionPath, 'keep.txt'), 'saved-login');
+  const failingClient = createFakeClient(() => {
+    throw new Error('Proxy connection refused');
+  });
+
+  const service = new FakeWhatsAppService({
+    sessionPath,
+    emit: () => {}
+  }, [failingClient]);
+
+  await assert.rejects(
+    () => service.ensureReady(),
+    /Proxy connection refused/
+  );
+  assert.equal(fs.existsSync(path.join(sessionPath, 'keep.txt')), true);
+  assert.equal(service.created.length, 1);
+});

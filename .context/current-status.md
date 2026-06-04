@@ -97,3 +97,9 @@
 - 已完成：额度页微信支付订单/二维码现在直接显示在额度页，套餐升级支付订单继续留在套餐页；自定义额度失败后重新生成仍保留原额度数。本轮按用户要求未打包。
 - 验证：`node --test tests\rendererPlanPayment.test.js` 10/10；`npm test` 140/140。
 - 下一步：用户确认 UI 体验后，再决定是否统一打包 EXE、同步 website 下载包并部署 server。
+- 已完成：v0.1.3 打包修复 WhatsApp 登录缓存失效边界；正常有效 session 会继续复用，只有检测到 `post_logout`、`LOGOUT`、`Execution context was destroyed`、`ProtocolError` 等失效信号时才自动清理当前账号 WhatsApp 缓存并重新打开扫码窗口。
+- 已完成：发送任务页新增 `登录异常时重新扫码` 手动兜底按钮；按钮只在用户主动点击时清缓存，且任务运行中主进程会拒绝清缓存，避免正在发送时破坏 session。
+- 已完成：正式包主窗口禁用 DevTools，并在主进程兜住 WhatsApp/Puppeteer 已知导航销毁类未处理 promise warning，避免用户看到开发者工具或 Node 异常刷屏。
+- 已完成：重新打包 `dist\Add WhatsApp 0.1.3.exe`，同步到 `website\public\downloads\latest\Add-WhatsApp.exe` 和 `website\public\downloads\releases\0.1.3\Add-WhatsApp-0.1.3.exe`；`update.json` 当前 `releaseDate=2026-06-05`、`sizeBytes=78890507`、SHA256 `c26f77a52ad8893f2b17c0e7691d1b216aa37ffbfc703468f9dbe6c069d71413`。
+- 验证：`npm test` 通过 142/142；`server npm test` 通过 42/42；`admin npm test` 通过 11/11；`website npm test` 通过 6/6；`npm run build` 成功生成 v0.1.3 EXE；`website npm run build` 成功；打包 asar 抽查确认 `devTools: false`、`ensureReadyWithRetry`、`auth:reset`、`resetWhatsAppButton` 和版本 `0.1.3` 已进入 EXE。
+- 下一步：提交并推送最新 v0.1.3 后，确认官网部署平台已从 `origin/main` 拉取/构建；线上校验以 `https://addwhatsapp.com/downloads/latest/update.json` 和 `https://addwhatsapp.com/downloads/releases/0.1.3/Add-WhatsApp-0.1.3.exe` 为准。

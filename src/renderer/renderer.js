@@ -53,6 +53,7 @@ const elements = {
   failedMetric: document.getElementById('failedMetric'),
   taskStateMetric: document.getElementById('taskStateMetric'),
   runButton: document.getElementById('runButton'),
+  resetWhatsAppButton: document.getElementById('resetWhatsAppButton'),
   stopButton: document.getElementById('stopButton'),
   dailyLimitInput: document.getElementById('dailyLimitInput'),
   delayMinInput: document.getElementById('delayMinInput'),
@@ -1371,6 +1372,37 @@ async function clearWhatsAppSession() {
     : (response.error || '清除失败。');
 }
 
+async function resetWhatsAppLoginFromTask() {
+  if (!elements.stopButton.disabled) {
+    addLog('任务正在运行，请先暂停任务，再重新扫码。', 'error');
+    return;
+  }
+  elements.resetWhatsAppButton.disabled = true;
+  try {
+    addLog('正在清除 WhatsApp 扫码缓存...', 'strong');
+    const response = await window.addWhatsapp.clearWhatsAppSession();
+    if (!response.ok) {
+      addLog(response.error || 'WhatsApp 缓存清除失败。', 'error');
+      return;
+    }
+
+    addLog('WhatsApp 缓存已清除。', 'strong');
+    if (!state.imported || elements.runButton.disabled) {
+      elements.taskState.textContent = '待扫码';
+      elements.taskStateMetric.textContent = '待扫码';
+      addLog('请导入有效名单后点击开始任务，届时会重新打开扫码窗口。');
+      return;
+    }
+
+    addLog('正在重新打开扫码窗口...');
+    await startTask();
+  } catch (error) {
+    addLog(error && error.message ? error.message : '重新扫码流程失败。', 'error');
+  } finally {
+    elements.resetWhatsAppButton.disabled = false;
+  }
+}
+
 async function exportSyncPackage() {
   const password = elements.syncPasswordInput.value;
   const response = await window.addWhatsapp.exportSyncPackage(password);
@@ -1636,6 +1668,7 @@ function taskEventMessage(event) {
   const map = {
     'task:starting': event.message,
     'auth:qr': event.message,
+    'auth:reset': event.message,
     'auth:authenticated': event.message,
     'auth:ready': event.message,
     'auth:failure': event.message,
@@ -2057,6 +2090,7 @@ elements.importButton.addEventListener('click', importContacts);
 elements.dropImportButton.addEventListener('click', importContacts);
 elements.exportButton.addEventListener('click', exportReport);
 elements.runButton.addEventListener('click', startTask);
+elements.resetWhatsAppButton.addEventListener('click', resetWhatsAppLoginFromTask);
 elements.stopButton.addEventListener('click', stopTask);
 elements.saveTemplatesButton.addEventListener('click', saveTemplates);
 elements.refreshHistoryButton.addEventListener('click', loadHistory);

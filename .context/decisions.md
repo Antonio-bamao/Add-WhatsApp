@@ -176,3 +176,10 @@
 - 背景：RackNerd 生产服务器到微信支付主域名连接超时，导致官方微信 Native 下单 `fetch failed`；但换用微信支付区域接入点后可生成 Native `code_url`。
 - 理由：境外 VPS 到微信支付主域名的线路不稳定，多区域 fallback 比要求用户更换服务器更快、更可控，也保留官方微信支付直连能力。
 - 约束：生产环境不要设置 `WECHAT_GATEWAY_URL`，除非明确要禁用 fallback 并指定单一网关；支付签名、订单金额、notify 解密和幂等入账仍全部只在 `server/` 执行。
+
+## 2026-06-05: WhatsApp 登录恢复只在失效时清缓存
+
+- 决策：发送任务默认复用当前账号的 WhatsApp LocalAuth session；只有检测到 `post_logout`、`LOGOUT`、`Execution context was destroyed`、`ProtocolError` 等明确失效信号时，才自动清理当前账号的 `whatsapp-session` 并重新打开扫码窗口。
+- 背景：用户反馈会话过期时打开 WhatsApp Web 后停在西语 `No se encontró el contenido` 页面，二维码不出现；同时用户明确要求不要每次点击发送任务都清缓存重新扫码。
+- 理由：有效 session 应该保持“一次扫码，多次使用”的体验；失效 session 则应由软件自动恢复，避免用户理解浏览器内部异常或 Puppeteer 报错。
+- 约束：普通网络错误、代理错误或非失效启动失败不能清理 session；运行中任务不能清理缓存；任务页保留手动 `登录异常时重新扫码` 作为用户可见兜底。

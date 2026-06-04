@@ -467,3 +467,13 @@
 - 结果：UID 以服务端 8 位 user.uid 为准；旧缓存缺 uid 时按后台同款 shortUserUid(user.id) 计算，不显示内部 user_... ID。
 - 验证：此前已验证：node --test tests\\cloudSessionRestorer.test.js tests\\cloudRendererContract.test.js 通过 7/7；npm test 通过 138/138。
 - 下一步：后续注册/修改账号时按后台和软件一致的 8 位 UID 做参考。
+
+## 2026-06-05T02:16:42+08:00｜发布 v0.1.3 WhatsApp 登录失效恢复
+- 目标：解决用户点击发送任务后 WhatsApp Web 打到 `post_logout` / `No se encontró el contenido` 页面、二维码不出现、DevTools 弹出、官网仍旧包的问题；同时保持人性化体验，正常 session 不重复要求扫码。
+- 动作：按失败路径补 `tests\\whatsappService.test.js`，覆盖失效登录会清当前账号 WhatsApp session 并重试到二维码、普通网络/代理错误不会清 session；补 `tests\\cloudRendererContract.test.js` 锁定正式包禁用 DevTools、未处理 WhatsApp 自动化 warning 兜底、任务页手动重新扫码按钮和按钮 `finally` 解锁。
+- 动作：`WhatsAppService.ensureReady()` 改为带重试的 `ensureReadyWithRetry()`；仅当错误匹配 `Execution context was destroyed`、`ProtocolError`、`auth timeout`、`post_logout`、`LOGOUT` 等失效信号时触发 `resetStaleSession()`，正常开始任务不会清缓存；`auth:reset` 会写入任务日志提示正在重新扫码。
+- 动作：发送任务页新增 `登录异常时重新扫码` 按钮，用户主动点击时先请求主进程清理当前账号 `whatsapp-session`，如已导入名单则重新进入开始任务流程；任务运行中主进程拒绝清缓存，renderer 用 `try/finally` 保证按钮不会卡死。
+- 动作：重新打包 `dist\\Add WhatsApp 0.1.3.exe`，同步到 `website\\public\\downloads\\latest\\Add-WhatsApp.exe` 和 `website\\public\\downloads\\releases\\0.1.3\\Add-WhatsApp-0.1.3.exe`，更新官网 release 元数据和 `update.json`。
+- 结果：新包 `sizeBytes=78890507`，SHA256 `c26f77a52ad8893f2b17c0e7691d1b216aa37ffbfc703468f9dbe6c069d71413`；正常有效 WhatsApp 登录会继续复用，只有会话过期/登出类异常才自动重新扫码，手动按钮作为异常兜底。
+- 验证：`npm test` 142/142；`server npm test` 42/42；`admin npm test` 11/11；`website npm test` 6/6；根项目 `npm run build` 成功；`website npm run build` 成功；打包 asar 抽查确认 `devTools: false`、`ensureReadyWithRetry`、`auth:reset`、`resetWhatsAppButton` 和版本 `0.1.3` 已进入 EXE；latest/release 两个 EXE SHA256 一致。
+- 下一步：推送 `main` 后等待官网部署平台拉取/构建；线上用 `latest/update.json` 和 `releases/0.1.3/Add-WhatsApp-0.1.3.exe` 直接校验，确认用户下载的不是旧 0.1.2 包。
