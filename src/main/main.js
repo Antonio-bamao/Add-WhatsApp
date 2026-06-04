@@ -84,6 +84,19 @@ let subscriptionState = defaultSubscriptionState();
 const openSecondaryWorkspaces = new Set();
 const activeCloudWorkspaceLeases = new Map();
 
+function isKnownWhatsAppAutomationRejection(error) {
+  const message = String(error && error.message ? error.message : error);
+  return /Could not load response body|Execution context was destroyed|ProtocolError|detached Frame/i.test(message);
+}
+
+process.on('unhandledRejection', error => {
+  if (isKnownWhatsAppAutomationRejection(error)) {
+    console.warn(`WhatsApp automation recovered: ${error && error.message ? error.message : error}`);
+    return;
+  }
+  console.error('Unhandled promise rejection:', error);
+});
+
 function defaultSubscriptionState() {
   return createEntitlementState('advanced', {
     balanceCredits: 2000,
@@ -113,7 +126,8 @@ function createWindow() {
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      devTools: false
     }
   });
   mainWindow.setMenu(null);

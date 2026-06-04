@@ -1,6 +1,9 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const EventEmitter = require('node:events');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 
 const { WhatsAppService } = require('../src/main/whatsappService');
 
@@ -8,17 +11,48 @@ function delay(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-test('ensureReady rejects when WhatsApp logs out during initialization', async () => {
+function createFakeClient(initialize) {
   const client = new EventEmitter();
-  client.initialize = () => {
-    setImmediate(() => client.emit('disconnected', 'LOGOUT'));
+  client.initialize = () => initialize(client);
+  client.destroyed = false;
+  client.destroy = async () => {
+    client.destroyed = true;
   };
+  return client;
+}
 
-  const service = new WhatsAppService({
-    sessionPath: 'C:\\tmp\\whatsapp-session',
-    emit: () => {}
+class FakeWhatsAppService extends WhatsAppService {
+  constructor(options, clients) {
+    super(options);
+    this.clients = [...clients];
+    this.created = [];
+  }
+
+  createClient() {
+    this.client = this.clients.shift();
+    this.attachClientEvents(this.client);
+    this.created.push(this.client);
+  }
+}
+
+test('ensureReady resets stale WhatsApp auth and retries to QR after logout during initialization', async () => {
+  const sessionPath = fs.mkdtempSync(path.join(os.tmpdir(), 'add-whatsapp-stale-session-'));
+  fs.writeFileSync(path.join(sessionPath, 'stale.txt'), 'old-login');
+  const events = [];
+  const staleClient = createFakeClient(client => {
+    setImmediate(() => client.emit('disconnected', 'LOGOUT'));
   });
-  service.client = client;
+  const freshClient = createFakeClient(client => {
+    setImmediate(() => {
+      client.emit('qr');
+      client.emit('ready');
+    });
+  });
+
+  const service = new FakeWhatsAppService({
+    sessionPath,
+    emit: event => events.push(event)
+  }, [staleClient, freshClient]);
 
   const readyPromise = service.ensureReady().then(
       () => 'resolved',
@@ -29,11 +63,9 @@ test('ensureReady rejects when WhatsApp logs out during initialization', async (
     delay(50).then(() => 'pending')
   ]);
 
-  if (result === 'pending') {
-    client.emit('auth_failure', 'cleanup');
-    await readyPromise;
-  }
-
-  assert.notEqual(result, 'pending');
-  assert.match(result.message, /登录.*失效|重新扫码/);
+  assert.equal(result, 'resolved');
+  assert.equal(staleClient.destroyed, true);
+  assert.equal(fs.existsSync(path.join(sessionPath, 'stale.txt')), false);
+  assert.equal(service.created.length, 2);
+  assert.deepEqual(events.map(event => event.type), ['auth:disconnected', 'auth:reset', 'auth:qr', 'auth:ready']);
 });

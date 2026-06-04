@@ -113,6 +113,9 @@ test('pricing page exposes official WeChat Native payment actions instead of mai
   assert.match(main, /cloud:manual-top-up/);
   assert.doesNotMatch(html, /支付宝沙盒官方异常修复中/);
   assert.doesNotMatch(renderer, /支付维护中/);
+  assert.match(main, /devTools:\s*false/);
+  assert.match(main, /process\.on\('unhandledRejection'/);
+  assert.match(main, /isKnownWhatsAppAutomationRejection/);
   assert.match(renderer, /lockedFeatureList/);
   assert.match(html, /assets\/icon\.png/);
   assert.ok(fs.existsSync(path.join(root, 'assets', 'icon.png')));

@@ -1,9 +1,9 @@
 {
-  "version": "0.1.2",
-  "fileName": "Add-WhatsApp.exe",
-  "downloadUrl": "/downloads/latest/Add-WhatsApp.exe",
+  "version": "0.1.3",
+  "fileName": "Add-WhatsApp-0.1.3.exe",
+  "downloadUrl": "/downloads/releases/0.1.3/Add-WhatsApp-0.1.3.exe",
   "releaseDate": "2026-06-05",
-  "sizeBytes": 78889028,
-  "sha256": "9af443df4c6adba4a0bd93a4172318ed69889f06296cef6614457f0609af8f7e",
+  "sizeBytes": 78888154,
+  "sha256": "7d0e94f39189adc8fba7776827d20bdd560e9ed65fe6764ce663522526c17a34",
   "notesUrl": "/releases"
 }

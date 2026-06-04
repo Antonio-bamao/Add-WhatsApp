@@ -24,7 +24,7 @@ export default function DownloadPage() {
               <p className="eyebrow">Official download</p>
               <h1>下载 Add WhatsApp for Windows</h1>
               <p>
-                当前提供 Windows 便携版。文件由官网直链托管，后续更新会保持 latest 地址不变，方便用户始终下载最新版本。
+                当前提供 Windows 便携版。文件由官网直链托管，下载入口会指向当前稳定版本，避免浏览器缓存旧包。
               </p>
               <a className="primary-action large" href={latestRelease.downloadUrl} download>
                 <Download size={21} />

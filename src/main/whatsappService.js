@@ -1,4 +1,5 @@
 const path = require('node:path');
+const fs = require('node:fs');
 const { Client, LocalAuth } = require('whatsapp-web.js');
 
 function chromeCandidates() {
@@ -36,29 +37,32 @@ class WhatsAppService {
         args
       }
     });
+    this.attachClientEvents(this.client);
+  }
 
-    this.client.on('qr', () => {
+  attachClientEvents(client) {
+    client.on('qr', () => {
       this.emit({
         type: 'auth:qr',
         message: '请在弹出的 WhatsApp Web 浏览器窗口里扫码登录。'
       });
     });
 
-    this.client.on('authenticated', () => {
+    client.on('authenticated', () => {
       this.emit({ type: 'auth:authenticated', message: 'WhatsApp 登录已保存。' });
     });
 
-    this.client.on('ready', () => {
+    client.on('ready', () => {
       this.ready = true;
       this.emit({ type: 'auth:ready', message: 'WhatsApp 已连接，可以开始任务。' });
     });
 
-    this.client.on('auth_failure', message => {
+    client.on('auth_failure', message => {
       this.ready = false;
       this.emit({ type: 'auth:failure', message: `WhatsApp 认证失败：${message}` });
     });
 
-    this.client.on('disconnected', reason => {
+    client.on('disconnected', reason => {
       this.ready = false;
       this.emit({ type: 'auth:disconnected', message: `WhatsApp 已断开：${reason}` });
     });
@@ -66,13 +70,39 @@ class WhatsAppService {
 
   async ensureReady() {
     if (this.ready && this.client) return this.client;
-    if (!this.client) this.createClient();
     if (this.initializing) {
       await this.initializing;
       return this.client;
     }
 
-    this.initializing = new Promise((resolve, reject) => {
+    this.initializing = this.ensureReadyWithRetry();
+
+    try {
+      await this.initializing;
+      return this.client;
+    } finally {
+      this.initializing = null;
+    }
+  }
+
+  async ensureReadyWithRetry() {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      if (!this.client) this.createClient();
+      try {
+        await this.waitForReady();
+        return;
+      } catch (error) {
+        if (attempt === 0 && this.isStaleAuthError(error)) {
+          await this.resetStaleSession();
+          continue;
+        }
+        throw error;
+      }
+    }
+  }
+
+  waitForReady() {
+    return new Promise((resolve, reject) => {
       let settled = false;
       const timeout = setTimeout(() => {
         finish(reject, new Error('WhatsApp 登录超时，请确认浏览器窗口是否已扫码。'));
@@ -127,18 +157,39 @@ class WhatsAppService {
         handleInitializeError(error);
       }
     });
+  }
 
+  isStaleAuthError(error) {
+    const message = String(error && error.message ? error.message : error);
+    return /Execution context was destroyed|ProtocolError|auth timeout|post_logout|LOGOUT/i.test(message);
+  }
+
+  async resetStaleSession() {
+    this.emit({
+      type: 'auth:reset',
+      message: 'WhatsApp 登录缓存已失效，正在清除缓存并重新打开扫码窗口。'
+    });
+    await this.destroy();
+    fs.rmSync(this.sessionPath, { recursive: true, force: true });
+    this.client = null;
+    this.ready = false;
+  }
+
+  async destroyClient(client) {
+    if (!client || typeof client.destroy !== 'function') return;
     try {
-      await this.initializing;
-      return this.client;
-    } finally {
-      this.initializing = null;
+      await client.destroy();
+    } catch (error) {
+      const message = String(error && error.message ? error.message : error);
+      if (!/Target closed|Session closed|browser has disconnected|Browser has been closed/i.test(message)) {
+        throw error;
+      }
     }
   }
 
   async destroy() {
     if (!this.client) return;
-    await this.client.destroy();
+    await this.destroyClient(this.client);
     this.client = null;
     this.ready = false;
   }
