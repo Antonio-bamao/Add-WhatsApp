@@ -52,3 +52,10 @@
 - 处理：renderSubscriptionState 缺 catalog 时继承现有 catalog；mapCloudEntitlements 默认带 planCatalog。
 - 预防：新增 renderer 回归测试，覆盖刷新权益缺 catalog 时套餐卡仍可见。
 - 状态：fixed
+
+## 2026-06-05: 误把 GitHub 推送当成官网已更新
+- 现象：本地已重新打包 v0.1.3、同步 `website/public/downloads`、更新 `update.json` 并推送 `origin/main` 后，`https://addwhatsapp.com/downloads/latest/update.json` 仍返回旧的 2026-06-02 文件，`/downloads/releases/0.1.3/Add-WhatsApp-0.1.3.exe` 仍为 404。
+- 根因：项目的官网不是由 GitHub push 自动完成线上部署；线上落地页和下载文件由 WhatsApp 机 `/opt/add-whatsapp` 上的服务提供，必须在服务器执行 `git pull --ff-only`、安装依赖、`npm run build --prefix website`、重启 `add-whatsapp-website.service` 并 reload Nginx。本地日志过去反复写“同步到 website latest/release”，但没有把“线上服务器部署命令是最终生效步骤”写成硬约束，导致误判。
+- 处理：本地提交 `573e50e` 已包含 v0.1.3 新包，线上服务器需要先处理本地 lockfile 改动，再执行部署：`git stash push -m "server-local-lockfiles-before-deploy" -- package-lock.json website/package-lock.json`，随后 `git pull --ff-only`、`npm ci`、`npm ci --prefix website`、`npm ci --prefix server`、`npm run build --prefix website`、重启 website/API、`nginx -t`、`systemctl reload nginx`。
+- 预防：以后每次“更新官网包”必须分清两步：第一步是本地 release unit（EXE、latest、release、update.json、release page、测试、构建、commit、push）；第二步是线上服务器 deploy（`/opt/add-whatsapp` pull/build/restart/reload）。最终必须用 `curl -L https://addwhatsapp.com/downloads/latest/update.json` 和 `curl -I https://addwhatsapp.com/downloads/releases/<version>/Add-WhatsApp-<version>.exe` 证明官网生效，不能只凭本地构建或 GitHub 推送声称完成。
+- 状态：recorded

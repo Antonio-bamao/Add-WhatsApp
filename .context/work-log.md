@@ -477,3 +477,11 @@
 - 结果：新包 `sizeBytes=78890507`，SHA256 `c26f77a52ad8893f2b17c0e7691d1b216aa37ffbfc703468f9dbe6c069d71413`；正常有效 WhatsApp 登录会继续复用，只有会话过期/登出类异常才自动重新扫码，手动按钮作为异常兜底。
 - 验证：`npm test` 142/142；`server npm test` 42/42；`admin npm test` 11/11；`website npm test` 6/6；根项目 `npm run build` 成功；`website npm run build` 成功；打包 asar 抽查确认 `devTools: false`、`ensureReadyWithRetry`、`auth:reset`、`resetWhatsAppButton` 和版本 `0.1.3` 已进入 EXE；latest/release 两个 EXE SHA256 一致。
 - 下一步：推送 `main` 后等待官网部署平台拉取/构建；线上用 `latest/update.json` 和 `releases/0.1.3/Add-WhatsApp-0.1.3.exe` 直接校验，确认用户下载的不是旧 0.1.2 包。
+
+## 2026-06-05T02:45:00+08:00｜补记官网线上更新必须执行服务器部署
+- 目标：把 v0.1.3 官网包线上未生效的真实原因写入项目日志，避免未来误把本地打包/GitHub 推送当成官网已经更新。
+- 事实：本地已打包并推送 `573e50e` 后，线上 `https://addwhatsapp.com/downloads/latest/update.json` 仍是旧文件，`https://addwhatsapp.com/downloads/releases/0.1.3/Add-WhatsApp-0.1.3.exe` 仍返回 404。
+- 根因：当前官网由生产 WhatsApp 机 `/opt/add-whatsapp` 的 website 服务提供，不是 GitHub push 自动发布；线上必须 `git pull --ff-only`、安装依赖、构建 website、重启 `add-whatsapp-website.service` 并 reload Nginx。
+- 现场卡点：用户在服务器执行 `git pull --ff-only` 时，服务器本地 `package-lock.json` 和 `website/package-lock.json` 有未提交改动，Git 拒绝覆盖并中止 pull。
+- 处理建议：在服务器执行 `git stash push -m "server-local-lockfiles-before-deploy" -- package-lock.json website/package-lock.json` 后再 `git pull --ff-only`；随后执行 `npm ci`、`npm ci --prefix website`、`npm ci --prefix server`、`npm run build --prefix website`、`systemctl restart add-whatsapp-website.service`、`systemctl restart add-whatsapp-api.service`、`nginx -t`、`systemctl reload nginx`。
+- 验证标准：只有线上 `curl -L https://addwhatsapp.com/downloads/latest/update.json` 显示 `version=0.1.3` 且 SHA256 为 `c26f77a52ad8893f2b17c0e7691d1b216aa37ffbfc703468f9dbe6c069d71413`，并且 `curl -I https://addwhatsapp.com/downloads/releases/0.1.3/Add-WhatsApp-0.1.3.exe` 返回 200，才能说官网包已更新。

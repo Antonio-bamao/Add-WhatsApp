@@ -183,3 +183,10 @@
 - 背景：用户反馈会话过期时打开 WhatsApp Web 后停在西语 `No se encontró el contenido` 页面，二维码不出现；同时用户明确要求不要每次点击发送任务都清缓存重新扫码。
 - 理由：有效 session 应该保持“一次扫码，多次使用”的体验；失效 session 则应由软件自动恢复，避免用户理解浏览器内部异常或 Puppeteer 报错。
 - 约束：普通网络错误、代理错误或非失效启动失败不能清理 session；运行中任务不能清理缓存；任务页保留手动 `登录异常时重新扫码` 作为用户可见兜底。
+
+## 2026-06-05: 官网下载包发布必须包含服务器部署
+
+- 决策：以后“官网包已更新”只有在线上 `addwhatsapp.com` 校验通过后才能这么说；本地打包、复制到 `website/public/downloads`、更新 `update.json`、提交和推送 GitHub 只算 release source 已准备好。
+- 背景：v0.1.3 本地已推送后，线上官网仍返回旧 `update.json` 和 0.1.3 EXE 404；服务器 `/opt/add-whatsapp` 的 `git pull --ff-only` 又因本地 `package-lock.json`、`website/package-lock.json` 改动被 Git 阻止。
+- 理由：当前官网运行在生产 WhatsApp 机的 `/opt/add-whatsapp` 服务上，不是 GitHub 自动部署。只有服务器拉取新提交、构建 website、重启 `add-whatsapp-website.service` 并 reload Nginx 后，用户下载入口才会变成新包。
+- 约束：发布步骤必须按顺序执行并记录：`git pull --ff-only`；如被 lockfile 阻挡，先 stash 服务器本地 lockfile；`npm ci`、`npm ci --prefix website`、`npm ci --prefix server`；`npm run build --prefix website`；`systemctl restart add-whatsapp-website.service`；必要时重启 API；`nginx -t`；`systemctl reload nginx`；最后用线上 `curl` 校验 `update.json` 版本/SHA256 和版本 EXE 的 200 状态。
