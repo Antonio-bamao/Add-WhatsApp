@@ -18,6 +18,7 @@ class WhatsAppService {
     this.emit = emit || (() => {});
     this.client = null;
     this.ready = false;
+    this.initializing = null;
   }
 
   createClient() {
@@ -66,28 +67,73 @@ class WhatsAppService {
   async ensureReady() {
     if (this.ready && this.client) return this.client;
     if (!this.client) this.createClient();
+    if (this.initializing) {
+      await this.initializing;
+      return this.client;
+    }
 
-    await new Promise((resolve, reject) => {
+    this.initializing = new Promise((resolve, reject) => {
+      let settled = false;
       const timeout = setTimeout(() => {
-        reject(new Error('WhatsApp 登录超时，请确认浏览器窗口是否已扫码。'));
+        finish(reject, new Error('WhatsApp 登录超时，请确认浏览器窗口是否已扫码。'));
       }, 180000);
 
-      const handleReady = () => {
+      const cleanup = () => {
         clearTimeout(timeout);
-        resolve();
+        this.client.off('ready', handleReady);
+        this.client.off('auth_failure', handleFailure);
+        this.client.off('disconnected', handleDisconnected);
+      };
+
+      const finish = (callback, value) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        callback(value);
+      };
+
+      const handleReady = () => {
+        finish(resolve);
       };
 
       const handleFailure = message => {
-        clearTimeout(timeout);
-        reject(new Error(`WhatsApp 认证失败：${message}`));
+        finish(reject, new Error(`WhatsApp 认证失败：${message}`));
+      };
+
+      const handleDisconnected = reason => {
+        const detail = reason ? `（${reason}）` : '';
+        finish(reject, new Error(`WhatsApp 登录已失效${detail}，请清除 WhatsApp 登录缓存后重新扫码。`));
+      };
+
+      const handleInitializeError = error => {
+        const message = String(error && error.message ? error.message : error);
+        if (/Execution context was destroyed|auth timeout|post_logout|LOGOUT/i.test(message)) {
+          finish(reject, new Error('WhatsApp 登录已失效，请清除 WhatsApp 登录缓存后重新扫码。'));
+          return;
+        }
+        finish(reject, error instanceof Error ? error : new Error(message));
       };
 
       this.client.once('ready', handleReady);
       this.client.once('auth_failure', handleFailure);
-      this.client.initialize();
+      this.client.once('disconnected', handleDisconnected);
+
+      try {
+        const result = this.client.initialize();
+        if (result && typeof result.catch === 'function') {
+          result.catch(handleInitializeError);
+        }
+      } catch (error) {
+        handleInitializeError(error);
+      }
     });
 
-    return this.client;
+    try {
+      await this.initializing;
+      return this.client;
+    } finally {
+      this.initializing = null;
+    }
   }
 
   async destroy() {
