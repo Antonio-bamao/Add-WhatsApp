@@ -1,11 +1,26 @@
 const path = require('node:path');
 
+const SHORT_WHATSAPP_SESSION_DIR = 'aw';
+
+function getWhatsAppSessionRoot(userDataPath, options = {}) {
+  const localAppData = options.localAppData || process.env.LOCALAPPDATA || userDataPath;
+  return path.join(localAppData, SHORT_WHATSAPP_SESSION_DIR);
+}
+
+function createShortWhatsAppClientId(accountId) {
+  const normalized = String(accountId || '').replace(/^user[_-]/i, '');
+  const compact = normalized.replace(/[^a-z0-9_-]/gi, '');
+  const shortId = compact.slice(0, 8);
+  if (!shortId) throw new Error('账号缺少可用的 WhatsApp clientId。');
+  return shortId;
+}
+
 function createWhatsAppSessionConfig(userDataPath, user, options = {}) {
   if (!user || !user.accountId) throw new Error('账号缺少 accountId。');
   return {
     accountId: user.accountId,
-    sessionPath: path.join(userDataPath, 'accounts', user.accountId, 'whatsapp-session'),
-    clientId: `add-whatsapp-${user.accountId}`,
+    sessionPath: getWhatsAppSessionRoot(userDataPath, options),
+    clientId: createShortWhatsAppClientId(user.accountId),
     proxyServer: options.proxyServer || null
   };
 }
@@ -42,6 +57,14 @@ class WhatsAppSessionManager {
     this.proxyServer = proxyServer || null;
   }
 
+  async forceResetActiveService() {
+    if (this.activeService && typeof this.activeService.forceReset === 'function') {
+      await this.activeService.forceReset();
+    }
+    this.activeService = null;
+    this.activeAccountId = null;
+  }
+
   async destroy() {
     if (this.activeService && typeof this.activeService.destroy === 'function') {
       await this.activeService.destroy();
@@ -53,5 +76,7 @@ class WhatsAppSessionManager {
 
 module.exports = {
   WhatsAppSessionManager,
-  createWhatsAppSessionConfig
+  createWhatsAppSessionConfig,
+  createShortWhatsAppClientId,
+  getWhatsAppSessionRoot
 };

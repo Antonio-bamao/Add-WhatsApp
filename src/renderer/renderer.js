@@ -7,6 +7,7 @@ const state = {
   activeTemplateLanguage: 'en',
   activePayment: null,
   paymentRequestInFlight: false,
+  taskStartInFlight: false,
   selectedQuotaCredits: 2000
 };
 
@@ -597,7 +598,7 @@ function updateActionLocks() {
   if (elements.runButton) {
     const validCount = state.imported && state.imported.stats ? Number(state.imported.stats.valid || 0) : 0;
     const taskAccess = taskStartAccess();
-    elements.runButton.disabled = !state.imported || validCount <= 0 || !taskAccess.ok;
+    elements.runButton.disabled = state.taskStartInFlight || !state.imported || validCount <= 0 || !taskAccess.ok;
     elements.runButton.title = taskAccess.ok ? '' : taskAccess.message;
   }
   const paymentAccess = featureAccess('onlinePayment');
@@ -1373,20 +1374,18 @@ async function clearWhatsAppSession() {
 }
 
 async function resetWhatsAppLoginFromTask() {
-  if (!elements.stopButton.disabled) {
-    addLog('任务正在运行，请先暂停任务，再重新扫码。', 'error');
-    return;
-  }
   elements.resetWhatsAppButton.disabled = true;
   try {
-    addLog('正在清除 WhatsApp 扫码缓存...', 'strong');
-    const response = await window.addWhatsapp.clearWhatsAppSession();
+    addLog('正在强制重置 WhatsApp 登录（清除缓存、关闭浏览器）...', 'strong');
+    const response = await window.addWhatsapp.forceRescanWhatsApp();
     if (!response.ok) {
-      addLog(response.error || 'WhatsApp 缓存清除失败。', 'error');
+      addLog(response.error || 'WhatsApp 登录重置失败。', 'error');
       return;
     }
 
-    addLog('WhatsApp 缓存已清除。', 'strong');
+    addLog('WhatsApp 登录已重置。', 'strong');
+    elements.stopButton.disabled = true;
+
     if (!state.imported || elements.runButton.disabled) {
       elements.taskState.textContent = '待扫码';
       elements.taskStateMetric.textContent = '待扫码';
@@ -1712,6 +1711,11 @@ function handleTaskEvent(event) {
     elements.taskState.textContent = '代理异常';
     elements.taskStateMetric.textContent = '正在停下';
   }
+  if (event.type === 'auth:stale-session' || event.type === 'auth:reset') {
+    elements.taskState.textContent = '登录异常';
+    elements.taskStateMetric.textContent = '登录异常';
+    elements.resetWhatsAppButton.disabled = false;
+  }
   if (event.type === 'row:sent') state.taskStats.sent += 1;
   if (event.type === 'row:unregistered') state.taskStats.unregistered += 1;
   if (event.type === 'row:failed' || event.type === 'row:fatal') state.taskStats.failed += 1;
@@ -1745,6 +1749,10 @@ function handleTaskEvent(event) {
 }
 
 async function startTask() {
+  if (state.taskStartInFlight) {
+    addLog('任务正在启动，请稍候。');
+    return;
+  }
   if (!state.imported) {
     addLog('请先导入表格。', 'error');
     return;
@@ -1760,24 +1768,36 @@ async function startTask() {
   const maxDelay = Number(elements.delayMaxInput.value || minDelay);
   elements.taskState.textContent = '准备中';
   elements.taskStateMetric.textContent = '准备中';
+  state.taskStartInFlight = true;
+  elements.runButton.disabled = true;
   addLog('准备连接 WhatsApp。如果是第一次使用，请在弹出的浏览器里扫码。', 'strong');
 
-  const response = await window.addWhatsapp.startTask({
-    maxPerDay: Number(elements.dailyLimitInput.value || (state.subscription && state.subscription.plan && state.subscription.plan.dailyLimit) || 80),
-    delayMinSeconds: Math.max(44, minDelay),
-    delayMaxSeconds: Math.max(Math.max(44, minDelay), maxDelay)
-  });
+  let started = false;
+  try {
+    const response = await window.addWhatsapp.startTask({
+      maxPerDay: Number(elements.dailyLimitInput.value || (state.subscription && state.subscription.plan && state.subscription.plan.dailyLimit) || 80),
+      delayMinSeconds: Math.max(44, minDelay),
+      delayMaxSeconds: Math.max(Math.max(44, minDelay), maxDelay)
+    });
 
-  if (!response.started) {
+    if (!response.started) {
+      elements.taskState.textContent = '未开始';
+      elements.taskStateMetric.textContent = '待机';
+      addLog(response.error || '任务启动失败。', 'error');
+      return;
+    }
+
+    started = true;
+    elements.runButton.disabled = true;
+    elements.stopButton.disabled = false;
+  } catch (error) {
     elements.taskState.textContent = '未开始';
     elements.taskStateMetric.textContent = '待机';
-    updateActionLocks();
-    addLog(response.error || '任务启动失败。', 'error');
-    return;
+    addLog(error.message || '任务启动失败。', 'error');
+  } finally {
+    state.taskStartInFlight = false;
+    if (!started) updateActionLocks();
   }
-
-  elements.runButton.disabled = true;
-  elements.stopButton.disabled = false;
 }
 
 async function stopTask() {

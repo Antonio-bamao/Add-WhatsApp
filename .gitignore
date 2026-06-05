@@ -18,6 +18,7 @@ qr.txt
 # Build output
 dist/
 build/
+build-resources/chromium/
 out/
 release/
 website/.next/

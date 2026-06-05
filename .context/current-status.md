@@ -102,6 +102,22 @@
 - 已完成：正式包主窗口禁用 DevTools，并在主进程兜住 WhatsApp/Puppeteer 已知导航销毁类未处理 promise warning，避免用户看到开发者工具或 Node 异常刷屏。
 - 已完成：重新打包 `dist\Add WhatsApp 0.1.3.exe`，同步到 `website\public\downloads\latest\Add-WhatsApp.exe` 和 `website\public\downloads\releases\0.1.3\Add-WhatsApp-0.1.3.exe`；`update.json` 当前 `releaseDate=2026-06-05`、`sizeBytes=78890507`、SHA256 `c26f77a52ad8893f2b17c0e7691d1b216aa37ffbfc703468f9dbe6c069d71413`。
 - 验证：`npm test` 通过 142/142；`server npm test` 通过 42/42；`admin npm test` 通过 11/11；`website npm test` 通过 6/6；`npm run build` 成功生成 v0.1.3 EXE；`website npm run build` 成功；打包 asar 抽查确认 `devTools: false`、`ensureReadyWithRetry`、`auth:reset`、`resetWhatsAppButton` 和版本 `0.1.3` 已进入 EXE。
-- 下一步：提交并推送最新 v0.1.3 后，确认官网部署平台已从 `origin/main` 拉取/构建；线上校验以 `https://addwhatsapp.com/downloads/latest/update.json` 和 `https://addwhatsapp.com/downloads/releases/0.1.3/Add-WhatsApp-0.1.3.exe` 为准。
+- 历史说明：v0.1.3 发布校验口径已被 v0.1.4 latest-only 规则替代；线上校验应以 `https://addwhatsapp.com/downloads/latest/update.json` 和 `https://addwhatsapp.com/downloads/latest/Add-WhatsApp.exe` 为准，不再检查 versioned release EXE。
 - 已记录：官网线上更新不是 GitHub push 自动完成；必须在 WhatsApp 生产机 `/opt/add-whatsapp` 执行服务器部署命令。若 `git pull --ff-only` 被服务器本地 `package-lock.json` 或 `website/package-lock.json` 阻挡，先 stash 这两个 lockfile，再 pull、`npm ci`、`npm run build --prefix website`、重启 `add-whatsapp-website.service`、`nginx -t`、reload Nginx。
-- 当前线上校验状态：推送 `573e50e` 后，`addwhatsapp.com` 仍返回旧 `update.json` 且 0.1.3 EXE 为 404，说明线上服务器尚未完成部署。官网是否已更新必须以线上 `curl` 结果为准，不得只看本地包或 GitHub 提交。
+- 当前线上校验状态：v0.1.4 尚未由生产服务器手动部署；官网是否已更新必须以线上 `curl` 结果为准，不得只看本地包或 GitHub 提交。
+- 已完成：WhatsApp 登录二维码长期转圈/数据库错误的重大连环故障已修复并复盘。最终根因不是代理、账号、webdriver 或普通缓存，而是 `whatsapp-web.js` npm 版兼容性、自动化 Chromium 持久化存储权限、Windows CacheStorage 超长路径三层问题叠加。
+- 已完成：当前有效方案是 GitHub 主分支 `whatsapp-web.js`、固定可访问的 WhatsApp Web HTML、真实 Chrome/148 UA、CDP 预授权 `durableStorage`/`notifications`、Puppeteer 预启动后用 `browserWSEndpoint` 交给 `whatsapp-web.js`，并把 LocalAuth profile 缩短到 `%LOCALAPPDATA%\\aw\\session-<8位clientId>`。
+- 已完成：进程策略已明确为优雅关闭优先，先 `client.destroy()` 再 `browser.close()`；`taskkill /F` 只能作为超时兜底。若发生强杀或检测到 database/storage error，下次启动前要清理当前 profile 下 IndexedDB、Local Storage、Session Storage、Service Worker 和 Cache。
+- 当前状态：用户已确认“终于成功修复这个 bug”；本轮按要求只补日志和复盘，不打包。后续先继续测试源码/开发启动流程，确认二维码、扫码登录和发送任务稳定后，再统一打包 EXE 并同步官网下载。
+- 已完成：额外补强 WhatsApp 重置边界，`resetStaleSession()` / `forceReset()` 现在只删除当前账号 `session-<clientId>` profile，不再删除整个 `%LOCALAPPDATA%\\aw` 根目录，避免多账号场景下一个账号重新扫码误伤其他账号登录态。
+- 验证：本轮新增失败测试后修复，`node --test tests\\whatsappService.test.js` 8/8、`node --test tests\\whatsappSessionManager.test.js` 6/6、根项目 `npm test` 150/150 通过。
+- 已完成：开始任务后 Chrome 窗口泄漏已修复。`WhatsAppService` 现在显式持有 browser 和本 app launch 的真实进程对象，所有失败、重试、重建、强制重置、destroy 都统一走 `closeBrowser()`；普通初始化失败也会关闭浏览器并清空引用。
+- 已完成：前端新增 `taskStartInFlight`，点击“开始任务”后立即禁用按钮并忽略重复点击；主进程新增 `before-quit` 兜底，退出时会销毁 WhatsApp session/browser。
+- 验证：`node --test tests\\whatsappService.test.js` 10/10；`node --test tests\\cloudRendererContract.test.js` 5/5；根项目 `npm test` 152/152。尚未做 GUI 手动点击验证，需用户本机实际启动后确认窗口不再残留。
+- 已完成：WhatsApp 浏览器初始 `about:blank` 标签清理已加入；在 `qr` / `ready` 后，确认浏览器里已有非空白 WhatsApp 页面才关闭空白标签，失败不会影响主流程。验证：`node --test tests\\whatsappService.test.js` 12/12，根项目 `npm test` 154/154。
+- 已完成：桌面端 WhatsApp 自动化改为随 EXE 携带固定 Chromium，不再探测或依赖用户电脑的 Chrome/Edge。打包后路径为 `resources\\chromium\\chrome-win64\\chrome.exe`；开发/打包前通过 `npm run prepare:browser` 从 Puppeteer 固定 Chrome for Testing 准备资源。
+- 验证：`node --test tests\\whatsappService.test.js` 13/13；根项目 `npm test` 155/155；`npm run prepare:browser` 成功准备 Chrome for Testing `146.0.7680.31`；`npm run build` 成功生成 `dist\\Add WhatsApp 0.1.3.exe`，大小 `200437877` 字节，`dist\\win-unpacked\\resources\\chromium\\chrome-win64\\chrome.exe` 存在。
+- 当前限制：尚未在真正卸载 Chrome/Edge 的干净 Windows 机器上手动实测扫码；本机验证覆盖了打包资源存在、代码不再搜索系统浏览器、代理参数和 WhatsApp 登录修复链路仍通过单测。
+- 已完成：为避免同版本换包导致缓存和更新判断混乱，内置 Chromium 包升版为 `0.1.4` 并同步到官网 latest。`website\\public\\downloads\\latest\\Add-WhatsApp.exe` 当前大小 `200439073` 字节，SHA256 `af7cdd7774c5b91a170864ab90c86f1b10337f259deba1acf1cb20fa122809cb`，`update.json` 的 `downloadUrl` 指向 `/downloads/latest/Add-WhatsApp.exe`。
+- 已完成：官网版本记录页不再提供旧版本独立下载；v0.1.3/v0.1.2 只保留更新说明，所有按钮文案为“下载最新版”，`public/downloads/releases` 下不再发布 `.exe` 旧包。
+- 验证：`npm test --prefix website` 6/6；`npm run build --prefix website` 成功；根项目 `npm test` 155/155。

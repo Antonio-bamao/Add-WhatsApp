@@ -190,3 +190,29 @@
 - 背景：v0.1.3 本地已推送后，线上官网仍返回旧 `update.json` 和 0.1.3 EXE 404；服务器 `/opt/add-whatsapp` 的 `git pull --ff-only` 又因本地 `package-lock.json`、`website/package-lock.json` 改动被 Git 阻止。
 - 理由：当前官网运行在生产 WhatsApp 机的 `/opt/add-whatsapp` 服务上，不是 GitHub 自动部署。只有服务器拉取新提交、构建 website、重启 `add-whatsapp-website.service` 并 reload Nginx 后，用户下载入口才会变成新包。
 - 约束：发布步骤必须按顺序执行并记录：`git pull --ff-only`；如被 lockfile 阻挡，先 stash 服务器本地 lockfile；`npm ci`、`npm ci --prefix website`、`npm ci --prefix server`；`npm run build --prefix website`；`systemctl restart add-whatsapp-website.service`；必要时重启 API；`nginx -t`；`systemctl reload nginx`；最后用线上 `curl` 校验 `update.json` 版本/SHA256 和版本 EXE 的 200 状态。
+
+## 2026-06-05: WhatsApp Web 自动化 profile 必须短路径、本地化并预授权持久化存储
+
+- 决策：WhatsApp Web 自动化浏览器的 LocalAuth profile 不再放在 Roaming 的深层账号目录，也不再使用完整 `add-whatsapp-user_<uuid>` 作为 clientId；统一使用 `%LOCALAPPDATA%\\aw` 作为短 dataPath，并用账号 UUID 前 8 位作为稳定短 clientId。
+- 背景：旧路径到 `Default` 已接近 190 字符，Chromium 继续写 `Service Worker\\CacheStorage\\<hash>\\<hash>` 后超过 Windows 260 字符限制，导致 `CacheStorage: Unexpected internal error`、`storage_initialization_error` 和 WhatsApp Web 粉色 database error，二维码无法生成。
+- 理由：Chromium profile、IndexedDB、Service Worker 和 CacheStorage 属于本机运行缓存，放在 Local 比 Roaming 更合适；短路径比依赖系统 LongPathsEnabled 更稳定，也能降低杀毒/同步/文件锁干扰。
+- 决策：程序先自行 launch Puppeteer，再通过 CDP `Browser.grantPermissions` 给 `https://web.whatsapp.com` 授权 `durableStorage` 和 `notifications`，随后用 `browser.wsEndpoint()` 让 `whatsapp-web.js` 连接该浏览器。
+- 背景：全新的自动化 Chromium profile 互动分为 0，Chrome 会拒绝持久化存储，WhatsApp Web 无法建 IndexedDB；这会被页面包装成 browser database error，而不是直观提示权限不足。
+- 约束：必须保留真实 Chrome UA、固定可用 webVersionCache、GitHub 主分支 `whatsapp-web.js`、`ignoreDefaultArgs: ['--enable-automation']` 和现有反自动化启动参数；不得回退到 `userAgent:false` 或让库自行拉取随机灰度 Web 版本。
+- 约束：同一 `clientId` / session 目录任意时刻只允许一个浏览器实例；正常关闭必须先 `client.destroy()` 后 `browser.close()`。`taskkill /F` 只能用于优雅关闭超时兜底，且一旦强杀，下次启动前必须清理该 profile 的 IndexedDB、Local Storage、Session Storage、Service Worker 和 Cache。
+
+## 2026-06-05: Windows EXE 随包携带固定 Chromium
+
+- 决策：普通用户版 EXE 不再使用系统 Chrome 或 Edge 作为 WhatsApp 自动化浏览器；采用 Puppeteer 固定 Chrome for Testing 打包进 `resources\\chromium`，运行时只从随包资源解析 `chrome.exe`。
+- 背景：另一台电脑运行 EXE 时出现 Edge 自动化窗口停在 `about:blank`，说明旧代码的 `chromeCandidates` 会在用户没装 Chrome 时降级到 Edge；这会引入用户环境差异、浏览器版本漂移和“没浏览器直接失败”的分发风险。
+- 理由：当前 `whatsapp-web.js` 登录稳定性已经依赖固定 Web HTML、真实 UA、CDP `durableStorage` 授权、短 LocalAuth 路径和优雅关闭。继续让用户系统浏览器参与，会重新把不可控版本和默认浏览器环境带回链路。
+- 约束：打包前必须执行 `npm run prepare:browser`；`electron-builder` 必须把 `build-resources\\chromium` 放进 `extraResources` 且不能塞进 asar 内运行；`.gitignore` 继续忽略浏览器二进制资源，发布以打包产物为准。
+- 约束：代理逻辑仍通过 Chromium `--proxy-server=...` 启动参数传入；如果 WhatsApp 页面停留 `about:blank` 超时，用户提示应指向网络/代理检查，而不是要求安装 Chrome/Edge。
+- 代价：本地 `0.1.3` 便携 EXE 从约 79 MB 增至约 200 MB；未压缩随包 Chromium 资源约 408 MB。此代价用于换取开箱即用和固定浏览器版本。
+
+## 2026-06-05: 官网只提供 latest 包下载
+
+- 决策：官网版本记录页只保留历史更新说明，不再提供旧版本 EXE 下载；所有下载按钮和 manifest 均指向 `/downloads/latest/Add-WhatsApp.exe`。
+- 背景：旧版本可能包含已修复的 WhatsApp 登录、浏览器路径、支付或风控问题；如果用户从版本记录页下载旧包，会把已经解决的问题重新带回售后。
+- 理由：对普通用户来说，官网应只提供当前稳定包；历史版本只用于说明发布记录和回溯变更，不作为可回退下载入口。
+- 约束：发布新版本时必须替换 `website/public/downloads/latest/Add-WhatsApp.exe`，更新 `latest/update.json`、`website/lib/releases.js` 和版本页说明；`website/public/downloads/releases` 下不得保留 `.exe` 旧包。

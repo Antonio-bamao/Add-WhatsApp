@@ -485,3 +485,52 @@
 - 现场卡点：用户在服务器执行 `git pull --ff-only` 时，服务器本地 `package-lock.json` 和 `website/package-lock.json` 有未提交改动，Git 拒绝覆盖并中止 pull。
 - 处理建议：在服务器执行 `git stash push -m "server-local-lockfiles-before-deploy" -- package-lock.json website/package-lock.json` 后再 `git pull --ff-only`；随后执行 `npm ci`、`npm ci --prefix website`、`npm ci --prefix server`、`npm run build --prefix website`、`systemctl restart add-whatsapp-website.service`、`systemctl restart add-whatsapp-api.service`、`nginx -t`、`systemctl reload nginx`。
 - 验证标准：只有线上 `curl -L https://addwhatsapp.com/downloads/latest/update.json` 显示 `version=0.1.3` 且 SHA256 为 `c26f77a52ad8893f2b17c0e7691d1b216aa37ffbfc703468f9dbe6c069d71413`，并且 `curl -I https://addwhatsapp.com/downloads/releases/0.1.3/Add-WhatsApp-0.1.3.exe` 返回 200，才能说官网包已更新。
+
+## 2026-06-05T18:30:00+08:00｜复盘并记录 WhatsApp 二维码加载重大连环故障
+- 目标：把用户已确认修复的 WhatsApp 登录二维码疑难故障完整写入项目日志，避免后续窗口或未来维护时重复走代理、UA、账号封禁、普通缓存损坏这些已排除方向。
+- 动作：整理故障链路为三层根因：`whatsapp-web.js` npm 版与 WhatsApp Web 2.3000.x 不兼容导致 `post_logout`；新自动化 profile 未获 `durableStorage` 导致 IndexedDB 初始化失败；旧 Roaming 深层 LocalAuth 路径过长导致 Windows 上 Chromium CacheStorage 写入失败。
+- 动作：记录最终有效组合：`whatsapp-web.js` 改 GitHub 主分支；固定可访问的 WhatsApp Web HTML；保留真实 Chrome/148 UA 和反自动化参数；程序先 launch Puppeteer 并通过 CDP 授权 `durableStorage` / `notifications`；LocalAuth profile 移到 `%LOCALAPPDATA%\\aw`，clientId 缩短到账号 UUID 前 8 位。
+- 动作：补充进程和自愈要求：正常关闭必须 `client.destroy()` 后 `browser.close()`，禁止正常流程 `taskkill /F`；同一 session 目录必须单实例；命中 database/storage error 时销毁浏览器、等待退出、清理 IndexedDB / Local Storage / Session Storage / Service Worker / Cache 后最多重试 3 次。
+- 结果：这次不再把问题记录成单点 UA、代理或缓存故障，而是明确为“症状混叠、逐层暴露”的重大 WhatsApp Web 启动链路问题。根目录 `bug-log.md` 也新增了“以 2026-06-05 复盘为准”的提示，防止早期 `userAgent:false`、`webVersionCache:none` 等过时结论误导后续修复。
+- 验证：用户已反馈“终于成功修复这个 bug”；本轮只写日志和复盘，不重新打包，符合用户“做完先别打包，先测试好再打包”的要求。
+- 下一步：继续让用户在源码/开发启动方式下观察二维码、扫码和发送任务稳定性；确认稳定后再决定是否统一打包 EXE、同步官网下载包并部署线上。
+
+## 2026-06-05T19:10:00+08:00｜补强 WhatsApp 重置只清当前账号 profile
+- 目标：回答“现在代码是否健硕、异常边界是否处理好”时做上线前审查，重点检查短路径 LocalAuth、单实例、优雅关闭和自愈边界。
+- 发现：短路径方案下多个账号共用 `%LOCALAPPDATA%\\aw` 根目录，`resetStaleSession()` / `forceReset()` 删除整个根目录会误删其他账号的 `session-<clientId>`，这是单账号场景不易暴露的小边界。
+- 动作：先写失败测试 `stale auth reset deletes only the active LocalAuth profile`，确认旧逻辑会删掉 sibling profile；随后把删除目标收窄到 `getLocalAuthProfilePath(this.sessionPath, this.clientId)`。
+- 结果：自动登录失效重置和强制重新扫码只删除当前账号 WhatsApp profile，不影响同一机器上其他账号的登录态。
+- 验证：`node --test tests\\whatsappService.test.js` 8/8；`node --test tests\\whatsappSessionManager.test.js` 6/6；根项目 `npm test` 150/150。
+- 下一步：继续按用户要求先测试源码版；若用户确认二维码、扫码和发送流程稳定，再统一打包发布。
+
+## 2026-06-05T19:40:00+08:00｜修复开始任务后 Chrome 窗口泄漏
+- 目标：解决用户反馈“每次点击开始任务会残留/累积一堆 Chrome 窗口，大多是空白新标签页”的问题，并确认用户给出的根因方向是否对口。
+- 诊断：用户方案基本对口；代码审查和红灯测试确认两个真实漏洞：普通非 stale 初始化失败不会关闭预启动浏览器；再次 `createClient()` 前不会先关闭旧浏览器。旧兜底杀进程依赖 `client.pupBrowser.process()`，在当前 `browserWSEndpoint` 连接链路里不够可靠。
+- 动作：`WhatsAppService` 显式保存 `this.browser` 和 `this.browserProcess`；新增统一 `closeBrowser()`，优先 `client.destroy()` + `browser.close()`，只有记录了本 app launch 的真实 pid 时才 `taskkill /F /T /PID` 兜底；失败、重试、重建、强制重置、destroy 都走同一关闭链路。
+- 动作：`createClient()` 开头先关闭已有 client/browser；`ensureReadyWithRetry()` 在非重试错误或最后一次失败前先关闭浏览器；renderer 增加 `taskStartInFlight` 防止重复点击；主进程增加 `before-quit` 退出兜底。
+- 结果：代码层面保证失败重试不会新旧窗口并存，普通初始化失败不会留下孤儿窗口，重复点击不会从 renderer 连续发起多个 start 请求；杀进程只针对记录的 pid，不会按 `chrome.exe` 误杀个人 Chrome。
+- 验证：`node --test tests\\whatsappService.test.js` 10/10；`node --test tests\\cloudRendererContract.test.js` 5/5；根项目 `npm test` 152/152。
+- 下一步：用户本机源码启动后实际点击一次“开始任务”观察窗口数量；若仍出现超过 1 个可见窗口，需要记录每个窗口出现时间点和任务日志事件，用于判断是正常重试还是关闭超时。
+
+## 2026-06-05T19:55:00+08:00｜清理 WhatsApp 浏览器初始 about:blank 标签
+- 目标：二维码已正常出现后，关闭 Puppeteer 启动 Chrome 时残留的默认 `about:blank` 空白标签，让窗口只保留 WhatsApp 标签。
+- 动作：在 `qr` 和 `ready` 事件后异步检查 `this.browser.pages()`；只有存在至少一个非 `about:blank` 页面时，才关闭 `about:blank` 页面；所有页面检查和关闭都用 try/catch 包住，不影响扫码和主流程。
+- 结果：不会在 WhatsApp 页面尚未存在时关闭唯一空白页，避免浏览器直接退出；也不会关闭 WhatsApp 标签。
+- 验证：`node --test tests\\whatsappService.test.js` 12/12；根项目 `npm test` 154/154。
+
+## 2026-06-05T21:25:00+08:00｜改为随 EXE 打包固定 Chromium
+- 目标：解决发给普通用户后仍依赖系统 Chrome/Edge 的问题，避免用户未安装 Chrome 时降级 Edge 卡在 `about:blank`，或系统浏览器版本漂移影响 WhatsApp Web 登录。
+- 决策：本轮采用备选方案 B，打包 Puppeteer 固定 Chrome for Testing，不接入 Electron 适配分支；原因是当前 `whatsapp-web.js` + 预启动 Puppeteer + CDP 授权 + `browserWSEndpoint` 链路已验证稳定，换 Electron BrowserView 需要重写较多登录、权限、关闭和重试边界。
+- 动作：删除系统浏览器探测路径，运行时只解析内置 Chromium：打包后使用 `process.resourcesPath\\chromium\\chrome-win64\\chrome.exe`，开发时优先使用 `build-resources\\chromium`，否则使用 Puppeteer 缓存；新增 `npm run prepare:browser` 在打包前复制固定浏览器内核。
+- 动作：`electron-builder` 增加 `extraResources` 和 `asarUnpack`，把 `build-resources\\chromium` 打进 `resources\\chromium`；`.gitignore` 忽略大体积浏览器资源；准备脚本会处理 Puppeteer 半残缓存目录，避免目录存在但 `chrome.exe` 缺失导致准备失败。
+- 结果：新 `dist\\Add WhatsApp 0.1.3.exe` 大小 `200437877` 字节；旧本地 `0.1.3` 包大小 `78980953` 字节，本轮约增加 121 MB。`dist\\win-unpacked\\resources\\chromium\\chrome-win64\\chrome.exe` 已存在，未压缩内置 Chromium 资源约 `427887145` 字节。
+- 验证：`node --test tests\\whatsappService.test.js` 13/13；根项目 `npm test` 155/155；`npm run prepare:browser` 成功准备 Chrome for Testing `146.0.7680.31`；`npm run build` 成功生成新 EXE。
+- 下一步：需要在真正未安装 Chrome/Edge 的干净 Windows 虚拟机或用户电脑上启动 EXE，点击“开始任务”确认二维码出现；本机只能证明打包产物内含 Chromium 且代码不再搜索系统浏览器。
+
+## 2026-06-05T21:45:00+08:00｜同步 v0.1.4 到官网 latest 并禁止旧包下载
+- 目标：把内置 Chromium 的 v0.1.4 包同步到官网下载入口；版本记录页面继续保留历史更新说明，但不允许用户下载旧版本。
+- 动作：桌面端版本升到 `0.1.4` 后重新 `npm run build`；把 `dist\\Add WhatsApp 0.1.4.exe` 复制为 `website\\public\\downloads\\latest\\Add-WhatsApp.exe`；删除 `website\\public\\downloads\\releases\\0.1.2\\Add-WhatsApp-0.1.2.exe` 和 `0.1.3\\Add-WhatsApp-0.1.3.exe`。
+- 动作：`website\\public\\downloads\\latest\\update.json` 改为 `version=0.1.4`，`downloadUrl=/downloads/latest/Add-WhatsApp.exe`；`website\\lib\\releases.js` 新增 v0.1.4 并把旧版本 `downloadUrl` 统一指向 latest；版本记录页按钮文案从“下载此版本”改成“下载最新版”。
+- 结果：官网唯一可下载 EXE 为 latest 包，大小 `200439073` 字节，SHA256 `af7cdd7774c5b91a170864ab90c86f1b10337f259deba1acf1cb20fa122809cb`；`public/downloads/releases` 下不再有 `.exe` 旧包。
+- 验证：`npm test --prefix website` 6/6；`npm run build --prefix website` 成功；根项目 `npm test` 155/155。
+- 下一步：用户手动在生产服务器 `/opt/add-whatsapp` 执行 pull/build/restart/reload 后，线上用 `curl -L https://addwhatsapp.com/downloads/latest/update.json` 和 `curl -I https://addwhatsapp.com/downloads/latest/Add-WhatsApp.exe` 校验版本、大小和 SHA256。

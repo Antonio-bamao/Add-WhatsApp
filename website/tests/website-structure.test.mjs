@@ -69,6 +69,8 @@ describe("public website structure", () => {
     assert.match(downloadPage, /Windows/);
     assert.match(downloadPage, /latestRelease\.downloadUrl/);
     assert.match(releasesPage, /releaseHistory/);
+    assert.match(releasesPage, /下载最新版/);
+    assert.doesNotMatch(releasesPage, /下载此版本/);
   });
 
   it("uses an open-source React globe with local country topology", () => {
@@ -112,15 +114,17 @@ describe("public website structure", () => {
   it("publishes the latest download manifest and referenced Windows binaries", () => {
     const updateJson = readJson("public/downloads/latest/update.json");
 
-    assert.equal(updateJson.version, "0.1.3");
-    assert.equal(updateJson.fileName, "Add-WhatsApp-0.1.3.exe");
-    assert.equal(updateJson.downloadUrl, "/downloads/releases/0.1.3/Add-WhatsApp-0.1.3.exe");
+    assert.equal(updateJson.version, "0.1.4");
+    assert.equal(updateJson.fileName, "Add-WhatsApp.exe");
+    assert.equal(updateJson.downloadUrl, "/downloads/latest/Add-WhatsApp.exe");
     assert.match(updateJson.releaseDate, /^\d{4}-\d{2}-\d{2}$/);
     assert.match(updateJson.sha256, /^[a-f0-9]{64}$/);
 
     assert.ok(fs.existsSync(path.join(websiteRoot, "public/downloads/latest/Add-WhatsApp.exe")));
-    assert.ok(fs.existsSync(path.join(websiteRoot, "public/downloads/releases/0.1.3/Add-WhatsApp-0.1.3.exe")));
-    assert.ok(fs.existsSync(path.join(websiteRoot, "public/downloads/releases/0.1.2/Add-WhatsApp-0.1.2.exe")));
+    assert.equal(updateJson.sizeBytes, fs.statSync(path.join(websiteRoot, "public/downloads/latest/Add-WhatsApp.exe")).size);
+    const releaseBinaries = listFiles(path.join(websiteRoot, "public/downloads/releases"))
+      .filter((file) => file.endsWith(".exe"));
+    assert.deepEqual(releaseBinaries, []);
     assert.ok(fs.existsSync(path.join(websiteRoot, "public/site.css")));
     assert.ok(fs.existsSync(path.join(websiteRoot, "public/logo.png")));
     assert.ok(fs.existsSync(path.join(websiteRoot, "public/icon.png")));

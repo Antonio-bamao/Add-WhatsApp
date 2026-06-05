@@ -18,7 +18,7 @@ export default function ReleasesPage() {
           <div className="section-heading">
             <p className="eyebrow">Release notes</p>
             <h1>版本记录</h1>
-            <p>这里保留官网发布过的软件包和更新说明，latest 下载入口始终指向当前稳定版本。</p>
+            <p>这里保留官网发布过的更新说明；所有下载入口始终指向当前稳定版本。</p>
           </div>
           <div className="release-list">
             {releaseHistory.map((release) => (
@@ -34,7 +34,7 @@ export default function ReleasesPage() {
                 </div>
                 <Link className="secondary-action" href={release.downloadUrl}>
                   <Download size={18} />
-                  下载此版本
+                  下载最新版
                 </Link>
               </article>
             ))}

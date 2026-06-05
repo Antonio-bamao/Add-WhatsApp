@@ -1,0 +1,1 @@
+website/public/downloads/latest/*.exe filter=lfs diff=lfs merge=lfs -text

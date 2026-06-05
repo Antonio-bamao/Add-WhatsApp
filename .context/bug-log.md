@@ -59,3 +59,47 @@
 - 处理：本地提交 `573e50e` 已包含 v0.1.3 新包，线上服务器需要先处理本地 lockfile 改动，再执行部署：`git stash push -m "server-local-lockfiles-before-deploy" -- package-lock.json website/package-lock.json`，随后 `git pull --ff-only`、`npm ci`、`npm ci --prefix website`、`npm ci --prefix server`、`npm run build --prefix website`、重启 website/API、`nginx -t`、`systemctl reload nginx`。
 - 预防：以后每次“更新官网包”必须分清两步：第一步是本地 release unit（EXE、latest、release、update.json、release page、测试、构建、commit、push）；第二步是线上服务器 deploy（`/opt/add-whatsapp` pull/build/restart/reload）。最终必须用 `curl -L https://addwhatsapp.com/downloads/latest/update.json` 和 `curl -I https://addwhatsapp.com/downloads/releases/<version>/Add-WhatsApp-<version>.exe` 证明官网生效，不能只凭本地构建或 GitHub 推送声称完成。
 - 状态：recorded
+
+## 2026-06-05: WhatsApp 登录二维码三层连环故障
+- 现象：点击“开始任务”后，自动化浏览器能打开 `web.whatsapp.com`，但二维码长期转圈；早期表现为跳转到 `https://web.whatsapp.com/login/?post_logout=1&logout_reason=0` 并显示 `Content Not Found`，后续进入真正登录页后又出现粉色提示 `A database error occurred on your browser. Please relink your device.`。
+- 关键 Console 证据：第一阶段有 `post_logout` / app bootstrap 失败；第二阶段有 `[storage] storage bucket persistence denied (acquire-persistent-storage-denied)`；最终阶段仍有 `Failed to execute 'open' on 'CacheStorage': Unexpected internal error` 和 `BackendEventBus: storage_initialization_error`。
+- 已排除：不是代理问题，手动 Chrome 走同一代理可出二维码；不是 UA 单点问题，已使用真实 Chrome 148 UA；不是 `navigator.webdriver` 单点检测；不是账号封禁；不是普通缓存损坏，全新 profile 和重启电脑后仍复现。
+- 根因 1：`whatsapp-web.js` npm 版 v1.34.x 与 WhatsApp Web 2.3000.x 大面积不兼容。WhatsApp 前端协议和 A/B 灰度变化快，npm 发布版本落后会导致注入脚本失败、Web App 无法 bootstrap，最终落到 `post_logout` 错误页。
+- 修复 1：依赖改为作者 GitHub 主分支版 `github:pedroslopez/whatsapp-web.js`；同时把 WhatsApp Web HTML 固定到已验证可用的远端版本，避免库自己拉到过期或灰度版本。当前代码以实际可访问的远端 HTML 为准，不使用 404 的版本号。
+- 根因 2：全新的自动化 Chromium profile 互动分为 0，Chrome 拒绝给 `https://web.whatsapp.com` 授予持久化存储，WhatsApp Web 无法初始化 IndexedDB，表现为浏览器数据库错误和二维码不生成。
+- 修复 2：不再完全依赖 `whatsapp-web.js` 内部 launch；由程序先用 Puppeteer 按原有参数启动浏览器，在 WhatsApp 页面加载前通过 CDP `Browser.grantPermissions` 给 `https://web.whatsapp.com` 授权 `durableStorage` 和 `notifications`，再把 `browser.wsEndpoint()` 交给 `whatsapp-web.js` 连接。
+- 根因 3：Windows 上 Chromium 的 CacheStorage 初始化失败。旧 LocalAuth profile 放在 `C:\Users\m1591\AppData\Roaming\add-whatsapp-desktop\accounts\user_c74e30f6-9f85-4ca0-a5fd-b1f94400cb50\whatsapp-session\session-add-whatsapp-user_c74e30f6-9f85-4ca0-a5fd-b1f94400cb50\Default`，到 `Default` 已约 190 字符；Chromium 继续写 `Service Worker\CacheStorage\<hash>\<hash>\...` 后超过 Windows 260 字符路径上限，导致 CacheStorage 写入失败，进而触发 WhatsApp 的 database error。
+- 修复 3：LocalAuth `dataPath` 移到极短的 `%LOCALAPPDATA%\aw`，`clientId` 改为账号 UUID 前 8 位，例如 `c74e30f6`；最终 profile 变为 `C:\Users\m1591\AppData\Local\aw\session-c74e30f6\Default`，长度约 56 字符，给 CacheStorage 深层目录留足空间。
+- 必须保留的稳定配置：真实 Chrome/148 UA 仍动态拼接，不能设成 `false`；`ignoreDefaultArgs: ['--enable-automation']` 仍保留；启动参数保留 `--disable-blink-features=AutomationControlled`、`--no-sandbox`、`--disable-setuid-sandbox`、`--disable-dev-shm-usage`；LocalAuth 仍按账号稳定映射，登录成功后不要求每次扫码。
+- 进程处理教训：正常关闭必须先 `await client.destroy()`，再 `await browser.close()`，并等待浏览器进程退出；`taskkill /F` 只能作为优雅关闭超时后的最后兜底。一旦发生强杀，下一次启动前必须清理该 profile 的 IndexedDB、Local Storage、Session Storage、Service Worker 和 Cache。
+- 单实例教训：同一个 `clientId` / session 目录同一时刻只能有一个浏览器实例。新任务启动前必须确认旧实例已经完全销毁，否则 IndexedDB / CacheStorage 文件锁会把同类错误伪装成浏览器数据库损坏。
+- 自愈策略：监听 `disconnected`、`auth_failure`、页面 `database error` / `Please relink your device` 文案，以及 `CacheStorage` / `storage_initialization_error` 类 Console 信号；命中后先销毁 client/browser，等进程退出，再用 `fs.promises.rm(path, { recursive: true, force: true, maxRetries: 15, retryDelay: 300 })` 清理 profile 子目录并最多重试 3 次。
+- 验证：用户已反馈“终于成功修复这个 bug”；本轮按用户要求先测试源码版，暂不重新打包。
+- 备选但未执行：如果 GitHub 主分支 + 固定 Web 版本未来再次失效，可评估社区 fork `github:alechkos/whatsapp-web.js`；若 `whatsapp-web.js` 继续追不上 WhatsApp 前端变化，则迁移到底层库 WPPConnect / wa-js。
+- 预防：后续凡是 WhatsApp Web 登录链路失败，必须同时看网页错误页、Console、CDP 存储权限、profile 路径长度和进程锁，不要只按“代理/UA/账号/缓存”单点处理。这次属于多个根因串联并互相遮蔽的重大故障，任一层修完都会暴露下一层问题。
+- 状态：fixed and recorded
+
+## 2026-06-05: WhatsApp 自动重置误删全部短路径 profile 的边界风险
+- 现象：短路径方案把所有账号的 WhatsApp profile 放在同一个根目录 `%LOCALAPPDATA%\aw` 下，每个账号使用 `session-<8位clientId>` 子目录；审查发现 `resetStaleSession()` 和 `forceReset()` 仍删除整个 `sessionPath` 根目录。
+- 风险：单账号测试不明显，但多账号或未来账号切换场景下，某一个账号登录失效或用户强制重新扫码，可能把同一机器上其他账号的 WhatsApp 登录态一起删掉，引发无关账号也要重新扫码。
+- 处理：删除目标从 `this.sessionPath` 收窄为 `getLocalAuthProfilePath(this.sessionPath, this.clientId)`，只清当前账号的 `session-<clientId>`；手动清缓存入口本来就是删当前账号子目录，保持不变。
+- 验证：新增回归测试 `stale auth reset deletes only the active LocalAuth profile`，先确认旧逻辑会误删 sibling profile，再修复；`node --test tests\whatsappService.test.js` 8/8 通过；根项目 `npm test` 150/150 通过。
+- 状态：fixed
+
+## 2026-06-05: 点击开始任务后 Chrome 窗口残留/累积
+- 现象：每次点击“开始任务”后会残留或累积多个 Chrome 窗口，很多是空白“新标签页”；多次尝试后窗口越来越多。
+- 根因：`waitForReady()` 失败 reject 后只解绑事件监听，没有关闭当前预启动浏览器；普通非 stale 初始化失败直接 throw，未执行 `client.destroy()` / `browser.close()`，且 `this.client` 未置空；再次 `createClient()` 前没有先关闭已存在浏览器；旧兜底杀进程路径依赖 `client.pupBrowser.process()`，在 `browserWSEndpoint` connect 场景可能拿不到真实 pid。
+- 处理：`WhatsAppService` 显式持有 `this.browser` 和 `this.browserProcess`；新增统一 `closeBrowser()`，关闭顺序为 `client.destroy()` -> `browser.close()` -> 仅对本 app launch 并记录的真实 pid 执行 `taskkill /F /T /PID` 兜底；任何失败、重试、重新创建客户端、强制重置、destroy 都先走 `closeBrowser()`，并清空 `this.client` / `this.browser`。
+- 处理：`createClient()` 开头若已有 client/browser，会先关闭旧实例再 launch 新浏览器；`ensureReadyWithRetry()` 在非可重试错误或最后一次失败前先关闭浏览器，保证“一次失败 = 关掉一个窗口”；renderer 增加 `taskStartInFlight`，按钮点击后立即禁用，重复点击直接忽略；主进程增加 `before-quit` 兜底清理。
+- 预防：禁止按 `chrome.exe` 进程名杀进程，只能关闭已持有 browser 或本 app 记录的 pid；后续所有 WhatsApp 初始化失败路径必须覆盖“浏览器被关闭且引用置空”的测试。
+- 验证：先写红灯测试确认旧逻辑不会关闭失败窗口、重复 create 不会先关旧窗口；修复后 `node --test tests\whatsappService.test.js` 10/10、`node --test tests\cloudRendererContract.test.js` 5/5、根项目 `npm test` 152/152 通过。
+- 状态：fixed in code; 等用户本机实际点击“开始任务”确认窗口不再残留。
+
+## 2026-06-05: 用户电脑使用 Edge 自动化窗口停在 about:blank
+- 现象：打包 EXE 发到另一台电脑后，启动 WhatsApp 自动化浏览器显示 “Microsoft Edge 正由自动测试软件控制”，页面停在 `about:blank`，没有进入 WhatsApp 二维码页。
+- 根因：旧实现通过 `chromeCandidates` 探测系统 `chrome.exe` / `msedge.exe` 作为 Puppeteer `executablePath`。用户机器没装 Chrome 时会降级 Edge；用户系统浏览器版本、权限、默认环境和 WhatsApp 固定 Web HTML 不一定匹配，且如果 Chrome/Edge 都不存在会直接失败。
+- 处理：采用随包固定 Chromium 方案。新增 `puppeteer` 完整依赖和 `scripts/prepare-browser-bundle.js`，打包前把 Chrome for Testing `146.0.7680.31` 复制到 `build-resources\chromium`；`electron-builder` 通过 `extraResources` 打进 `resources\chromium`；运行时只解析内置 Chromium，不再搜索系统 Chrome/Edge。
+- 处理：保留此前已修好的 WhatsApp 链路：GitHub 主分支 `whatsapp-web.js`、固定 WhatsApp Web HTML、真实 Chrome UA、CDP `durableStorage` / `notifications` 授权、短 LocalAuth 路径、单实例和优雅关闭。
+- 验证：`node --test tests\whatsappService.test.js` 13/13；根项目 `npm test` 155/155；`npm run prepare:browser` 成功；`npm run build` 成功，新 `dist\Add WhatsApp 0.1.3.exe` 为 `200437877` 字节，`dist\win-unpacked\resources\chromium\chrome-win64\chrome.exe` 存在。
+- 预防：以后发布 Windows EXE 前必须校验 `resources\chromium\chrome-win64\chrome.exe` 存在；遇到用户机器 `about:blank` 时先区分网络/代理超时和内置浏览器资源缺失，不再建议用户安装 Chrome 作为默认解决方案。
+- 状态：fixed in code and packaged; 仍需在无 Chrome/Edge 的干净 Windows 环境做最终手动扫码验收。

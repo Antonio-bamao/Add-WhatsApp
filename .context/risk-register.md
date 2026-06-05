@@ -4,6 +4,12 @@
 | --- | --- | --- | --- |
 | WhatsApp Web 自动化失效 | WhatsApp Web 页面或 `whatsapp-web.js` 行为变化 | 登录、检测或发送失败 | 保持自动化核心模块隔离，后续可单独适配 |
 | WhatsApp 登录缓存过期 | 本地 LocalAuth 仍存在但 WhatsApp Web 已登出、跳到 `post_logout` 或浏览器上下文被销毁 | 用户点击开始任务后看不到二维码，任务无法开始 | 仅在识别到失效信号时自动清理当前账号 `whatsapp-session` 并重试；发送任务页保留手动 `登录异常时重新扫码` 按钮，正常有效 session 不重复扫码 |
+| WhatsApp Web 版本/注入兼容性漂移 | WhatsApp Web 2.3000.x 继续灰度或改前端协议，npm 版 `whatsapp-web.js` 落后 | 页面 bootstrap 失败、跳 `post_logout`、二维码不出现 | 依赖优先使用作者 GitHub 主分支；固定已验证可访问的 WhatsApp Web HTML；失败时先验证 raw HTML URL、GitHub issue 和 Console，而不是先改代理/UA |
+| 用户电脑缺少兼容浏览器 | EXE 运行在未安装 Chrome 的电脑，旧逻辑降级 Edge 或找不到系统浏览器 | WhatsApp 自动化窗口停在 `about:blank`、二维码不出现，或启动直接失败 | EXE 随包携带 Puppeteer 固定 Chrome for Testing；运行时只解析 `resources\\chromium\\chrome-win64\\chrome.exe`，不再搜索系统 Chrome/Edge；打包前执行 `npm run prepare:browser` 并校验资源存在 |
+| Chromium 持久化存储权限不足 | 自动化浏览器使用全新 profile，`web.whatsapp.com` 未获得 `durableStorage` | IndexedDB 初始化失败，页面显示 database error，二维码长期转圈 | WhatsApp 页面加载前通过 CDP `Browser.grantPermissions` 授权 `durableStorage` 和 `notifications`；保留授权失败日志和页面 Console 采集 |
+| Chromium profile 路径过长 | LocalAuth dataPath 放在 Roaming 深层账号目录，clientId 使用完整 `add-whatsapp-user_<uuid>` | Windows CacheStorage 深层目录超过 260 字符，触发 `CacheStorage: Unexpected internal error` / `storage_initialization_error` | LocalAuth profile 固定到 `%LOCALAPPDATA%\\aw\\session-<8位clientId>`；后续新增账号目录时必须检查最终 `Default` 路径长度并避免长前缀 |
+| WhatsApp 自动化进程强杀或双开 | 正常流程用 `taskkill /F`，或同一 session 目录被两个浏览器实例同时打开 | IndexedDB/CacheStorage 写坏或被锁，后续反复 database error | 正常关闭只走 `client.destroy()` + `browser.close()`；单实例守卫同一 clientId；强杀仅为超时兜底，强杀后下一次启动前清理当前 profile 的存储子目录 |
+| WhatsApp 浏览器窗口泄漏 | 初始化失败、重试或重复 create 前没有关闭上一个预启动浏览器 | Chrome 空白窗口残留、profile 被占用、后续 database error 或用户误以为软件失控 | `WhatsAppService.closeBrowser()` 统一关闭 client/browser，只对记录的 pid 兜底 taskkill；create/retry/failure/destroy/退出均先关闭旧实例；renderer 用 `taskStartInFlight` 忽略重复点击 |
 | 电话号码误解析 | 表格号码格式混乱或国家列缺失 | 发送到错误号码或跳过有效号码 | 使用 `libphonenumber-js`、导入预检、待确认状态 |
 | 敏感数据误提交 | Git 跟踪客户号码、登录缓存或报表 | 泄露客户数据或登录状态 | `.gitignore` 排除 `.wwebjs_auth/`、客户表格、进度和报表 |
 | 平台限制 | 大批量发送或过快发送 | 账号受限或任务失败 | 保留每日限额、随机间隔、暂停继续，不做风控规避 |
@@ -24,6 +30,7 @@
 | 微信平台回调签名未做完整平台证书校验 | 当前实现先解密 APIv3 resource 并校验 `mchid/appid`，但尚未引入微信平台证书或公钥验证 `WECHATPAY-SIGNATURE` 请求头 | 极端情况下回调来源验证不完整，资金边界审计强度低于官方最佳实践 | 当前依赖 APIv3 key 解密和商户/AppID 校验作为上线最小闭环；后续补 `WECHATPAY-SERIAL` 平台证书轮换和请求头签名验签后再关闭该风险 |
 | 旧本地账号数据切换为数据库账号后看不到 | 老版本用户的历史、模板或 WhatsApp 缓存曾挂在旧本地 accountId 下，新版本用云端 `user.id` 作为账号目录 | 老用户首次升级后可能误以为原本机历史或扫码缓存丢失，需要重新扫码或迁移数据 | 新产品文案不再暴露本地账号；如要保留旧数据，需要后续做按用户名或手动同步包的迁移工具，把旧账号目录迁到数据库账号目录 |
 | 官网下载包过期 | 桌面端重新打包后未同步 `website/public/downloads` 和 `update.json` | 用户下载旧版本或校验信息不一致 | 每次发布执行复制 EXE、计算 SHA256、更新 latest/release 目录和版本页，再跑 website 测试与 build |
+| 官网旧版本仍可下载 | 版本记录页或 `public/downloads/releases` 保留旧 EXE | 用户拿到已知缺陷旧包，引发已修复 bug 复发和售后混乱 | 官网只发布 `downloads/latest/Add-WhatsApp.exe`；历史版本只留说明，所有按钮指向 latest；结构测试断言 releases 下没有 `.exe` |
 | 公开官网误放敏感配置 | 官网后续接后台/API 时混入密钥、数据库 URL 或客户数据 | 公开站点泄露管理能力或用户数据 | 官网目录只放公开内容和下载元数据；后台走 `admin.addwhatsapp.com`，API 走 `api.addwhatsapp.com`，结构测试扫描敏感导入和密钥字样 |
 | 后台人工操作无审计 | 管理员改套餐、补额度、释放租约或审核推荐时只改状态不写日志 | 资金和权限问题无法追溯，误操作难以修正 | 后台管理台把审计日志作为一等模块；余额只能通过账本调整，敏感动作必须记录管理员、对象、前后摘要、时间和 IP |
 | 内存预览服务被误认为生产后端 | `server/` 当前为了无依赖本地预览使用内存存储 | 重启后数据丢失，无法支撑真实付费、退款和审计 | README 和 `.context` 标明内存存储仅用于本地预览；生产化必须接 PostgreSQL schema 和事务仓储 |

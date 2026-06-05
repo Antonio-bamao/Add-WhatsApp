@@ -32,7 +32,7 @@ const { PendingCloudSyncStore } = require('../core/pendingCloudSyncStore');
 const { createWhatsAppService } = require('./whatsappService');
 const { createCloudDesktopController } = require('./cloudDesktopController');
 const { restoreAuthenticatedSession: restoreAuthenticatedCloudSession } = require('./cloudSessionRestorer');
-const { WhatsAppSessionManager } = require('./whatsappSessionManager');
+const { WhatsAppSessionManager, createWhatsAppSessionConfig } = require('./whatsappSessionManager');
 const { LocalProxyBridge } = require('./proxyBridge');
 const {
   JsonProxySettingsStore,
@@ -63,6 +63,7 @@ if (workspaceId) {
 let mainWindow;
 let tray;
 let isQuitting = false;
+let beforeQuitCleanupStarted = false;
 let closeChoiceOpen = false;
 let importedRows = [];
 let importedSource = null;
@@ -173,6 +174,16 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   if (isQuitting && process.platform !== 'darwin') app.quit();
+});
+
+app.on('before-quit', event => {
+  if (beforeQuitCleanupStarted) return;
+  beforeQuitCleanupStarted = true;
+  event.preventDefault();
+  quitCompletely().catch(error => {
+    console.warn(`Quit cleanup failed: ${error.message}`);
+    app.quit();
+  });
 });
 
 function restoreAuthenticatedSession() {
@@ -335,6 +346,7 @@ async function showCloseChoice() {
 
 async function quitCompletely() {
   isQuitting = true;
+  beforeQuitCleanupStarted = true;
   stopRequested = true;
   if (activeRun && historyStore) {
     const history = historyStore.upsert({
@@ -424,12 +436,38 @@ ipcMain.handle('auth:clear-whatsapp-session', async () => {
     const user = requireAuthenticated();
     if (currentTask) return { ok: false, error: '当前任务正在运行，不能清除 WhatsApp 缓存。' };
     await whatsappSessionManager.destroy();
-    const sessionPath = accountContext.accountPath('whatsapp-session');
-    fs.rmSync(sessionPath, { recursive: true, force: true });
+    const sessionConfig = createWhatsAppSessionConfig(userDataPath, user);
+    const sessionDir = path.join(sessionConfig.sessionPath, `session-${sessionConfig.clientId}`);
+    fs.rmSync(sessionDir, { recursive: true, force: true });
     sendToRenderer('task:event', { type: 'auth:disconnected', message: '当前账号的 WhatsApp 缓存已清除，下次任务需要重新扫码。' });
     return { ok: true, accountId: user.accountId };
   } catch (error) {
     return protectedError(error);
+  }
+});
+
+ipcMain.handle('auth:force-rescan', async () => {
+  try {
+    requireAuthenticated();
+  } catch (error) {
+    return protectedError(error);
+  }
+  try {
+    stopRequested = true;
+    sendToRenderer('task:event', { type: 'auth:reset', message: '正在强制重置 WhatsApp 登录...' });
+    await whatsappSessionManager.forceResetActiveService();
+    if (currentTask) {
+      const taskTimeout = new Promise(resolve => setTimeout(resolve, 8000));
+      await Promise.race([currentTask, taskTimeout]);
+      currentTask = null;
+      activeRun = null;
+    }
+    stopRequested = false;
+    sendToRenderer('task:event', { type: 'auth:disconnected', message: 'WhatsApp 登录已强制重置，可以重新扫码。' });
+    return { ok: true };
+  } catch (error) {
+    stopRequested = false;
+    return { ok: false, error: error.message || '强制重置失败。' };
   }
 });
 
