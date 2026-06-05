@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import zlib from "node:zlib";
 
 export const PLAN_CATALOG = Object.freeze({
   free: {
@@ -201,6 +202,16 @@ function normalizeOriginalFormat(value, fileName) {
   return match ? match[1].toLowerCase() : "unknown";
 }
 
+function normalizeParsedRows(body = {}) {
+  if (typeof body.parsedRowsGzipBase64 === "string" && body.parsedRowsGzipBase64.trim()) {
+    const rawJson = zlib.gunzipSync(Buffer.from(body.parsedRowsGzipBase64, "base64")).toString("utf8");
+    const rows = JSON.parse(rawJson);
+    if (!Array.isArray(rows)) throw new Error("CONTACT_IMPORT_PARSED_ROWS_INVALID");
+    return rows;
+  }
+  return Array.isArray(body.parsedRows) ? body.parsedRows : [];
+}
+
 function normalizeContactImportPayload(store, body = {}) {
   const originalFileName = safeFileName(body.originalFileName, "contact-import");
   const originalFormat = normalizeOriginalFormat(body.originalFormat, originalFileName);
@@ -213,7 +224,7 @@ function normalizeContactImportPayload(store, body = {}) {
   const originalSha256 = crypto.createHash("sha256").update(originalBytes).digest("hex");
   const expectedSha256 = String(body.originalSha256 || originalSha256).trim().toLowerCase();
   if (expectedSha256 && expectedSha256 !== originalSha256) throw new Error("CONTACT_IMPORT_SHA_MISMATCH");
-  const parsedRows = Array.isArray(body.parsedRows) ? body.parsedRows : [];
+  const parsedRows = normalizeParsedRows(body);
   return {
     id: createId("contact_import"),
     userId: body.userId,

@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import zlib from "node:zlib";
 import { Pool } from "pg";
 
 function createId(prefix) {
@@ -184,6 +185,16 @@ function normalizeOriginalFormat(value, fileName) {
   return match ? match[1].toLowerCase() : "unknown";
 }
 
+function normalizeParsedRows(body = {}) {
+  if (typeof body.parsedRowsGzipBase64 === "string" && body.parsedRowsGzipBase64.trim()) {
+    const rawJson = zlib.gunzipSync(Buffer.from(body.parsedRowsGzipBase64, "base64")).toString("utf8");
+    const rows = JSON.parse(rawJson);
+    if (!Array.isArray(rows)) throw new Error("CONTACT_IMPORT_PARSED_ROWS_INVALID");
+    return rows;
+  }
+  return Array.isArray(body.parsedRows) ? body.parsedRows : [];
+}
+
 function normalizeContactImportBody(body = {}) {
   const originalFileName = safeFileName(body.originalFileName, "contact-import");
   const originalFormat = normalizeOriginalFormat(body.originalFormat, originalFileName);
@@ -206,7 +217,7 @@ function normalizeContactImportBody(body = {}) {
     columns: body.columns || {},
     stats: body.stats || {},
     importOptions: body.importOptions || {},
-    parsedRows: Array.isArray(body.parsedRows) ? body.parsedRows : []
+    parsedRows: normalizeParsedRows(body)
   };
 }
 

@@ -69,7 +69,8 @@ describe("public website structure", () => {
     assert.match(downloadPage, /Windows/);
     assert.match(downloadPage, /latestRelease\.downloadUrl/);
     assert.match(releasesPage, /releaseHistory/);
-    assert.match(releasesPage, /下载最新版/);
+    assert.doesNotMatch(releasesPage, /下载最新版/);
+    assert.doesNotMatch(releasesPage, /release\.downloadUrl/);
     assert.doesNotMatch(releasesPage, /下载此版本/);
   });
 

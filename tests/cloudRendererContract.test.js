@@ -157,4 +157,7 @@ test('contact import audit uploads both manual and restored imports without rend
   assert.notEqual(restoreEnd, -1);
   const restoreBody = main.slice(restoreStart, restoreEnd);
   assert.match(restoreBody, /queueContactImportAuditUpload\(data, currentImportOptions\)/);
+  assert.match(main, /zlib\.gzipSync\(Buffer\.from\(JSON\.stringify\(parsedRows\), 'utf8'\)\)/);
+  assert.match(main, /parsedRowsGzipBase64/);
+  assert.doesNotMatch(main, /parsedRows: Array\.isArray\(data\.rows\) \? data\.rows : \[\]/);
 });

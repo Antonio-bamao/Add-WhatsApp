@@ -1,5 +1,3 @@
-import Link from "next/link";
-import { Download } from "lucide-react";
 import { SiteHeader } from "../../components/SiteHeader";
 import { SiteFooter } from "../../components/SiteFooter";
 import { formatBytes, releaseHistory } from "../../lib/releases";
@@ -32,10 +30,6 @@ export default function ReleasesPage() {
                     ))}
                   </ul>
                 </div>
-                <Link className="secondary-action" href={release.downloadUrl}>
-                  <Download size={18} />
-                  下载最新版
-                </Link>
               </article>
             ))}
           </div>

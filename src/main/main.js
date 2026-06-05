@@ -1,6 +1,7 @@
 const path = require('path');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
+const zlib = require('node:zlib');
 const { spawn } = require('node:child_process');
 const { app, BrowserWindow, Tray, Menu, dialog, ipcMain, shell, clipboard } = require('electron');
 const QRCode = require('qrcode');
@@ -876,6 +877,7 @@ function contactImportAuditPayload(data, importOptions = {}) {
   const fileBuffer = fs.readFileSync(data.filePath);
   const originalFileName = data.fileName || path.basename(data.filePath);
   const originalFormat = path.extname(originalFileName).replace(/^\./, '').toLowerCase() || 'unknown';
+  const parsedRows = Array.isArray(data.rows) ? data.rows : [];
   return {
     originalFileName,
     originalFormat,
@@ -886,7 +888,7 @@ function contactImportAuditPayload(data, importOptions = {}) {
     columns: data.columns || {},
     stats: data.stats || {},
     importOptions,
-    parsedRows: Array.isArray(data.rows) ? data.rows : []
+    parsedRowsGzipBase64: zlib.gzipSync(Buffer.from(JSON.stringify(parsedRows), 'utf8')).toString('base64')
   };
 }
 

@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
+import zlib from "node:zlib";
 
 import { createAppServer, createRuntimeFromEnv } from "../src/app.js";
 import { createCloudStore, createMemoryRuntime } from "../src/services/billingService.js";
@@ -1100,6 +1101,16 @@ describe("cloud API skeleton", () => {
       const auth = { authorization: `Bearer ${registered.payload.accessToken}` };
       const original = Buffer.from("raw workbook bytes");
       const originalSha256 = crypto.createHash("sha256").update(original).digest("hex");
+      const parsedRows = [
+        {
+          rowNumber: 2,
+          status: "valid",
+          e164: "+15551234567",
+          countryIso: "US",
+          language: "en",
+          source: { phone: "5551234567", country: "US", 姓名: "客户名" }
+        }
+      ];
 
       const created = await request(baseUrl, "/v1/contact-imports", {
         method: "POST",
@@ -1114,16 +1125,7 @@ describe("cloud API skeleton", () => {
           columns: { phoneColumn: "phone", countryColumn: "country", languageColumn: "language" },
           stats: { total: 1, valid: 1, invalid: 0 },
           importOptions: { skipChinaNumbers: true },
-          parsedRows: [
-            {
-              rowNumber: 2,
-              status: "valid",
-              e164: "+15551234567",
-              countryIso: "US",
-              language: "en",
-              source: { phone: "5551234567", country: "US", 姓名: "客户名" }
-            }
-          ]
+          parsedRowsGzipBase64: zlib.gzipSync(JSON.stringify(parsedRows)).toString("base64")
         }
       });
       assert.equal(created.response.status, 201);
