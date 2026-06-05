@@ -15,12 +15,16 @@ export const latestRelease = {
 
 export const releaseHistory = [
   {
-    ...latestRelease
+    version: latestRelease.version,
+    fileName: latestRelease.fileName,
+    releaseDate: latestRelease.releaseDate,
+    sizeBytes: latestRelease.sizeBytes,
+    sha256: latestRelease.sha256,
+    highlights: latestRelease.highlights
   },
   {
     version: "0.1.3",
     fileName: "Add-WhatsApp-0.1.3.exe",
-    downloadUrl: latestRelease.downloadUrl,
     releaseDate: "2026-06-05",
     sizeBytes: 78890507,
     sha256: "c26f77a52ad8893f2b17c0e7691d1b216aa37ffbfc703468f9dbe6c069d71413",
@@ -34,7 +38,6 @@ export const releaseHistory = [
   {
     version: "0.1.2",
     fileName: "Add-WhatsApp-0.1.2.exe",
-    downloadUrl: latestRelease.downloadUrl,
     releaseDate: "2026-06-03",
     sizeBytes: 78880538,
     sha256: "0d09e629b73034aa634fb4161aef0985b00262d093a21238adc0c34e9b271742",

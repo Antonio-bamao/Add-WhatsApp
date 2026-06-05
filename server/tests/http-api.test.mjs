@@ -1125,12 +1125,33 @@ describe("cloud API skeleton", () => {
           columns: { phoneColumn: "phone", countryColumn: "country", languageColumn: "language" },
           stats: { total: 1, valid: 1, invalid: 0 },
           importOptions: { skipChinaNumbers: true },
+          clientImportKey: "d33331ff0437095b000000000000000000000000000000000000000000000001",
           parsedRowsGzipBase64: zlib.gzipSync(JSON.stringify(parsedRows)).toString("base64")
         }
       });
       assert.equal(created.response.status, 201);
       assert.equal(created.payload.originalFormat, "xlsx");
       assert.equal(created.payload.parsedRowCount, 1);
+
+      const replayed = await request(baseUrl, "/v1/contact-imports", {
+        method: "POST",
+        headers: auth,
+        body: {
+          originalFileName: "1000条(1)(1).xlsx",
+          originalFormat: "xlsx",
+          originalMimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          originalSizeBytes: original.length,
+          originalSha256,
+          originalBase64: original.toString("base64"),
+          columns: { phoneColumn: "phone", countryColumn: "country", languageColumn: "language" },
+          stats: { total: 1, valid: 1, invalid: 0 },
+          importOptions: { skipChinaNumbers: true },
+          clientImportKey: "d33331ff0437095b000000000000000000000000000000000000000000000001",
+          parsedRowsGzipBase64: zlib.gzipSync(JSON.stringify(parsedRows)).toString("base64")
+        }
+      });
+      assert.equal(replayed.response.status, 201);
+      assert.equal(replayed.payload.id, created.payload.id);
 
       const rejectedList = await request(baseUrl, "/v1/admin/contact-imports");
       assert.equal(rejectedList.response.status, 401);
@@ -1170,6 +1191,47 @@ describe("cloud API skeleton", () => {
         headers: adminAuth
       });
       assert.deepEqual([...parsedBytes.buffer.subarray(0, 3)], [0xef, 0xbb, 0xbf]);
+    });
+  });
+
+  it("stores large compressed parsed contact imports without truncating rows", async () => {
+    await withServer(async (baseUrl) => {
+      const registered = await request(baseUrl, "/v1/auth/register", {
+        method: "POST",
+        body: { username: "large-import-user", password: "StrongPass123", planId: "advanced" }
+      });
+      assert.equal(registered.response.status, 201);
+      const original = Buffer.from("large workbook bytes");
+      const originalSha256 = crypto.createHash("sha256").update(original).digest("hex");
+      const parsedRows = Array.from({ length: 16630 }, (_, index) => ({
+        rowNumber: index + 1,
+        status: "valid",
+        e164: `+1447556${String(index).padStart(4, "0")}`,
+        countryIso: "US",
+        language: "en",
+        source: { phone: `447556${String(index).padStart(4, "0")}` }
+      }));
+
+      const created = await request(baseUrl, "/v1/contact-imports", {
+        method: "POST",
+        headers: { authorization: `Bearer ${registered.payload.accessToken}` },
+        body: {
+          originalFileName: "16630.xlsx",
+          originalFormat: "xlsx",
+          originalMimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          originalSizeBytes: original.length,
+          originalSha256,
+          originalBase64: original.toString("base64"),
+          columns: { phoneColumn: "phone" },
+          stats: { total: 16630, valid: 16630, invalid: 0 },
+          importOptions: { skipChinaNumbers: true },
+          clientImportKey: "d33331ff0437095b000000000000000000000000000000000000000000001663",
+          parsedRowsGzipBase64: zlib.gzipSync(JSON.stringify(parsedRows)).toString("base64")
+        }
+      });
+
+      assert.equal(created.response.status, 201);
+      assert.equal(created.payload.parsedRowCount, 16630);
     });
   });
 

@@ -14,6 +14,7 @@ const ORDER_PAYMENT_TTL_MS = 5 * 60 * 1000;
 const ADMIN_ACCESS_TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
 const CONTACT_IMPORT_MAX_BYTES = 25 * 1024 * 1024;
 const migratedOrderLifecyclePools = new WeakSet();
+const migratedContactImportPools = new WeakSet();
 const PLAN_RANKS = Object.freeze({
   free: 0,
   advanced: 1,
@@ -195,6 +196,13 @@ function normalizeParsedRows(body = {}) {
   return Array.isArray(body.parsedRows) ? body.parsedRows : [];
 }
 
+function normalizeClientImportKey(value) {
+  const key = String(value || "").trim().toLowerCase();
+  if (!key) return "";
+  if (!/^[a-f0-9]{32,128}$/.test(key)) throw new Error("CONTACT_IMPORT_CLIENT_KEY_INVALID");
+  return key.slice(0, 128);
+}
+
 function normalizeContactImportBody(body = {}) {
   const originalFileName = safeFileName(body.originalFileName, "contact-import");
   const originalFormat = normalizeOriginalFormat(body.originalFormat, originalFileName);
@@ -211,6 +219,7 @@ function normalizeContactImportBody(body = {}) {
     originalFileName,
     originalFormat,
     originalMimeType,
+    clientImportKey: normalizeClientImportKey(body.clientImportKey),
     originalSizeBytes: originalBytes.length,
     originalSha256,
     originalBytes,
@@ -226,6 +235,7 @@ function publicContactImport(row) {
   return {
     id: row.id,
     userId: row.user_id,
+    clientImportKey: row.client_import_key || "",
     account: row.username || row.user_id,
     originalFileName: row.original_file_name,
     originalFormat: row.original_format,
@@ -445,6 +455,17 @@ async function ensureOrderLifecycleColumns(client, db) {
   await client.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS expires_at TEXT");
   await client.query("UPDATE orders SET expires_at = created_at WHERE expires_at IS NULL");
   migratedOrderLifecyclePools.add(db);
+}
+
+async function ensureContactImportColumns(client, db) {
+  if (migratedContactImportPools.has(db)) return;
+  await client.query("ALTER TABLE contact_imports ADD COLUMN IF NOT EXISTS client_import_key TEXT");
+  await client.query(
+    `CREATE UNIQUE INDEX IF NOT EXISTS contact_imports_user_client_import_key_idx
+     ON contact_imports (user_id, client_import_key)
+     WHERE client_import_key IS NOT NULL`
+  );
+  migratedContactImportPools.add(db);
 }
 
 async function orderByIdOrNumber(client, { orderId, orderNo, forUpdate = false }) {
@@ -1093,7 +1114,15 @@ export function createPostgresRuntime({ databaseUrl, pool } = {}) {
       const normalized = normalizeContactImportBody(body);
       const client = await db.connect();
       try {
+        await ensureContactImportColumns(client, db);
         await requireActiveUser(client, userId);
+        if (normalized.clientImportKey) {
+          const existing = await client.query(
+            "SELECT ci.*, u.username FROM contact_imports ci JOIN users u ON u.id = ci.user_id WHERE ci.user_id = $1 AND ci.client_import_key = $2 LIMIT 1",
+            [userId, normalized.clientImportKey]
+          );
+          if (existing.rows[0]) return publicContactImport(existing.rows[0]);
+        }
         const record = {
           id: createId("contact_import"),
           userId,
@@ -1109,13 +1138,14 @@ export function createPostgresRuntime({ databaseUrl, pool } = {}) {
             original_mime_type,
             original_size_bytes,
             original_sha256,
+            client_import_key,
             original_file_bytes,
             columns_json,
             stats_json,
             import_options_json,
             parsed_rows_json,
             created_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
           [
             record.id,
             record.userId,
@@ -1124,6 +1154,7 @@ export function createPostgresRuntime({ databaseUrl, pool } = {}) {
             record.originalMimeType,
             record.originalSizeBytes,
             record.originalSha256,
+            record.clientImportKey || null,
             record.originalBytes,
             JSON.stringify(record.columns),
             JSON.stringify(record.stats),
@@ -1136,6 +1167,7 @@ export function createPostgresRuntime({ databaseUrl, pool } = {}) {
           id: record.id,
           user_id: record.userId,
           username: (await requireActiveUser(client, userId)).username,
+          client_import_key: record.clientImportKey || "",
           original_file_name: record.originalFileName,
           original_format: record.originalFormat,
           original_mime_type: record.originalMimeType,

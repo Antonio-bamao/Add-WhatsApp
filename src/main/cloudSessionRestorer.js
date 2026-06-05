@@ -21,6 +21,7 @@ function restoreAuthenticatedSession({
   accountContext,
   initializeAccountStores,
   schedulePendingCloudSyncRetry,
+  schedulePendingContactImportAuditRetry,
   mapCloudUser = desktopUserFromCloudUser
 }) {
   const cloud = cloudState();
@@ -28,6 +29,7 @@ function restoreAuthenticatedSession({
   accountContext.setCurrentUser(mapCloudUser(cloud.user));
   initializeAccountStores();
   if (typeof schedulePendingCloudSyncRetry === 'function') schedulePendingCloudSyncRetry();
+  if (typeof schedulePendingContactImportAuditRetry === 'function') schedulePendingContactImportAuditRetry();
   return true;
 }
 

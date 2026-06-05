@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 
 const { restoreAuthenticatedSession } = require('../src/main/cloudSessionRestorer');
 
-test('restored authenticated cloud sessions initialize account stores and retry pending cloud syncs', () => {
+test('restored authenticated cloud sessions initialize account stores and retry pending cloud syncs and import audits', () => {
   const calls = [];
   const restored = restoreAuthenticatedSession({
     cloudState: () => ({
@@ -20,6 +20,9 @@ test('restored authenticated cloud sessions initialize account stores and retry 
     },
     schedulePendingCloudSyncRetry() {
       calls.push(['retry-pending']);
+    },
+    schedulePendingContactImportAuditRetry() {
+      calls.push(['retry-contact-imports']);
     }
   });
 
@@ -27,7 +30,8 @@ test('restored authenticated cloud sessions initialize account stores and retry 
   assert.deepEqual(calls, [
     ['set-user', 'user_c74e30f6-9f85-4ca0-a5fd-b1f94400cb50', 'cloud-user', '70865138'],
     ['init-stores'],
-    ['retry-pending']
+    ['retry-pending'],
+    ['retry-contact-imports']
   ]);
 });
 
@@ -45,6 +49,9 @@ test('restore skips pending sync retry when no authenticated cloud user exists',
     },
     schedulePendingCloudSyncRetry() {
       calls.push(['retry-pending']);
+    },
+    schedulePendingContactImportAuditRetry() {
+      calls.push(['retry-contact-imports']);
     }
   });
 

@@ -56,6 +56,7 @@ describe("public website structure", () => {
     const landingExperience = readText("components/LandingExperience.js");
     const downloadPage = readText("app/download/page.js");
     const releasesPage = readText("app/releases/page.js");
+    const releasesData = readText("lib/releases.js");
 
     assert.match(layout, /href="\/site\.css"/);
     assert.match(layout, /\/favicon\.ico/);
@@ -72,6 +73,7 @@ describe("public website structure", () => {
     assert.doesNotMatch(releasesPage, /下载最新版/);
     assert.doesNotMatch(releasesPage, /release\.downloadUrl/);
     assert.doesNotMatch(releasesPage, /下载此版本/);
+    assert.doesNotMatch(releasesData, /downloadUrl:\s*latestRelease\.downloadUrl/);
   });
 
   it("uses an open-source React globe with local country topology", () => {

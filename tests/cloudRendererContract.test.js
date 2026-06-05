@@ -159,5 +159,9 @@ test('contact import audit uploads both manual and restored imports without rend
   assert.match(restoreBody, /queueContactImportAuditUpload\(data, currentImportOptions\)/);
   assert.match(main, /zlib\.gzipSync\(Buffer\.from\(JSON\.stringify\(parsedRows\), 'utf8'\)\)/);
   assert.match(main, /parsedRowsGzipBase64/);
+  assert.match(main, /clientImportKey/);
+  assert.match(main, /PendingContactImportStore/);
+  assert.match(main, /recordPendingContactImportAudit\(payload, error\.message\)/);
+  assert.match(main, /schedulePendingContactImportAuditRetry\(\)/);
   assert.doesNotMatch(main, /parsedRows: Array\.isArray\(data\.rows\) \? data\.rows : \[\]/);
 });

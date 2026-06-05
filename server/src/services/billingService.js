@@ -212,6 +212,13 @@ function normalizeParsedRows(body = {}) {
   return Array.isArray(body.parsedRows) ? body.parsedRows : [];
 }
 
+function normalizeClientImportKey(value) {
+  const key = String(value || "").trim().toLowerCase();
+  if (!key) return "";
+  if (!/^[a-f0-9]{32,128}$/.test(key)) throw new Error("CONTACT_IMPORT_CLIENT_KEY_INVALID");
+  return key.slice(0, 128);
+}
+
 function normalizeContactImportPayload(store, body = {}) {
   const originalFileName = safeFileName(body.originalFileName, "contact-import");
   const originalFormat = normalizeOriginalFormat(body.originalFormat, originalFileName);
@@ -228,6 +235,7 @@ function normalizeContactImportPayload(store, body = {}) {
   return {
     id: createId("contact_import"),
     userId: body.userId,
+    clientImportKey: normalizeClientImportKey(body.clientImportKey),
     originalFileName,
     originalFormat,
     originalMimeType,
@@ -247,6 +255,7 @@ function publicContactImport(store, record) {
   return {
     id: record.id,
     userId: record.userId,
+    clientImportKey: record.clientImportKey || "",
     account: user ? user.username : record.userId,
     originalFileName: record.originalFileName,
     originalFormat: record.originalFormat,
@@ -265,6 +274,12 @@ function publicContactImport(store, record) {
 function createContactImport(store, body) {
   getUser(store, body.userId);
   const record = normalizeContactImportPayload(store, body);
+  if (record.clientImportKey) {
+    const existing = [...store.contactImports.values()].find((item) =>
+      item.userId === record.userId && item.clientImportKey === record.clientImportKey
+    );
+    if (existing) return publicContactImport(store, existing);
+  }
   store.contactImports.set(record.id, record);
   return publicContactImport(store, record);
 }

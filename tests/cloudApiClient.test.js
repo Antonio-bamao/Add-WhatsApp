@@ -217,6 +217,40 @@ test('uploads contact import audit records with original and parsed artifacts', 
   assert.equal(created.parsedRowCount, 1);
 });
 
+test('uses an extended timeout for large contact import audit uploads', async () => {
+  const client = new CloudApiClient({
+    baseUrl: 'http://127.0.0.1:4110',
+    requestTimeoutMs: 5,
+    contactImportRequestTimeoutMs: 35,
+    fetchImpl: async (url, options = {}) => {
+      assert.equal(url, 'http://127.0.0.1:4110/v1/contact-imports');
+      assert.equal(options.headers.authorization, 'Bearer access-1');
+      assert.equal(options.method, 'POST');
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => resolve(response(201, { id: 'import-slow', parsedRowCount: 16630 })), 20);
+        options.signal.addEventListener('abort', () => {
+          clearTimeout(timer);
+          const error = new Error('aborted');
+          error.name = 'AbortError';
+          reject(error);
+        });
+      });
+    }
+  });
+
+  const created = await client.createContactImport('access-1', {
+    originalFileName: 'large.xlsx',
+    originalFormat: 'xlsx',
+    originalMimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    originalSizeBytes: 12,
+    originalSha256: 'sha256-raw-file',
+    originalBase64: 'cmF3LWNvbnRlbnQ=',
+    parsedRowsGzipBase64: 'gzip-base64'
+  });
+
+  assert.equal(created.parsedRowCount, 16630);
+});
+
 test('renews and releases workspace leases with bearer auth', async () => {
   const requests = [];
   const client = new CloudApiClient({

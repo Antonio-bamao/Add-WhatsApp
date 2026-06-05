@@ -121,6 +121,7 @@ CREATE TABLE IF NOT EXISTS contact_imports (
   original_mime_type TEXT NOT NULL,
   original_size_bytes INTEGER NOT NULL,
   original_sha256 TEXT NOT NULL,
+  client_import_key TEXT,
   original_file_bytes BYTEA NOT NULL,
   columns_json TEXT NOT NULL,
   stats_json TEXT NOT NULL,
@@ -128,6 +129,10 @@ CREATE TABLE IF NOT EXISTS contact_imports (
   parsed_rows_json TEXT NOT NULL,
   created_at TEXT NOT NULL
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS contact_imports_user_client_import_key_idx
+  ON contact_imports (user_id, client_import_key)
+  WHERE client_import_key IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS referral_codes (
   id TEXT PRIMARY KEY,

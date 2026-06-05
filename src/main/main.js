@@ -30,6 +30,7 @@ const {
 const { CloudApiClient, DEFAULT_API_BASE_URL, mapCloudEntitlements } = require('../core/cloudApiClient');
 const { CloudSessionStore } = require('../core/cloudSessionStore');
 const { PendingCloudSyncStore } = require('../core/pendingCloudSyncStore');
+const { PendingContactImportStore } = require('../core/pendingContactImportStore');
 const { createWhatsAppService } = require('./whatsappService');
 const { createCloudDesktopController } = require('./cloudDesktopController');
 const { restoreAuthenticatedSession: restoreAuthenticatedCloudSession } = require('./cloudSessionRestorer');
@@ -78,6 +79,7 @@ let whatsappSessionManager = null;
 let templateStore = null;
 let historyStore = null;
 let pendingCloudSyncStore = null;
+let pendingContactImportStore = null;
 let activeRun = null;
 let proxyMonitorTimer = null;
 let activeProxyBridge = null;
@@ -193,6 +195,7 @@ function restoreAuthenticatedSession() {
     accountContext,
     initializeAccountStores,
     schedulePendingCloudSyncRetry,
+    schedulePendingContactImportAuditRetry,
     mapCloudUser: desktopUserFromCloudUser
   });
 }
@@ -205,6 +208,7 @@ function initializeAccountStores() {
   templateStore = new JsonTemplateStore(accountContext.accountPath('templates.json'));
   historyStore = new JsonHistoryStore(accountContext.accountPath('history', 'runs.json'));
   pendingCloudSyncStore = new PendingCloudSyncStore(accountContext.accountPath('cloud-sync-pending.json'));
+  pendingContactImportStore = new PendingContactImportStore(accountContext.accountPath('contact-import-audit-pending.json'));
   historyStore.markOpenInterrupted();
   restoreLastImport();
 }
@@ -213,6 +217,7 @@ function clearAccountState() {
   templateStore = null;
   historyStore = null;
   pendingCloudSyncStore = null;
+  pendingContactImportStore = null;
   importedRows = [];
   importedSource = null;
   currentImportOptions = { skipChinaNumbers: true };
@@ -385,6 +390,7 @@ ipcMain.handle('auth:register', async (_event, payload = {}) => {
     accountContext.setCurrentUser(user);
     initializeAccountStores();
     schedulePendingCloudSyncRetry();
+    schedulePendingContactImportAuditRetry();
     const auth = authState();
     sendToRenderer('auth:changed', auth);
     return { ok: true, user, auth, cloud: result.cloud, subscription: publicSubscriptionState() };
@@ -405,6 +411,7 @@ ipcMain.handle('auth:login', async (_event, payload = {}) => {
     accountContext.setCurrentUser(user);
     initializeAccountStores();
     schedulePendingCloudSyncRetry();
+    schedulePendingContactImportAuditRetry();
     const auth = authState();
     sendToRenderer('auth:changed', auth);
     return { ok: true, user, auth, cloud: result.cloud, subscription: publicSubscriptionState() };
@@ -865,12 +872,32 @@ function queueContactImportAuditUpload(data, importOptions = {}) {
     return;
   }
   setImmediate(async () => {
-    try {
-      await cloudController.createContactImport(payload);
-    } catch (error) {
-      console.warn('Contact import audit upload failed:', error.message);
-    }
+    await uploadContactImportAuditPayload(payload);
   });
+}
+
+async function uploadContactImportAuditPayload(payload) {
+  if (!cloudController || !payload) return;
+  try {
+    const result = await cloudController.createContactImport(payload);
+    if (result && result.ok && !result.skipped && !result.authRequired) {
+      pendingContactImportStore?.remove(payload.clientImportKey);
+      return;
+    }
+    recordPendingContactImportAudit(payload, result?.error || 'AUTH_REQUIRED');
+  } catch (error) {
+    recordPendingContactImportAudit(payload, error.message);
+    console.warn('Contact import audit upload failed:', error.message);
+  }
+}
+
+function recordPendingContactImportAudit(payload, reason) {
+  if (!pendingContactImportStore || !payload) return;
+  try {
+    pendingContactImportStore.upsert({ payload, reason });
+  } catch (error) {
+    console.warn('Contact import audit pending save failed:', error.message);
+  }
 }
 
 function contactImportAuditPayload(data, importOptions = {}) {
@@ -878,17 +905,24 @@ function contactImportAuditPayload(data, importOptions = {}) {
   const originalFileName = data.fileName || path.basename(data.filePath);
   const originalFormat = path.extname(originalFileName).replace(/^\./, '').toLowerCase() || 'unknown';
   const parsedRows = Array.isArray(data.rows) ? data.rows : [];
+  const originalSha256 = crypto.createHash('sha256').update(fileBuffer).digest('hex');
+  const parsedRowsGzipBase64 = zlib.gzipSync(Buffer.from(JSON.stringify(parsedRows), 'utf8')).toString('base64');
+  const clientImportKey = crypto
+    .createHash('sha256')
+    .update(`${originalSha256}:${parsedRowsGzipBase64}`)
+    .digest('hex');
   return {
+    clientImportKey,
     originalFileName,
     originalFormat,
     originalMimeType: mimeTypeForImportFormat(originalFormat),
     originalSizeBytes: fileBuffer.length,
-    originalSha256: crypto.createHash('sha256').update(fileBuffer).digest('hex'),
+    originalSha256,
     originalBase64: fileBuffer.toString('base64'),
     columns: data.columns || {},
     stats: data.stats || {},
     importOptions,
-    parsedRowsGzipBase64: zlib.gzipSync(Buffer.from(JSON.stringify(parsedRows), 'utf8')).toString('base64')
+    parsedRowsGzipBase64
   };
 }
 
@@ -1143,6 +1177,14 @@ function schedulePendingCloudSyncRetry() {
   });
 }
 
+function schedulePendingContactImportAuditRetry() {
+  setImmediate(() => {
+    retryPendingContactImportAudits().catch(error => {
+      console.warn(`Pending contact import audit retry failed: ${error.message}`);
+    });
+  });
+}
+
 async function retryPendingCloudSyncs() {
   if (!pendingCloudSyncStore || !cloudController) return;
   const items = pendingCloudSyncStore.list();
@@ -1165,6 +1207,26 @@ async function retryPendingCloudSyncs() {
         type: 'cloud:usage-synced',
         message: `已补同步任务 ${item.taskId} 的 ${cloudResult.consumed || item.sentRows.length} 个成功添加额度。`
       });
+    }
+  }
+}
+
+async function retryPendingContactImportAudits() {
+  if (!pendingContactImportStore || !cloudController) return;
+  for (const item of pendingContactImportStore.list()) {
+    if (!item.payload || !item.clientImportKey) {
+      pendingContactImportStore.remove(item.clientImportKey);
+      continue;
+    }
+    try {
+      const result = await cloudController.createContactImport(item.payload);
+      if (result && result.ok && !result.skipped && !result.authRequired) {
+        pendingContactImportStore.remove(item.clientImportKey);
+      } else {
+        pendingContactImportStore.markAttempt(item.clientImportKey, result?.error || 'AUTH_REQUIRED');
+      }
+    } catch (error) {
+      pendingContactImportStore.markAttempt(item.clientImportKey, error.message);
     }
   }
 }

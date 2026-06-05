@@ -3,11 +3,12 @@ const { createEntitlementState, planCatalog } = require('./billingPlans');
 const DEFAULT_API_BASE_URL = 'https://api.addwhatsapp.com';
 
 class CloudApiClient {
-  constructor({ baseUrl = DEFAULT_API_BASE_URL, fetchImpl = globalThis.fetch, requestTimeoutMs = 12000, paymentRequestTimeoutMs = 30000 } = {}) {
+  constructor({ baseUrl = DEFAULT_API_BASE_URL, fetchImpl = globalThis.fetch, requestTimeoutMs = 12000, paymentRequestTimeoutMs = 30000, contactImportRequestTimeoutMs = 60000 } = {}) {
     this.baseUrl = String(baseUrl || DEFAULT_API_BASE_URL).replace(/\/+$/, '');
     this.fetchImpl = fetchImpl;
     this.requestTimeoutMs = Math.max(Number(requestTimeoutMs) || 12000, 1);
     this.paymentRequestTimeoutMs = Math.max(Number(paymentRequestTimeoutMs) || 30000, this.requestTimeoutMs);
+    this.contactImportRequestTimeoutMs = Math.max(Number(contactImportRequestTimeoutMs) || 60000, this.requestTimeoutMs);
     if (typeof this.fetchImpl !== 'function') {
       throw new Error('当前运行环境不支持云端 API 请求。');
     }
@@ -52,7 +53,8 @@ class CloudApiClient {
     return this.request('/v1/contact-imports', {
       method: 'POST',
       headers: { authorization: `Bearer ${accessToken}` },
-      body: payload
+      body: payload,
+      timeoutMs: this.contactImportRequestTimeoutMs
     });
   }
 
