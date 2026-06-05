@@ -1323,7 +1323,6 @@ function restoreLastImport() {
     const data = importContacts(saved.sourceFile, currentImportOptions);
     importedRows = data.rows;
     importedSource = data.filePath;
-    queueContactImportAuditUpload(data, currentImportOptions);
     return data;
   } catch {
     return null;

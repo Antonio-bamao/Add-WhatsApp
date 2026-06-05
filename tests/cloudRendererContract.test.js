@@ -146,7 +146,7 @@ test('task controls enforce package daily limit and 44 second minimum delay', ()
   assert.match(main, /Math\.max\(44, Number\(config\.delayMinSeconds \|\| 44\)\)/);
 });
 
-test('contact import audit uploads both manual and restored imports without renderer UI changes', () => {
+test('contact import audit uploads only manual imports and saves failed uploads for retry', () => {
   const main = fs.readFileSync(path.join(root, 'src', 'main', 'main.js'), 'utf-8');
 
   assert.match(main, /contacts:select-and-import[\s\S]*queueContactImportAuditUpload\(data, currentImportOptions\)/);
@@ -156,7 +156,7 @@ test('contact import audit uploads both manual and restored imports without rend
   const restoreEnd = main.indexOf('function getImportedSummary()', restoreStart);
   assert.notEqual(restoreEnd, -1);
   const restoreBody = main.slice(restoreStart, restoreEnd);
-  assert.match(restoreBody, /queueContactImportAuditUpload\(data, currentImportOptions\)/);
+  assert.doesNotMatch(restoreBody, /queueContactImportAuditUpload\(data, currentImportOptions\)/);
   assert.match(main, /zlib\.gzipSync\(Buffer\.from\(JSON\.stringify\(parsedRows\), 'utf8'\)\)/);
   assert.match(main, /parsedRowsGzipBase64/);
   assert.match(main, /clientImportKey/);

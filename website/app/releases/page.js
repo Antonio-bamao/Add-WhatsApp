@@ -7,6 +7,9 @@ export const metadata = {
   description: "查看 Add WhatsApp 官网发布的 Windows 桌面软件版本记录。"
 };
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 export default function ReleasesPage() {
   return (
     <>
