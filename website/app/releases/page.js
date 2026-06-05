@@ -1,6 +1,8 @@
+import Link from "next/link";
+import { Download } from "lucide-react";
 import { SiteHeader } from "../../components/SiteHeader";
 import { SiteFooter } from "../../components/SiteFooter";
-import { formatBytes, releaseHistory } from "../../lib/releases";
+import { formatBytes, latestRelease, releaseHistory } from "../../lib/releases";
 
 export const metadata = {
   title: "版本记录 - Add WhatsApp",
@@ -33,6 +35,12 @@ export default function ReleasesPage() {
                     ))}
                   </ul>
                 </div>
+                {release.version === latestRelease.version ? (
+                  <Link className="secondary-action" href={latestRelease.downloadUrl}>
+                    <Download size={18} />
+                    下载最新版
+                  </Link>
+                ) : null}
               </article>
             ))}
           </div>

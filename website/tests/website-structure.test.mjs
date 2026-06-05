@@ -70,9 +70,10 @@ describe("public website structure", () => {
     assert.match(downloadPage, /Windows/);
     assert.match(downloadPage, /latestRelease\.downloadUrl/);
     assert.match(releasesPage, /releaseHistory/);
+    assert.match(releasesPage, /latestRelease\.downloadUrl/);
     assert.match(releasesPage, /dynamic = "force-dynamic"/);
     assert.match(releasesPage, /revalidate = 0/);
-    assert.doesNotMatch(releasesPage, /下载最新版/);
+    assert.equal((releasesPage.match(/下载最新版/g) || []).length, 1);
     assert.doesNotMatch(releasesPage, /release\.downloadUrl/);
     assert.doesNotMatch(releasesPage, /下载此版本/);
     assert.doesNotMatch(releasesData, /downloadUrl:\s*latestRelease\.downloadUrl/);
