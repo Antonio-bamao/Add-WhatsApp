@@ -1,6 +1,6 @@
 {
   "name": "add-whatsapp-desktop",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "WhatsApp contact follow-up desktop automation tool",
   "author": "Add WhatsApp",
   "main": "src/main/main.js",
@@ -9,7 +9,11 @@
     "test": "node --test tests/*.test.js",
     "prepare:browser": "node scripts/prepare-browser-bundle.js",
     "prebuild": "npm run prepare:browser",
-    "build": "electron-builder --win portable"
+    "build": "electron-builder --config electron-builder.config.js --win nsis --x64",
+    "publish:update": "node scripts/publish-update-assets.js",
+    "publish:update:artifacts": "node scripts/publish-update-assets.js --phase=artifacts",
+    "publish:update:metadata": "node scripts/publish-update-assets.js --phase=metadata",
+    "verify:update:host": "node scripts/verify-update-host.js"
   },
   "build": {
     "appId": "com.addwhatsapp.desktop",
@@ -33,16 +37,35 @@
       "**/chromium/**"
     ],
     "win": {
-      "target": "portable",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
       "icon": "assets/icon.ico",
-      "signAndEditExecutable": false
+      "artifactName": "Add-WhatsApp-Setup-${version}.${ext}"
     },
     "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowElevation": false,
+      "createDesktopShortcut": "always",
+      "createStartMenuShortcut": true,
+      "deleteAppDataOnUninstall": false,
       "installerIcon": "assets/icon.ico",
       "uninstallerIcon": "assets/icon.ico"
+    },
+    "publish": {
+      "provider": "generic",
+      "url": "https://addwhatsapp.com/downloads/updates/win/stable/"
     }
   },
   "dependencies": {
+    "electron-log": "^5.4.3",
+    "electron-updater": "^6.8.5",
     "libphonenumber-js": "^1.11.19",
     "puppeteer": "24.38.0",
     "qrcode": "^1.5.4",
@@ -53,6 +76,7 @@
   },
   "devDependencies": {
     "electron": "^31.7.7",
-    "electron-builder": "^24.13.3"
+    "electron-builder": "^24.13.3",
+    "yaml": "^2.8.1"
   }
 }

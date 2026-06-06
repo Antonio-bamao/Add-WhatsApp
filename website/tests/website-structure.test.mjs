@@ -120,14 +120,26 @@ describe("public website structure", () => {
   it("publishes the latest download manifest and referenced Windows binaries", () => {
     const updateJson = readJson("public/downloads/latest/update.json");
 
-    assert.equal(updateJson.version, "0.1.4");
-    assert.equal(updateJson.fileName, "Add-WhatsApp.exe");
-    assert.equal(updateJson.downloadUrl, "/downloads/latest/Add-WhatsApp.exe");
+    assert.equal(updateJson.schemaVersion, 1);
+    assert.equal(updateJson.enabled, true);
+    assert.equal(updateJson.version, "0.1.5");
+    assert.equal(updateJson.mandatoryOnNextLaunch, true);
+    assert.deepEqual(updateJson.revokedVersions, []);
+    assert.equal(updateJson.fileName, "Add-WhatsApp-Setup.exe");
+    assert.equal(updateJson.downloadUrl, "/downloads/latest/Add-WhatsApp-Setup.exe");
+    assert.equal(updateJson.updateFeedUrl, "/downloads/updates/win/stable/");
     assert.match(updateJson.releaseDate, /^\d{4}-\d{2}-\d{2}$/);
     assert.match(updateJson.sha256, /^[a-f0-9]{64}$/);
+    assert.match(updateJson.sha512, /^[A-Za-z0-9+/]+={0,2}$/);
 
-    assert.ok(fs.existsSync(path.join(websiteRoot, "public/downloads/latest/Add-WhatsApp.exe")));
-    assert.equal(updateJson.sizeBytes, fs.statSync(path.join(websiteRoot, "public/downloads/latest/Add-WhatsApp.exe")).size);
+    const latestInstaller = path.join(websiteRoot, "public/downloads/latest/Add-WhatsApp-Setup.exe");
+    const stableDir = path.join(websiteRoot, "public/downloads/updates/win/stable");
+    assert.ok(fs.existsSync(latestInstaller));
+    assert.equal(updateJson.sizeBytes, fs.statSync(latestInstaller).size);
+    assert.ok(fs.existsSync(path.join(stableDir, "Add-WhatsApp-Setup-0.1.5.exe")));
+    assert.ok(fs.existsSync(path.join(stableDir, "Add-WhatsApp-Setup-0.1.5.exe.blockmap")));
+    assert.ok(fs.existsSync(path.join(stableDir, "latest.yml")));
+    assert.ok(!fs.existsSync(path.join(websiteRoot, "public/downloads/latest/Add-WhatsApp.exe")));
     const releaseBinaries = listFiles(path.join(websiteRoot, "public/downloads/releases"))
       .filter((file) => file.endsWith(".exe"));
     assert.deepEqual(releaseBinaries, []);

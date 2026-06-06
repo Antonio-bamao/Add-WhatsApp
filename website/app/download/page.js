@@ -24,7 +24,7 @@ export default function DownloadPage() {
               <p className="eyebrow">Official download</p>
               <h1>下载 Add WhatsApp for Windows</h1>
               <p>
-                当前提供 Windows 便携版。文件由官网直链托管，下载入口会指向当前稳定版本，避免浏览器缓存旧包。
+                当前提供 Windows 安装版。首次安装后，软件会自动检查并下载后续稳定更新。
               </p>
               <a className="primary-action large" href={latestRelease.downloadUrl} download>
                 <Download size={21} />
@@ -69,9 +69,9 @@ export default function DownloadPage() {
             <h2>安装说明</h2>
             <ol>
               <li>点击官方下载按钮保存 EXE 文件。</li>
-              <li>双击启动 Add WhatsApp。</li>
-              <li>按软件提示扫码登录 WhatsApp Web。</li>
-              <li>导入表格，设置模板和发送节奏。</li>
+              <li>双击安装，Windows 显示未知发布者时确认继续。</li>
+              <li>从桌面快捷方式启动 Add WhatsApp。</li>
+              <li>旧便携版用户确认数据正常后可删除旧 EXE。</li>
             </ol>
           </article>
         </section>

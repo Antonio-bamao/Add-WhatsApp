@@ -26,6 +26,9 @@ contextBridge.exposeInMainWorld('addWhatsapp', {
   importSyncPackage: password => ipcRenderer.invoke('sync:import', { password }),
   getBootstrapState: () => ipcRenderer.invoke('app:bootstrap'),
   closeChoiceAction: action => ipcRenderer.invoke('app:close-choice-action', action),
+  getUpdateState: () => ipcRenderer.invoke('updates:get-state'),
+  checkForUpdates: () => ipcRenderer.invoke('updates:check'),
+  installPendingUpdate: () => ipcRenderer.invoke('updates:install-pending'),
   importContacts: options => ipcRenderer.invoke('contacts:select-and-import', options),
   exportReport: rows => ipcRenderer.invoke('report:export', { rows }),
   startTask: config => ipcRenderer.invoke('task:start', config),
@@ -54,5 +57,10 @@ contextBridge.exposeInMainWorld('addWhatsapp', {
     const listener = (_event, payload) => callback(payload);
     ipcRenderer.on('auth:changed', listener);
     return () => ipcRenderer.removeListener('auth:changed', listener);
+  },
+  onUpdateStateChanged: callback => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('updates:state-changed', listener);
+    return () => ipcRenderer.removeListener('updates:state-changed', listener);
   }
 });
