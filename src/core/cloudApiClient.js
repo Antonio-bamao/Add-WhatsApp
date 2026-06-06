@@ -163,14 +163,29 @@ class CloudApiClient {
         body: options.body ? JSON.stringify(options.body) : undefined,
         signal: controller ? controller.signal : undefined
       });
-      const payload = await response.json();
       if (!response.ok) {
+        const rawBody = await readRawResponseBody(response);
+        let payload = null;
+        try {
+          payload = rawBody ? JSON.parse(rawBody) : null;
+        } catch {
+          payload = null;
+        }
         const msg = payload && payload.error ? payload.error : `CLOUD_API_${response.status}`;
         const detail = payload && payload.cause ? ` (cause: ${payload.cause})` : '';
-        const error = new Error(`${msg}${detail}`);
+        const fallbackDetail = payload ? '' : formatResponseExcerpt(rawBody);
+        const error = new Error(`${msg}${detail}${fallbackDetail}`);
         error.status = response.status;
         throw error;
       }
+      const contentType = response.headers && typeof response.headers.get === 'function'
+        ? String(response.headers.get('content-type') || '')
+        : '';
+      if (contentType && !/\bjson\b/i.test(contentType)) {
+        const rawBody = typeof response.text === 'function' ? await response.text() : '';
+        return rawBody ? rawBody : null;
+      }
+      const payload = await response.json();
       return payload;
     } catch (error) {
       if (error && error.name === 'AbortError') {
@@ -183,6 +198,24 @@ class CloudApiClient {
       if (timer) clearTimeout(timer);
     }
   }
+}
+
+async function readRawResponseBody(response) {
+  if (response && typeof response.text === 'function') {
+    return response.text();
+  }
+  if (response && typeof response.json === 'function') {
+    const payload = await response.json();
+    return payload === undefined ? '' : JSON.stringify(payload);
+  }
+  return '';
+}
+
+function formatResponseExcerpt(rawBody) {
+  const text = String(rawBody || '').trim();
+  if (!text) return '';
+  const excerpt = text.length > 500 ? `${text.slice(0, 500)}...` : text;
+  return `: ${excerpt}`;
 }
 
 function mapCloudEntitlements(payload = {}) {

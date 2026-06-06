@@ -203,11 +203,18 @@ function normalizeClientImportKey(value) {
   return key.slice(0, 128);
 }
 
+function decodeOriginalFileBytes(body = {}) {
+  if (body.originalGzipBase64) {
+    return zlib.gunzipSync(Buffer.from(String(body.originalGzipBase64), "base64"));
+  }
+  return Buffer.from(String(body.originalBase64 || ""), "base64");
+}
+
 function normalizeContactImportBody(body = {}) {
   const originalFileName = safeFileName(body.originalFileName, "contact-import");
   const originalFormat = normalizeOriginalFormat(body.originalFormat, originalFileName);
   const originalMimeType = String(body.originalMimeType || "application/octet-stream").slice(0, 200);
-  const originalBytes = Buffer.from(String(body.originalBase64 || ""), "base64");
+  const originalBytes = decodeOriginalFileBytes(body);
   if (!originalBytes.length) throw new Error("CONTACT_IMPORT_FILE_REQUIRED");
   if (originalBytes.length > CONTACT_IMPORT_MAX_BYTES) throw new Error("CONTACT_IMPORT_FILE_TOO_LARGE");
   const originalSizeBytes = Number(body.originalSizeBytes || originalBytes.length);

@@ -599,12 +599,83 @@ test('lists billing orders and times out stuck cloud API requests', async () => 
   ]);
 });
 
+test('preserves HTTP status when cloud API returns an HTML error page', async () => {
+  const client = new CloudApiClient({
+    baseUrl: 'http://127.0.0.1:4110',
+    fetchImpl: async () => textResponse(413, '<html><body>Payload Too Large</body></html>', 'text/html')
+  });
+
+  await assert.rejects(
+    () => client.createContactImport('access-1', { originalFileName: 'large.xlsx' }),
+    (error) => {
+      assert.equal(error.status, 413);
+      assert.match(error.message, /CLOUD_API_413/);
+      assert.match(error.message, /Payload Too Large/);
+      assert.doesNotMatch(error.message, /Unexpected token/);
+      return true;
+    }
+  );
+});
+
+test('parses JSON error responses after checking HTTP status', async () => {
+  const client = new CloudApiClient({
+    baseUrl: 'http://127.0.0.1:4110',
+    fetchImpl: async () => textResponse(401, JSON.stringify({ error: 'AUTH_REQUIRED', cause: 'missing_token' }))
+  });
+
+  await assert.rejects(
+    () => client.getEntitlements('expired-token'),
+    (error) => {
+      assert.equal(error.status, 401);
+      assert.equal(error.message, 'AUTH_REQUIRED (cause: missing_token)');
+      return true;
+    }
+  );
+});
+
+test('handles successful non-JSON cloud API responses safely', async () => {
+  const client = new CloudApiClient({
+    baseUrl: 'http://127.0.0.1:4110',
+    fetchImpl: async () => textResponse(204, '', 'text/plain')
+  });
+
+  const payload = await client.request('/v1/no-content');
+
+  assert.equal(payload, null);
+});
+
 function response(status, payload) {
   return {
     ok: status >= 200 && status < 300,
     status,
+    headers: {
+      get(name) {
+        return name.toLowerCase() === 'content-type' ? 'application/json' : null;
+      }
+    },
     async json() {
       return payload;
+    },
+    async text() {
+      return JSON.stringify(payload);
+    }
+  };
+}
+
+function textResponse(status, body, contentType = 'application/json') {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    headers: {
+      get(name) {
+        return name.toLowerCase() === 'content-type' ? contentType : null;
+      }
+    },
+    async json() {
+      return JSON.parse(body);
+    },
+    async text() {
+      return body;
     }
   };
 }

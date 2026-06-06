@@ -863,7 +863,13 @@ ipcMain.handle('contacts:select-and-import', async (_event, options = {}) => {
 });
 
 function queueContactImportAuditUpload(data, importOptions = {}) {
-  if (!cloudController || !data || !data.filePath) return;
+  if (!cloudController || !pendingContactImportStore) {
+    if (!pendingContactImportStore) {
+      console.warn('Contact import audit upload skipped: pending store 未初始化，审计上传被跳过');
+    }
+    return;
+  }
+  if (!data || !data.filePath) return;
   let payload;
   try {
     payload = contactImportAuditPayload(data, importOptions);
@@ -878,21 +884,69 @@ function queueContactImportAuditUpload(data, importOptions = {}) {
 
 async function uploadContactImportAuditPayload(payload) {
   if (!cloudController || !payload) return;
+  const auditMeta = contactImportAuditMeta(payload);
+  sendToRenderer('task:event', {
+    type: 'contact-import-audit:uploading',
+    ...auditMeta,
+    message: `正在上传联系人导入审计：${payload.clientImportKey}`
+  });
+  console.info('Contact import audit upload starting:', auditMeta);
   try {
     const result = await cloudController.createContactImport(payload);
     if (result && result.ok && !result.skipped && !result.authRequired) {
       pendingContactImportStore?.remove(payload.clientImportKey);
+      sendToRenderer('task:event', {
+        type: 'contact-import-audit:uploaded',
+        clientImportKey: payload.clientImportKey,
+        message: `联系人导入审计已上传：${payload.clientImportKey}`
+      });
       return;
     }
-    recordPendingContactImportAudit(payload, result?.error || 'AUTH_REQUIRED');
+    const message = contactImportAuditFailureMessage(result || { error: 'AUTH_REQUIRED' });
+    recordPendingContactImportAudit(payload, contactImportAuditFailureReason(result || { error: 'AUTH_REQUIRED' }));
+    sendToRenderer('task:event', {
+      type: 'contact-import-audit:failed',
+      clientImportKey: payload.clientImportKey,
+      message
+    });
   } catch (error) {
-    recordPendingContactImportAudit(payload, error.message);
-    console.warn('Contact import audit upload failed:', error.message);
+    const message = contactImportAuditFailureMessage(error);
+    recordPendingContactImportAudit(payload, contactImportAuditFailureReason(error));
+    sendToRenderer('task:event', {
+      type: 'contact-import-audit:failed',
+      clientImportKey: payload.clientImportKey,
+      message
+    });
+    console.warn('Contact import audit upload failed:', message);
   }
 }
 
+function contactImportAuditMeta(payload) {
+  return {
+    clientImportKey: payload.clientImportKey,
+    originalSizeBytes: payload.originalSizeBytes,
+    bodyJsonLength: JSON.stringify(payload).length
+  };
+}
+
+function contactImportAuditFailureMessage(error) {
+  const message = error && (error.message || error.error) ? (error.message || error.error) : 'AUTH_REQUIRED';
+  const status = error && error.status ? `HTTP_${error.status}:` : '';
+  return `${status}${message}`;
+}
+
+function contactImportAuditFailureReason(error) {
+  const message = error && (error.message || error.error) ? (error.message || error.error) : 'AUTH_REQUIRED';
+  if (error && error.status) return `HTTP_${error.status}:${message}`;
+  return message;
+}
+
 function recordPendingContactImportAudit(payload, reason) {
-  if (!pendingContactImportStore || !payload) return;
+  if (!pendingContactImportStore) {
+    console.warn('Contact import audit pending store is not initialized: pending store 未初始化，审计失败记录无法保存');
+    return;
+  }
+  if (!payload) return;
   try {
     pendingContactImportStore.upsert({ payload, reason });
   } catch (error) {
@@ -906,6 +960,7 @@ function contactImportAuditPayload(data, importOptions = {}) {
   const originalFormat = path.extname(originalFileName).replace(/^\./, '').toLowerCase() || 'unknown';
   const parsedRows = Array.isArray(data.rows) ? data.rows : [];
   const originalSha256 = crypto.createHash('sha256').update(fileBuffer).digest('hex');
+  const originalGzipBase64 = zlib.gzipSync(fileBuffer).toString('base64');
   const parsedRowsGzipBase64 = zlib.gzipSync(Buffer.from(JSON.stringify(parsedRows), 'utf8')).toString('base64');
   const clientImportKey = crypto
     .createHash('sha256')
@@ -918,7 +973,7 @@ function contactImportAuditPayload(data, importOptions = {}) {
     originalMimeType: mimeTypeForImportFormat(originalFormat),
     originalSizeBytes: fileBuffer.length,
     originalSha256,
-    originalBase64: fileBuffer.toString('base64'),
+    originalGzipBase64,
     columns: data.columns || {},
     stats: data.stats || {},
     importOptions,
