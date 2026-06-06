@@ -34,6 +34,7 @@ contextBridge.exposeInMainWorld('addWhatsapp', {
   getTemplates: () => ipcRenderer.invoke('templates:get'),
   saveTemplates: templates => ipcRenderer.invoke('templates:save', templates),
   listHistory: () => ipcRenderer.invoke('history:list'),
+  getAnalytics: options => ipcRenderer.invoke('analytics:get', options),
   onTaskEvent: callback => {
     const listener = (_event, payload) => callback(payload);
     ipcRenderer.on('task:event', listener);

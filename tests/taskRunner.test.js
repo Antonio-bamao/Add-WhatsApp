@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { isFatalAutomationError, runSendTask } = require('../src/core/taskRunner');
+const { isFatalAutomationError, nextDelayMs, runSendTask } = require('../src/core/taskRunner');
 
 function createFakeClient({ registered = new Set(), failures = new Set() } = {}) {
   return {
@@ -133,6 +133,14 @@ test('stops when daily send limit is reached', async () => {
   assert.equal(result.stats.sent, 1);
   assert.equal(store.progress.lastIndex, 0);
   assert.equal(client.sent.length, 1);
+});
+
+test('random delay stays within the configured range', () => {
+  for (let i = 0; i < 100; i += 1) {
+    const delay = nextDelayMs({ delayMinMs: 44000, delayMaxMs: 60000 });
+    assert.ok(delay >= 44000);
+    assert.ok(delay <= 60000);
+  }
 });
 
 test('stops gracefully when stop signal is set before next row', async () => {

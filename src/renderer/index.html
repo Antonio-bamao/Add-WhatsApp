@@ -96,6 +96,10 @@
             <span class="nav-dot"></span>
             历史报表
           </button>
+          <button class="nav-item" type="button" data-page-target="statisticsPage">
+            <span class="nav-dot"></span>
+            数据统计
+          </button>
           <div class="nav-group expanded">
             <button id="plansToggle" class="nav-item nav-parent" type="button" aria-expanded="true">
               <span class="nav-dot"></span>
@@ -107,7 +111,6 @@
               <button class="subnav-item" type="button" data-page-target="usagePage">用量</button>
               <button class="subnav-item" type="button" data-page-target="quotaPage">额度</button>
               <button class="subnav-item" type="button" data-page-target="billingPage">账单</button>
-              <button class="subnav-item" type="button" data-page-target="referralPage">推荐奖励</button>
             </div>
           </div>
           <button class="nav-item" type="button" data-page-target="accountPage">
@@ -394,6 +397,127 @@
           </section>
         </section>
 
+        <section id="statisticsPage" class="page" data-title="查看发送活跃度、名单质量和任务表现" data-eyebrow="运营概览">
+          <section class="statistics-toolbar">
+            <div>
+              <h3>数据统计</h3>
+              <p>统计当前账号的本地任务记录，失败后重试成功的号码不会重复计数。</p>
+            </div>
+            <div class="statistics-segments" aria-label="统计时间范围">
+              <button type="button" data-statistics-days="30">近 30 天</button>
+              <button type="button" data-statistics-days="90">近 90 天</button>
+              <button class="active" type="button" data-statistics-days="365">过去一年</button>
+            </div>
+          </section>
+
+          <section class="statistics-kpis" aria-label="核心统计">
+            <article class="statistics-kpi success">
+              <span>成功发送</span>
+              <strong id="statisticsSent">0</strong>
+              <small id="statisticsProcessedNote">共处理 0 个号码</small>
+            </article>
+            <article class="statistics-kpi">
+              <span>发送成功率</span>
+              <strong id="statisticsSuccessRate">0%</strong>
+              <small>仅统计成功发送与发送失败</small>
+            </article>
+            <article class="statistics-kpi warning">
+              <span>未注册号码</span>
+              <strong id="statisticsUnregistered">0</strong>
+              <small id="statisticsUnregisteredNote">占处理总量 0%</small>
+            </article>
+            <article class="statistics-kpi">
+              <span>已完成任务</span>
+              <strong id="statisticsTasks">0</strong>
+              <small>当前时间范围内的历史任务</small>
+            </article>
+          </section>
+
+          <section class="panel statistics-activity-panel">
+            <div class="panel-head">
+              <div>
+                <h3 id="statisticsActivityTitle">成功发送活跃度</h3>
+                <p id="statisticsActivityDescription">绿色越深，代表当天成功发送数量越多。悬停可查看当天明细。</p>
+              </div>
+              <div class="statistics-segments compact" aria-label="贡献图指标">
+                <button class="active" type="button" data-statistics-metric="sent">成功发送</button>
+                <button type="button" data-statistics-metric="processed">处理总量</button>
+              </div>
+            </div>
+            <div class="statistics-streaks">
+              <div><strong id="statisticsPeak">0</strong><span id="statisticsPeakLabel">单日最高发送</span></div>
+              <div><strong id="statisticsCurrentStreak">0 天</strong><span>当前连续活跃</span></div>
+              <div><strong id="statisticsLongestStreak">0 天</strong><span>最长连续活跃</span></div>
+              <div><strong id="statisticsActiveDays">0 天</strong><span>累计活跃天数</span></div>
+            </div>
+            <div class="activity-heatmap-shell">
+              <div id="activityMonthLabels" class="activity-month-labels" aria-hidden="true"></div>
+              <div class="activity-heatmap-row">
+                <div class="activity-weekdays" aria-hidden="true"><span>一</span><span></span><span>三</span><span></span><span>五</span><span></span><span>日</span></div>
+                <div id="activityHeatmap" class="activity-heatmap" role="img" aria-label="发送活跃度贡献图"></div>
+              </div>
+              <div class="activity-legend"><span>较少</span><i></i><i></i><i></i><i></i><i></i><span>较多</span></div>
+            </div>
+          </section>
+
+          <section class="statistics-split">
+            <article class="panel">
+              <div class="panel-head">
+                <div>
+                  <h3>近 30 天发送趋势</h3>
+                  <p>按日对比成功发送与异常结果。</p>
+                </div>
+              </div>
+              <div id="statisticsTrend" class="statistics-trend" role="img" aria-label="近 30 天发送趋势"></div>
+              <div class="statistics-chart-legend"><span class="sent">成功发送</span><span class="anomaly">失败、未注册与无效</span></div>
+            </article>
+            <article class="panel">
+              <div class="panel-head">
+                <div>
+                  <h3>处理结果分布</h3>
+                  <p>帮助判断名单质量与任务稳定性。</p>
+                </div>
+              </div>
+              <div id="statisticsOutcomes" class="statistics-progress-list"></div>
+            </article>
+          </section>
+
+          <section class="statistics-bottom">
+            <article class="panel">
+              <div class="panel-head">
+                <div>
+                  <h3>语言分布</h3>
+                  <p>按成功发送记录统计。</p>
+                </div>
+              </div>
+              <div id="statisticsLanguages" class="statistics-progress-list"></div>
+            </article>
+            <article class="panel">
+              <div class="panel-head">
+                <div>
+                  <h3>任务来源表现</h3>
+                  <p>快速找到高质量或异常率较高的客户表格。</p>
+                </div>
+              </div>
+              <div class="table-wrap statistics-source-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>来源文件</th>
+                      <th>成功</th>
+                      <th>异常</th>
+                      <th>成功率</th>
+                    </tr>
+                  </thead>
+                  <tbody id="statisticsSources">
+                    <tr class="empty-row"><td colspan="4">还没有可统计的任务记录。</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </article>
+          </section>
+        </section>
+
         <section id="planPage" class="page" data-title="选择适合你添加节奏的套餐" data-eyebrow="探索方案">
           <section class="plans-toolbar">
             <div>
@@ -401,11 +525,6 @@
               <p>账户余额长期保留；每日可用上限每天 00:00 重置，只控制消耗速度。</p>
             </div>
             <span id="activePlanBadge" class="table-state">当前套餐</span>
-          </section>
-          <section id="planPaymentNotice" class="plan-notice" aria-label="支付维护提示">
-            <strong>当前使用微信 Native 扫码支付。</strong>
-          <span>生成订单后会显示微信支付二维码，付款成功后系统自动给账号入账。</span>
-          <p id="planPaymentState" class="plan-payment-state" role="status"></p>
           </section>
           <div id="planPaymentSlot">
             <section id="manualPaymentPanel" class="panel manual-payment-panel" hidden aria-label="支付订单">
@@ -644,50 +763,6 @@
                     <td>-</td>
                     <td>等待刷新</td>
                   </tr>
-                </tbody>
-              </table>
-            </div>
-          </section>
-        </section>
-
-        <section id="referralPage" class="page" data-title="推荐奖励" data-eyebrow="探索方案">
-          <section class="panel referral-overview">
-            <div>
-              <h3>推荐概览</h3>
-              <p>查看您的推荐统计数据。</p>
-            </div>
-            <strong>--</strong>
-            <span>0 邀请总数</span>
-          </section>
-          <section class="panel referral-code-panel">
-            <h3>我的推荐码</h3>
-            <p>分享您的专属推荐码，邀请好友注册。</p>
-            <strong id="referralCodeText">ADWA2026</strong>
-          </section>
-          <section class="panel referral-code-panel">
-            <h3>推荐链接</h3>
-            <p>复制链接并分享给好友，完成注册即可获得奖励。</p>
-            <code id="referralLinkText">https://add-whatsapp.local/signin?referral=ADWA2026</code>
-          </section>
-          <section class="panel">
-            <div class="panel-head">
-              <div>
-                <h3>推荐记录</h3>
-                <p>后续会展示注册时间、被邀请人和奖励状态。</p>
-              </div>
-            </div>
-            <div class="table-wrap compact-table">
-              <table>
-                <thead>
-                  <tr>
-                    <th>注册时间</th>
-                    <th>被邀请账号</th>
-                    <th>奖励额度</th>
-                    <th>状态</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr class="empty-row"><td colspan="4">暂无推荐记录。</td></tr>
                 </tbody>
               </table>
             </div>

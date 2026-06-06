@@ -56,12 +56,14 @@ test('account settings shows the current database user uid', () => {
 test('pricing page exposes official WeChat Native payment actions instead of maintenance copy', () => {
   const html = fs.readFileSync(path.join(root, 'src', 'renderer', 'index.html'), 'utf-8');
   const renderer = fs.readFileSync(path.join(root, 'src', 'renderer', 'renderer.js'), 'utf-8');
+  const styles = fs.readFileSync(path.join(root, 'src', 'renderer', 'styles.css'), 'utf-8');
   const preload = fs.readFileSync(path.join(root, 'src', 'main', 'preload.js'), 'utf-8');
   const main = fs.readFileSync(path.join(root, 'src', 'main', 'main.js'), 'utf-8');
 
   assert.match(html, /id="quotaPayButton"/);
   assert.match(html, /id="manualPaymentPanel"/);
-  assert.match(html, /微信 Native 扫码支付/);
+  assert.doesNotMatch(html, /当前使用微信 Native 扫码支付|生成订单后会显示微信支付二维码/);
+  assert.doesNotMatch(html, /id="planPaymentNotice"/);
   assert.match(html, /微信支付/);
   assert.match(html, /id="paymentLinkBox"/);
   assert.match(html, /id="paymentCopyButton"/);
@@ -127,7 +129,8 @@ test('pricing page exposes official WeChat Native payment actions instead of mai
   assert.match(renderer, /auth:reset/);
   assert.match(main, /app\.on\('before-quit'/);
   assert.match(main, /whatsappSessionManager\.destroy\(\)/);
-  assert.match(renderer, /lockedFeatureList/);
+  assert.doesNotMatch(renderer, /lockedFeatureList|plan-lock-list|人工充值锁定|导出预检锁定|新建工作台锁定|代理 IP 设置锁定|自定义文案锁定/);
+  assert.match(styles, /\.plan-grid\s*{[^}]*grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\)/s);
   assert.match(html, /assets\/icon\.png/);
   assert.ok(fs.existsSync(path.join(root, 'assets', 'icon.png')));
   assert.ok(fs.existsSync(path.join(root, 'assets', 'icon.ico')));

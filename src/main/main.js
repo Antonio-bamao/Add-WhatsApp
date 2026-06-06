@@ -17,6 +17,7 @@ const { runSendTask } = require('../core/taskRunner');
 const { selectNewlySentRows } = require('../core/taskBilling');
 const { JsonTemplateStore, applyTemplateLimit, templateLanguageCounts } = require('../core/templateStore');
 const { JsonHistoryStore } = require('../core/historyStore');
+const { buildAnalytics } = require('../core/analytics');
 const {
   canOpenSecondaryWorkspace,
   createEntitlementState,
@@ -1129,6 +1130,15 @@ ipcMain.handle('templates:save', async (_event, templates) => {
 ipcMain.handle('history:list', async () => {
   requireAuthenticated();
   return historyStore.list();
+});
+
+ipcMain.handle('analytics:get', async (_event, options = {}) => {
+  requireAuthenticated();
+  return buildAnalytics({
+    progressEntries: collectProgressEntries(),
+    history: historyStore.list(),
+    days: options.days
+  });
 });
 
 async function runTask(config) {

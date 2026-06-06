@@ -8,7 +8,10 @@ const state = {
   activePayment: null,
   paymentRequestInFlight: false,
   taskStartInFlight: false,
-  selectedQuotaCredits: 2000
+  selectedQuotaCredits: 2000,
+  statisticsDays: 365,
+  statisticsMetric: 'sent',
+  analytics: null
 };
 
 const CLOUD_ENTITLEMENT_REFRESH_MIN_INTERVAL_MS = 30 * 1000;
@@ -80,6 +83,27 @@ const elements = {
   templateSaveState: document.getElementById('templateSaveState'),
   refreshHistoryButton: document.getElementById('refreshHistoryButton'),
   historyBody: document.getElementById('historyBody'),
+  statisticsSent: document.getElementById('statisticsSent'),
+  statisticsProcessedNote: document.getElementById('statisticsProcessedNote'),
+  statisticsSuccessRate: document.getElementById('statisticsSuccessRate'),
+  statisticsUnregistered: document.getElementById('statisticsUnregistered'),
+  statisticsUnregisteredNote: document.getElementById('statisticsUnregisteredNote'),
+  statisticsTasks: document.getElementById('statisticsTasks'),
+  statisticsActivityTitle: document.getElementById('statisticsActivityTitle'),
+  statisticsActivityDescription: document.getElementById('statisticsActivityDescription'),
+  statisticsPeak: document.getElementById('statisticsPeak'),
+  statisticsPeakLabel: document.getElementById('statisticsPeakLabel'),
+  statisticsCurrentStreak: document.getElementById('statisticsCurrentStreak'),
+  statisticsLongestStreak: document.getElementById('statisticsLongestStreak'),
+  statisticsActiveDays: document.getElementById('statisticsActiveDays'),
+  activityMonthLabels: document.getElementById('activityMonthLabels'),
+  activityHeatmap: document.getElementById('activityHeatmap'),
+  statisticsTrend: document.getElementById('statisticsTrend'),
+  statisticsOutcomes: document.getElementById('statisticsOutcomes'),
+  statisticsLanguages: document.getElementById('statisticsLanguages'),
+  statisticsSources: document.getElementById('statisticsSources'),
+  statisticsDayButtons: [...document.querySelectorAll('[data-statistics-days]')],
+  statisticsMetricButtons: [...document.querySelectorAll('[data-statistics-metric]')],
   closeModal: document.getElementById('closeModal'),
   closeModalDetail: document.getElementById('closeModalDetail'),
   closeMinimizeButton: document.getElementById('closeMinimizeButton'),
@@ -309,7 +333,6 @@ function renderPlanCards(subscription) {
       ? `${formatCredits(plan.minimumTopUpCredits)} 额度起充`
       : '无需充值';
     const templateLimit = plan.templateLimit ? `自定义文案模板 X${plan.templateLimit}` : '自定义文案模板不限';
-    const lockedItems = lockedFeatureList(plan);
     const canTopUp = Boolean(isHigherPlan && plan.capabilities && plan.capabilities.onlinePayment && Number(plan.minimumTopUpCredits || 0) > 0);
     const actionText = isActive ? '当前套餐' : (isLowerPlan ? '低于当前套餐' : (canTopUp ? '微信支付' : '暂不支持'));
     const disabled = !canTopUp;
@@ -334,9 +357,6 @@ function renderPlanCards(subscription) {
       </ul>
       <div class="plan-feature-list">
         ${(plan.features || []).map(feature => `<span>${escapeHtml(feature)}</span>`).join('')}
-      </div>
-      <div class="plan-lock-list" aria-label="${escapeHtml(plan.name)}锁定功能">
-        ${lockedItems.map(item => `<span>${escapeHtml(item)}</span>`).join('')}
       </div>
       <button class="button ${isActive ? 'secondary' : 'ghost'}" type="button" data-plan-pay="${escapeHtml(plan.id)}" ${disabled ? 'disabled' : ''}>${actionText}</button>
     `;
@@ -363,18 +383,6 @@ function renderPlanCards(subscription) {
     }
     elements.planCards.appendChild(card);
   }
-}
-
-function lockedFeatureList(plan = {}) {
-  const capabilities = plan.capabilities || {};
-  const locks = [];
-  if (!capabilities.onlinePayment) locks.push('人工充值锁定');
-  if (!capabilities.exportPreview) locks.push('导出预检锁定');
-  if (!capabilities.secondaryWorkspace) locks.push('新建工作台锁定');
-  if (!capabilities.proxySettings) locks.push('代理 IP 设置锁定');
-  if (plan.templateLimit) locks.push(`超过 ${formatCredits(plan.templateLimit)} 条自定义文案锁定`);
-  if (plan.id === 'business') locks.push('第 6 个工作台起需人工审核');
-  return locks;
 }
 
 function renderSubscriptionState(subscription) {
@@ -1503,11 +1511,12 @@ function switchPage(pageId) {
   elements.pageTitle.textContent = active.dataset.title;
   elements.pageEyebrow.textContent = active.dataset.eyebrow;
   elements.topbarActions.hidden = !PAGE_ACTIONS.has(pageId);
-  const isPlanPage = ['planPage', 'usagePage', 'quotaPage', 'billingPage', 'referralPage'].includes(pageId);
+  const isPlanPage = ['planPage', 'usagePage', 'quotaPage', 'billingPage'].includes(pageId);
   elements.plansToggle.classList.toggle('active', isPlanPage);
   if (isPlanPage) setPlansExpanded(true);
   if (isPlanPage) refreshCloudEntitlementsIfStale().catch(() => {});
   if (pageId === 'historyPage') loadHistory();
+  if (pageId === 'statisticsPage') loadStatistics();
 }
 
 function setPlansExpanded(expanded) {
@@ -1680,6 +1689,7 @@ function taskEventMessage(event) {
     'row:sent': `第 ${event.row.rowNumber} 行已发送：${languageLabel(event.row.language)}`,
     'row:failed': `第 ${event.row.rowNumber} 行发送失败：${event.error}`,
     'row:fatal': `自动化浏览器已关闭或失联，停在第 ${event.row.rowNumber} 行：${event.error}`,
+    'task:waiting': `等待 ${Math.ceil(Number(event.delayMs || 0) / 1000)} 秒后继续。`,
     'cloud:usage-synced': event.message,
     'cloud:usage-sync-failed': event.message,
     'cloud:workspace-lease-renew-failed': event.message,
@@ -2000,6 +2010,184 @@ async function loadHistory() {
   renderHistory(await window.addWhatsapp.listHistory());
 }
 
+function percent(value, total) {
+  if (!total) return 0;
+  return Math.round((Number(value || 0) / Number(total)) * 1000) / 10;
+}
+
+function renderActivityHeatmap(analytics, metric = state.statisticsMetric) {
+  const daily = Array.isArray(analytics.daily) ? analytics.daily : [];
+  const activity = analytics.activity[metric];
+  const panel = elements.activityHeatmap.closest('.statistics-activity-panel');
+  const processedMode = metric === 'processed';
+  panel.classList.toggle('processed-mode', processedMode);
+  elements.statisticsActivityTitle.textContent = processedMode ? '号码处理活跃度' : '成功发送活跃度';
+  elements.statisticsActivityDescription.textContent = processedMode
+    ? '蓝色越深，代表当天处理的号码总量越多，包含成功、未注册、失败和无效。'
+    : '绿色越深，代表当天成功发送数量越多。悬停可查看当天明细。';
+  elements.statisticsPeak.textContent = formatCredits(activity.peak);
+  elements.statisticsPeakLabel.textContent = processedMode ? '单日最高处理' : '单日最高发送';
+  elements.statisticsCurrentStreak.textContent = `${activity.currentStreak || 0} 天`;
+  elements.statisticsLongestStreak.textContent = `${activity.longestStreak || 0} 天`;
+  elements.statisticsActiveDays.textContent = `${activity.activeDays || 0} 天`;
+  elements.activityHeatmap.innerHTML = '';
+  elements.activityMonthLabels.innerHTML = '';
+  if (!daily.length) return;
+
+  const firstDate = new Date(`${daily[0].date}T00:00:00.000Z`);
+  const startOffset = (firstDate.getUTCDay() + 6) % 7;
+  const totalCells = Math.ceil((startOffset + daily.length) / 7) * 7;
+  const columns = Math.max(1, totalCells / 7);
+  const maxValue = Math.max(0, ...daily.map(item => Number(item[metric] || 0)));
+  elements.activityHeatmap.style.setProperty('--heatmap-columns', columns);
+  elements.activityMonthLabels.style.setProperty('--heatmap-columns', columns);
+
+  for (let index = 0; index < startOffset; index += 1) {
+    const blank = document.createElement('span');
+    blank.className = 'activity-cell blank';
+    elements.activityHeatmap.appendChild(blank);
+  }
+
+  let previousMonth = '';
+  for (const [index, item] of daily.entries()) {
+    const value = Number(item[metric] || 0);
+    const level = value > 0 && maxValue > 0 ? Math.max(1, Math.min(4, Math.ceil((value / maxValue) * 4))) : 0;
+    const cell = document.createElement('span');
+    cell.className = `activity-cell level-${level}`;
+    cell.title = `${item.date}：成功 ${item.sent}，处理 ${item.processed}，未注册 ${item.unregistered}，失败 ${item.failed}`;
+    cell.setAttribute('aria-label', cell.title);
+    elements.activityHeatmap.appendChild(cell);
+
+    const month = item.date.slice(0, 7);
+    if (month !== previousMonth) {
+      const monthLabel = document.createElement('span');
+      const week = Math.floor((startOffset + index) / 7) + 1;
+      monthLabel.style.gridColumn = `${week} / span 4`;
+      monthLabel.textContent = `${Number(item.date.slice(5, 7))}月`;
+      elements.activityMonthLabels.appendChild(monthLabel);
+      previousMonth = month;
+    }
+  }
+
+  for (let index = startOffset + daily.length; index < totalCells; index += 1) {
+    const blank = document.createElement('span');
+    blank.className = 'activity-cell blank';
+    elements.activityHeatmap.appendChild(blank);
+  }
+  elements.activityHeatmap.setAttribute(
+    'aria-label',
+    `${analytics.range.startDate} 至 ${analytics.range.endDate}，累计活跃 ${analytics.summary.activeDays} 天`
+  );
+}
+
+function renderStatisticsTrend(daily) {
+  const recent = (Array.isArray(daily) ? daily : []).slice(-30);
+  elements.statisticsTrend.innerHTML = '';
+  const peak = Math.max(1, ...recent.flatMap(item => [
+    Number(item.sent || 0),
+    Number(item.failed || 0) + Number(item.unregistered || 0) + Number(item.invalid || 0)
+  ]));
+  for (const item of recent) {
+    const anomalies = Number(item.failed || 0) + Number(item.unregistered || 0) + Number(item.invalid || 0);
+    const group = document.createElement('div');
+    group.className = 'statistics-trend-day';
+    group.title = `${item.date}：成功 ${item.sent}，异常 ${anomalies}`;
+    group.innerHTML = `
+      <i class="sent" style="--bar-height:${Math.max(2, percent(item.sent, peak))}%"></i>
+      <i class="anomaly" style="--bar-height:${Math.max(2, percent(anomalies, peak))}%"></i>
+    `;
+    elements.statisticsTrend.appendChild(group);
+  }
+}
+
+function renderProgressRows(container, rows, maxValue) {
+  container.innerHTML = '';
+  if (!rows.length) {
+    container.innerHTML = '<p class="statistics-empty">还没有可统计的数据。</p>';
+    return;
+  }
+  for (const row of rows) {
+    const item = document.createElement('div');
+    item.className = 'statistics-progress-row';
+    item.innerHTML = `
+      <span>${escapeHtml(row.label)}</span>
+      <div><i class="${row.tone || ''}" style="width:${percent(row.value, maxValue)}%"></i></div>
+      <strong>${formatCredits(row.value)}</strong>
+    `;
+    container.appendChild(item);
+  }
+}
+
+function renderStatistics(analytics) {
+  state.analytics = analytics;
+  const summary = analytics.summary || {};
+  setText('statisticsSent', formatCredits(summary.sent));
+  elements.statisticsProcessedNote.textContent = `共处理 ${formatCredits(summary.processed)} 个号码`;
+  elements.statisticsSuccessRate.textContent = `${Number(summary.successRate || 0).toFixed(1)}%`;
+  setText('statisticsUnregistered', formatCredits(summary.unregistered));
+  elements.statisticsUnregisteredNote.textContent = `占处理总量 ${percent(summary.unregistered, summary.processed).toFixed(1)}%`;
+  setText('statisticsTasks', formatCredits(summary.completedTasks));
+
+  renderActivityHeatmap(analytics);
+  renderStatisticsTrend(analytics.daily);
+  renderProgressRows(elements.statisticsOutcomes, [
+    { label: '成功发送', value: summary.sent || 0 },
+    { label: '未注册', value: summary.unregistered || 0, tone: 'warning' },
+    { label: '发送失败', value: summary.failed || 0, tone: 'danger' },
+    { label: '无效/重复', value: summary.invalid || 0, tone: 'info' }
+  ], Math.max(1, summary.processed || 0));
+  const languages = (analytics.languages || []).map(item => ({
+    label: languageLabel(item.language),
+    value: item.count
+  }));
+  renderProgressRows(
+    elements.statisticsLanguages,
+    languages,
+    Math.max(1, ...languages.map(item => item.value))
+  );
+
+  elements.statisticsSources.innerHTML = '';
+  if (!(analytics.sources || []).length) {
+    elements.statisticsSources.innerHTML = '<tr class="empty-row"><td colspan="4">还没有可统计的任务记录。</td></tr>';
+  } else {
+    for (const source of analytics.sources) {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td title="${escapeHtml(source.sourceFile)}">${escapeHtml(source.sourceFile)}</td>
+        <td>${formatCredits(source.sent)}</td>
+        <td>${formatCredits(source.anomalies)}</td>
+        <td><strong class="${source.successRate < 80 ? 'statistics-rate-warning' : 'statistics-rate-good'}">${Number(source.successRate || 0).toFixed(1)}%</strong></td>
+      `;
+      elements.statisticsSources.appendChild(tr);
+    }
+  }
+}
+
+async function loadStatistics() {
+  if (!state.auth.authenticated) return;
+  try {
+    renderStatistics(await window.addWhatsapp.getAnalytics({ days: state.statisticsDays }));
+  } catch (error) {
+    addLog(error.message || '数据统计加载失败。', 'error');
+  }
+}
+
+function selectStatisticsDays(days) {
+  state.statisticsDays = Number(days) || 365;
+  for (const button of elements.statisticsDayButtons) {
+    button.classList.toggle('active', Number(button.dataset.statisticsDays) === state.statisticsDays);
+  }
+  loadStatistics();
+}
+
+function selectStatisticsMetric(metric) {
+  state.statisticsMetric = metric === 'processed' ? 'processed' : 'sent';
+  for (const button of elements.statisticsMetricButtons) {
+    button.classList.toggle('active', button.dataset.statisticsMetric === state.statisticsMetric);
+  }
+  if (state.analytics) renderActivityHeatmap(state.analytics);
+}
+
 async function loadAuthenticatedWorkspace(bootstrap = null) {
   const data = bootstrap || await window.addWhatsapp.getBootstrapState();
   if (data.auth) applyAuthState(data.auth);
@@ -2114,6 +2302,12 @@ elements.resetWhatsAppButton.addEventListener('click', resetWhatsAppLoginFromTas
 elements.stopButton.addEventListener('click', stopTask);
 elements.saveTemplatesButton.addEventListener('click', saveTemplates);
 elements.refreshHistoryButton.addEventListener('click', loadHistory);
+for (const button of elements.statisticsDayButtons) {
+  button.addEventListener('click', () => selectStatisticsDays(button.dataset.statisticsDays));
+}
+for (const button of elements.statisticsMetricButtons) {
+  button.addEventListener('click', () => selectStatisticsMetric(button.dataset.statisticsMetric));
+}
 elements.closeMinimizeButton.addEventListener('click', () => handleCloseChoice('minimize'));
 elements.closeQuitButton.addEventListener('click', () => handleCloseChoice('quit'));
 elements.closeCancelButton.addEventListener('click', () => handleCloseChoice('cancel'));
@@ -2172,7 +2366,11 @@ for (const button of elements.templateAddButtons) {
 }
 
 window.addWhatsapp.onTaskEvent(handleTaskEvent);
-window.addWhatsapp.onHistoryUpdated(renderHistory);
+window.addWhatsapp.onHistoryUpdated(items => {
+  renderHistory(items);
+  const statisticsPage = document.getElementById('statisticsPage');
+  if (statisticsPage && statisticsPage.classList.contains('active-page')) loadStatistics();
+});
 window.addWhatsapp.onShowCloseChoice(showCloseModal);
 window.addWhatsapp.onAuthChanged(auth => {
   applyAuthState(auth);

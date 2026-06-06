@@ -671,7 +671,7 @@ function createFakeStorage() {
 
 function createFakeDocument() {
   const byId = new Map();
-  const pageIds = ['importPage', 'taskPage', 'templatePage', 'historyPage', 'planPage', 'usagePage', 'quotaPage', 'billingPage', 'referralPage', 'accountPage'];
+  const pageIds = ['importPage', 'taskPage', 'templatePage', 'historyPage', 'statisticsPage', 'planPage', 'usagePage', 'quotaPage', 'billingPage', 'accountPage'];
   const pageMeta = {
     quotaPage: { title: '额度余额和充值规则', eyebrow: '探索方案' },
     planPage: { title: '选择适合你添加节奏的套餐', eyebrow: '探索方案' }

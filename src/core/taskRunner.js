@@ -17,6 +17,14 @@ function nextDelayMs(config = {}) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
+async function sleepBetweenRows(config, onEvent, reason) {
+  const delayMs = nextDelayMs(config);
+  if (delayMs > 0) {
+    onEvent({ type: 'task:waiting', delayMs, reason });
+  }
+  await sleep(delayMs);
+}
+
 function chooseTemplate(language, templates = DEFAULT_TEMPLATES, random = Math.random) {
   const pool = templates[language] && templates[language].length ? templates[language] : templates.en;
   return pool[Math.floor(random() * pool.length)];
@@ -110,7 +118,7 @@ async function runSendTask({
         stats.processed += 1;
         progressStore.save(progress);
         onEvent({ type: 'row:unregistered', index, row });
-        await sleep(nextDelayMs(config));
+        await sleepBetweenRows(config, onEvent, 'unregistered');
         continue;
       }
 
@@ -129,7 +137,7 @@ async function runSendTask({
       sentToday += 1;
       progressStore.save(progress);
       onEvent({ type: 'row:sent', index, row, message });
-      await sleep(nextDelayMs(config));
+      await sleepBetweenRows(config, onEvent, 'sent');
     } catch (error) {
       const fatal = isFatalAutomationError(error);
       progress.failed.push({
@@ -149,7 +157,7 @@ async function runSendTask({
       if (fatal) {
         return { reason: 'automation-lost', stats, progress };
       }
-      await sleep(nextDelayMs(config));
+      await sleepBetweenRows(config, onEvent, 'failed');
     }
   }
 
