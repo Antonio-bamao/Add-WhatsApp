@@ -56,6 +56,12 @@ const {
 
 const PROXY_MONITOR_INTERVAL_MS = 5 * 60 * 1000;
 const CLOUD_LEASE_RENEW_INTERVAL_MS = 30 * 1000;
+const CONTACT_IMPORT_AUDIT_DEFAULT_MAX_BODY_JSON_LENGTH = 28 * 1024 * 1024;
+const CONTACT_IMPORT_AUDIT_MAX_BODY_JSON_LENGTH = Number(
+  process.env.ADD_WHATSAPP_CONTACT_IMPORT_AUDIT_MAX_BODY_BYTES || CONTACT_IMPORT_AUDIT_DEFAULT_MAX_BODY_JSON_LENGTH
+);
+const CONTACT_IMPORT_AUDIT_RETRY_BASE_MS = 60 * 1000;
+const CONTACT_IMPORT_AUDIT_RETRY_MAX_MS = 60 * 60 * 1000;
 const workspaceId = parseWorkspaceId(process.argv);
 const workspaceProxyServer = parseWorkspaceProxy(process.argv);
 if (workspaceId) {
@@ -885,6 +891,14 @@ function queueContactImportAuditUpload(data, importOptions = {}) {
 async function uploadContactImportAuditPayload(payload) {
   if (!cloudController || !payload) return;
   const auditMeta = contactImportAuditMeta(payload);
+  if (auditMeta.bodyJsonLength > CONTACT_IMPORT_AUDIT_MAX_BODY_JSON_LENGTH) {
+    handleContactImportAuditUploadFailure(payload, {
+      reason: 'PERMANENT_PAYLOAD_TOO_LARGE',
+      message: '该名单过大，请拆分后再导入'
+    });
+    console.warn('Contact import audit payload too large:', auditMeta);
+    return;
+  }
   sendToRenderer('task:event', {
     type: 'contact-import-audit:uploading',
     ...auditMeta,
@@ -902,22 +916,9 @@ async function uploadContactImportAuditPayload(payload) {
       });
       return;
     }
-    const message = contactImportAuditFailureMessage(result || { error: 'AUTH_REQUIRED' });
-    recordPendingContactImportAudit(payload, contactImportAuditFailureReason(result || { error: 'AUTH_REQUIRED' }));
-    sendToRenderer('task:event', {
-      type: 'contact-import-audit:failed',
-      clientImportKey: payload.clientImportKey,
-      message
-    });
+    handleContactImportAuditUploadFailure(payload, result || { error: 'AUTH_REQUIRED' });
   } catch (error) {
-    const message = contactImportAuditFailureMessage(error);
-    recordPendingContactImportAudit(payload, contactImportAuditFailureReason(error));
-    sendToRenderer('task:event', {
-      type: 'contact-import-audit:failed',
-      clientImportKey: payload.clientImportKey,
-      message
-    });
-    console.warn('Contact import audit upload failed:', message);
+    handleContactImportAuditUploadFailure(payload, error);
   }
 }
 
@@ -929,16 +930,51 @@ function contactImportAuditMeta(payload) {
   };
 }
 
-function contactImportAuditFailureMessage(error) {
+function handleContactImportAuditUploadFailure(payload, error) {
+  const reason = contactImportAuditFailureReason(error);
+  recordPendingContactImportAudit(payload, reason);
+  sendToRenderer('task:event', {
+    type: 'contact-import-audit:failed',
+    clientImportKey: payload.clientImportKey,
+    message: contactImportAuditFailureMessage(error, reason)
+  });
+  if (reason.startsWith('PERMANENT_')) {
+    console.warn('Contact import audit upload failed permanently: 需人工处理（体积/参数），自动重试不会成功', reason);
+    return;
+  }
+  console.warn('Contact import audit upload failed:', reason);
+}
+
+function contactImportAuditFailureMessage(error, reason = contactImportAuditFailureReason(error)) {
   const message = error && (error.message || error.error) ? (error.message || error.error) : 'AUTH_REQUIRED';
-  const status = error && error.status ? `HTTP_${error.status}:` : '';
-  return `${status}${message}`;
+  if (reason === 'PERMANENT_PAYLOAD_TOO_LARGE') {
+    return '该名单过大，请拆分后再导入';
+  }
+  if (reason.startsWith('PERMANENT_')) {
+    return `联系人导入审计上传失败（${reason}）：需人工处理（体积/参数），自动重试不会成功。`;
+  }
+  return `联系人导入审计上传失败（${reason}）：${message}，已保存到本地待重试。`;
 }
 
 function contactImportAuditFailureReason(error) {
+  if (error && error.reason) return String(error.reason);
   const message = error && (error.message || error.error) ? (error.message || error.error) : 'AUTH_REQUIRED';
-  if (error && error.status) return `HTTP_${error.status}:${message}`;
-  return message;
+  const status = contactImportAuditFailureStatus(error);
+  if (status) {
+    const prefix = contactImportAuditIsPermanentFailure(status) ? `PERMANENT_HTTP_${status}` : `HTTP_${status}`;
+    return `${prefix}:${message}`;
+  }
+  return `NETWORK:${message}`;
+}
+
+function contactImportAuditFailureStatus(error) {
+  if (error && error.status) return Number(error.status);
+  if (error && error.authRequired) return 401;
+  return null;
+}
+
+function contactImportAuditIsPermanentFailure(status) {
+  return [400, 413, 415, 422].includes(Number(status));
 }
 
 function recordPendingContactImportAudit(payload, reason) {
@@ -964,7 +1000,7 @@ function contactImportAuditPayload(data, importOptions = {}) {
   const parsedRowsGzipBase64 = zlib.gzipSync(Buffer.from(JSON.stringify(parsedRows), 'utf8')).toString('base64');
   const clientImportKey = crypto
     .createHash('sha256')
-    .update(`${originalSha256}:${parsedRowsGzipBase64}`)
+    .update(`${originalSha256}:${parsedRows.length}`)
     .digest('hex');
   return {
     clientImportKey,
@@ -1267,8 +1303,15 @@ async function retryPendingCloudSyncs() {
 }
 
 async function retryPendingContactImportAudits() {
-  if (!pendingContactImportStore || !cloudController) return;
-  for (const item of pendingContactImportStore.list()) {
+  if (!pendingContactImportStore) {
+    console.warn('Pending contact import audit retry skipped: pending store 未初始化，审计重试被跳过');
+    return;
+  }
+  if (!cloudController) return;
+  const now = Date.now();
+  for (const item of pendingContactImportStore.list({ retryableOnly: true })) {
+    if (item.giveUp || String(item.reason || '').startsWith('PERMANENT_')) continue;
+    if (!shouldRetryPendingContactImportAudit(item, now)) continue;
     if (!item.payload || !item.clientImportKey) {
       pendingContactImportStore.remove(item.clientImportKey);
       continue;
@@ -1278,12 +1321,27 @@ async function retryPendingContactImportAudits() {
       if (result && result.ok && !result.skipped && !result.authRequired) {
         pendingContactImportStore.remove(item.clientImportKey);
       } else {
-        pendingContactImportStore.markAttempt(item.clientImportKey, result?.error || 'AUTH_REQUIRED');
+        pendingContactImportStore.markAttempt(
+          item.clientImportKey,
+          contactImportAuditFailureReason(result || { error: 'AUTH_REQUIRED' })
+        );
       }
     } catch (error) {
-      pendingContactImportStore.markAttempt(item.clientImportKey, error.message);
+      pendingContactImportStore.markAttempt(item.clientImportKey, contactImportAuditFailureReason(error));
     }
   }
+}
+
+function shouldRetryPendingContactImportAudit(item, now = Date.now()) {
+  if (!item || item.giveUp || String(item.reason || '').startsWith('PERMANENT_')) return false;
+  const updatedAt = Date.parse(item.updatedAt || item.createdAt || '');
+  if (!Number.isFinite(updatedAt)) return true;
+  return now - updatedAt >= contactImportAuditRetryDelayMs(item.attempts);
+}
+
+function contactImportAuditRetryDelayMs(attempts = 0) {
+  const normalizedAttempts = Math.max(0, Math.min(Number(attempts || 0), 6));
+  return Math.min(CONTACT_IMPORT_AUDIT_RETRY_MAX_MS, CONTACT_IMPORT_AUDIT_RETRY_BASE_MS * (2 ** normalizedAttempts));
 }
 
 function progressPathForSource(sourceFile) {

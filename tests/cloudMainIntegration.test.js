@@ -847,6 +847,9 @@ function response(status, payload) {
     status,
     async json() {
       return payload;
+    },
+    async text() {
+      return JSON.stringify(payload);
     }
   };
 }

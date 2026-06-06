@@ -103,3 +103,30 @@
 - 验证：`node --test tests\whatsappService.test.js` 13/13；根项目 `npm test` 155/155；`npm run prepare:browser` 成功；`npm run build` 成功，新 `dist\Add WhatsApp 0.1.3.exe` 为 `200437877` 字节，`dist\win-unpacked\resources\chromium\chrome-win64\chrome.exe` 存在。
 - 预防：以后发布 Windows EXE 前必须校验 `resources\chromium\chrome-win64\chrome.exe` 存在；遇到用户机器 `about:blank` 时先区分网络/代理超时和内置浏览器资源缺失，不再建议用户安装 Chrome 作为默认解决方案。
 - 状态：fixed in code and packaged; 仍需在无 Chrome/Edge 的干净 Windows 环境做最终手动扫码验收。
+
+## 2026-06-06: 官网版本页下载按钮回归失误
+- 现象：用户要求“不要让用户下载到旧版本”，但版本记录页先出现每个历史版本卡片都有“下载最新版”按钮；后续修复又把最新版卡片上的下载按钮也删掉，导致 `/releases` 页面没有用户可点的最新版下载入口。
+- 根因：发布页把“历史版本不能下载”和“版本记录页是否需要下载入口”耦合在同一处渲染逻辑中处理。第一次只改文案和 URL，导致旧版本卡片仍显示按钮；第二次又按“版本页不显示下载按钮”过度修复，漏掉最新版应保留入口的产品要求。
+- 处理：`website/app/releases/page.js` 只在 `release.version === latestRelease.version` 时渲染 `latestRelease.downloadUrl` 按钮；`releaseHistory` 的旧版本对象不携带 `downloadUrl`；结构测试断言 releases 页面引用 latest 下载地址、恰好保留一个 `下载最新版` 文案，同时禁止 `release.downloadUrl` 和旧版本数据层映射回归。
+- 验证：`npm test --prefix website` 6/6；`npm run build --prefix website` 成功；构建产物只包含 1 个 `下载最新版`；生产服务器文件列表只剩 `website/public/downloads/latest/Add-WhatsApp.exe` 和 `website/public/downloads/latest/update.json`。
+- 预防：以后涉及“禁用旧版本下载”时必须用测试表达完整产品口径：旧版本卡片无按钮，最新版卡片有且只有一个按钮，所有按钮都指向 `/downloads/latest/Add-WhatsApp.exe`。不要只用 `curl | grep` 的文本计数判断浏览器可见按钮数量，因为 Next 可能在 HTML 与 hydration/RSC 数据里重复同一文案。
+- 状态：fixed and recorded; 线上仍需以部署后的浏览器页面和 `latest/update.json` 校验为准。
+
+## 2026-06-06: 大名单上传审计被 Nginx 413 拦截且桌面端丢失真实状态码
+- 现象：用户上传 1.66 万行名单后，桌面端预检能看到 `总行数 16630`、`有效号码 3290`、`无效/重复 13340`，但后台“上传名单审计”没有对应记录。历史上还出现过后台行数为 0 或重复 SHA256 的记录，造成一开始容易误判为解析、去重、幂等或后台分页问题。
+- 根因 1：`api.addwhatsapp.com` 的 Nginx 未设置 `client_max_body_size`，默认约 1MB；桌面端 `POST /v1/contact-imports` 的审计 body 包含原始 xlsx base64 和 parsed rows gzip base64，1.66 万行时请求体超过 1MB，Nginx 在到达 Node API 前直接返回 413。Nginx `error.log` 明确出现 `client intended to send too large body`，样本请求大小约 `1368442`、`1435872` 字节。
+- 根因 2：桌面端 `src/core/cloudApiClient.js` 的 `request()` 旧逻辑在判断 `response.ok` 前无条件 `await response.json()`。Nginx 返回 413/502/504 HTML 错误页时会先抛 `Unexpected token '<'`，真实 HTTP 状态码被吞掉，上层无法区分请求体过大、网关超时、鉴权失败或网络错误。
+- 根因 3：联系人导入审计上传链路原本观测性不足。`queueContactImportAuditUpload()` 使用 `setImmediate` 异步发送，失败只 `console.warn`；pending store 未初始化时曾存在静默 return 风险；失败 reason 没有稳定带 `HTTP_413` / `HTTP_504` / `NETWORK:*` 等分类，导致事后无法从本地 pending 文件判断失败原因。
+- 排查过程：先从后台缺记录和桌面预检截图入手，确认导入解析本身能得到 16630 行；随后查 Nginx `access.log` 和 `error.log`，发现旧记录里大量 `POST /v1/contact-imports` 对应 `client intended to send too large body`。这证明请求被 Nginx 拦在 Node API 之前，不是 PostgreSQL、后台列表或服务端幂等没有写入。
+- 早期误区 1：只用默认 access log 查看时，看到的是 `response_bytes`，不是上传请求体大小，无法判断真实 body 大小。后来在 `/etc/nginx/nginx.conf` 的 `http {}` 中新增 `log_format api '$remote_addr [$time_local] "$request" status=$status request_length=$request_length body_sent=$body_bytes_sent';`，并在 `api.addwhatsapp.com` 的 443 `server {}` 中加 `access_log /var/log/nginx/access.log api;`，reload 后才可用 `request_length` 回归确认。
+- 早期误区 2：用户曾把 `log_format ...` 和 `access_log ...` 当作 shell 命令直接执行，终端报 `Command 'log_format' not found` / `access_log: command not found`。复盘结论：这些是 Nginx 配置语句，必须写入配置文件后 `nginx -t` 和 `systemctl reload nginx`，不是 Linux 命令。
+- 早期误区 3：备份文件 `api.addwhatsapp.com.bak` 一度放在 `/etc/nginx/sites-enabled` 下，导致 `nginx -t` 出现 duplicate/conflicting server name warning。处理方式是把 `.bak` 移出 `sites-enabled`，只保留真实站点配置，再校验 reload。
+- 服务端/Nginx 修复：在 `api.addwhatsapp.com` 的 443 `server {}` 中设置 `client_max_body_size 32m;`，并补齐 `proxy_read_timeout 75s;`、`proxy_send_timeout 75s;`、`proxy_connect_timeout 75s;`，确保大于桌面端 60s 客户端超时。每次修改后必须先 `nginx -t`，再 `systemctl reload nginx`，不能 restart。
+- 桌面端修复：`cloudApiClient.request()` 改为先读 `response.text()`，非 2xx 时尝试 JSON.parse，失败则用 `CLOUD_API_<status>: <截断文本>` 抛错，并始终设置 `error.status=response.status`；保留 `AbortError -> CLOUD_API_TIMEOUT(status=504)`。这样 413/504/401 不再被 HTML JSON 解析错误掩盖。
+- 审计链路修复：`uploadContactImportAuditPayload()` 增加 `contact-import-audit:uploading/uploaded/failed` 的 `task:event`，失败 message 带状态码；pending reason 记录 `PERMANENT_HTTP_413:*`、`HTTP_504:*`、`HTTP_401:*` 或 `NETWORK:*`；`400/413/415/422` 标记为永久失败并提示“需人工处理（体积/参数），自动重试不会成功”；`401/504/网络错误` 保持可重试。`queueContactImportAuditUpload()` 和 `recordPendingContactImportAudit()` 在 pending store 未初始化时明确 `console.warn`。
+- 请求体瘦身修复：桌面端 `contactImportAuditPayload()` 不再发送未压缩的 `originalBase64`，改发 `originalGzipBase64 = gzip(fileBuffer).base64`；`clientImportKey` 改为稳定输入 `sha256(originalSha256:parsedRows.length)`，不依赖 gzip 输出字节。PostgreSQL runtime 的 `normalizeContactImportBody()` 优先解码 `originalGzipBase64`，回退兼容旧客户端 `originalBase64`，解码后仍校验 SHA256、25MB 上限，并写入 `original_file_bytes(BYTEA)`。
+- 重试/兜底修复：`PendingContactImportStore` 对 `PERMANENT_` 或 `attempts >= 8` 的记录标记 `giveUp=true`，保留文件但不再自动重试；`retryPendingContactImportAudits()` 跳过 `giveUp/PERMANENT_` 并按 attempts 做指数退避，避免每次启动全量重发。发送前新增本地 body 预检，默认 `28MB`，超限时不发网络请求，直接 pending `PERMANENT_PAYLOAD_TOO_LARGE` 并通过 UI 提示“该名单过大，请拆分后再导入”。
+- 端到端验证补强：新增真实链路脚本 `scripts/contact-import-e2e.js`，支持登录真实/测试账号、构造 16630 行 xlsx 风格 payload、打印 JSON body 字节数、POST 到真实域名 `/v1/contact-imports`，再用 admin 接口查 `clientImportKey` 和 `parsedRowCount=16630`。脚本必须经过 Nginx 域名，不直连 Node 端口。
+- 最终线上验证：Nginx 配置 reload 后，`grep 'POST /v1/contact-imports' /var/log/nginx/access.log | grep -oE 'status=[0-9]{3}|request_length=[0-9]+' | paste - -` 显示新请求 `status=201 request_length=442876`、`status=201 request_length=615442`。后台“上传名单审计”已能看到 16630 行记录，`POST /v1/contact-imports` 不再出现 413/504，本轮用户确认“这个 bug 总算是完美解决了”。
+- 预防：以后处理大文件/审计上传问题，必须同时查客户端异常、pending reason、Nginx `error.log`、Nginx access log 的 `status/request_length`、API 日志和后台记录；不能只看桌面 UI 或默认 access log 的 `response_bytes`。Nginx 配置项必须写入配置文件并 `nginx -t && systemctl reload nginx`，不能在 shell 直接执行配置语句。
+- 状态：fixed and recorded。

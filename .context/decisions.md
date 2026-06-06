@@ -216,3 +216,26 @@
 - 背景：旧版本可能包含已修复的 WhatsApp 登录、浏览器路径、支付或风控问题；如果用户从版本记录页下载旧包，会把已经解决的问题重新带回售后。
 - 理由：对普通用户来说，官网应只提供当前稳定包；历史版本只用于说明发布记录和回溯变更，不作为可回退下载入口。
 - 约束：发布新版本时必须替换 `website/public/downloads/latest/Add-WhatsApp.exe`，更新 `latest/update.json`、`website/lib/releases.js` 和版本页说明；`website/public/downloads/releases` 下不得保留 `.exe` 旧包。
+
+## 2026-06-06: 版本记录页仅最新版卡片保留下载按钮
+
+- 决策：`/releases` 版本记录页保留历史版本说明，但只有当前 `latestRelease.version` 对应的卡片显示 `下载最新版` 按钮；旧版本卡片不显示任何下载按钮。
+- 背景：用户的真实要求是“不要让用户下载到旧版本”，不是“版本记录页完全没有下载入口”。此前修复把旧版本按钮和最新版按钮一起移除，造成最新版也无法从版本页下载。
+- 理由：用户可以在官网首页、下载页和版本页的最新版本位置下载当前稳定包；历史卡片只用于说明变更，不给旧包入口，避免已修复缺陷回流。
+- 约束：`website/lib/releases.js` 中旧版本对象不得带 `downloadUrl`；`website/app/releases/page.js` 只能用 `latestRelease.downloadUrl` 渲染最新版按钮；结构测试必须断言“恰好一个 `下载最新版`”并禁止 `release.downloadUrl` 回归。
+
+## 2026-06-06: 官网下载链路以自有服务器 latest 文件为准
+
+- 决策：当前官网软件下载链路不使用 GitHub Releases 附件作为用户下载源；官网按钮指向站内 `/downloads/latest/Add-WhatsApp.exe`，由生产服务器上的 `website/public/downloads/latest/Add-WhatsApp.exe` 提供。
+- 背景：用户询问打包后 EXE 是先推 GitHub Releases，还是直接推官网服务器。实际当前实现是把 EXE 作为 `website/public/downloads/latest` 下的仓库文件推到 GitHub main，再由生产服务器 `git pull` 拉取并通过官网域名提供下载。
+- 理由：站内 latest 路径让下载按钮、update manifest、SHA256 和官网部署保持同一套可控文件；旧版本不会因为 GitHub Releases 或历史目录残留而继续暴露给普通用户。
+- 约束：每次发布后必须在生产服务器执行 pull/build/restart/reload，并用 `find website/public/downloads -maxdepth 4 -type f -print` 确认只保留 latest EXE 和 update.json；线上最终校验用 `https://addwhatsapp.com/downloads/latest/update.json` 与 `https://addwhatsapp.com/downloads/latest/Add-WhatsApp.exe`。
+
+## 2026-06-06: 联系人导入审计大文件链路采用压缩上传 + Nginx 余量 + 本地预检
+
+- 决策：`POST /v1/contact-imports` 的桌面端 payload 不再发送未压缩原始文件 `originalBase64`，改为发送 `originalGzipBase64`；服务端优先解压新字段并回退兼容旧 `originalBase64`。`clientImportKey` 使用稳定输入 `sha256(originalSha256:parsedRows.length)`，不依赖 gzip 输出字节。
+- 背景：1.66 万行名单审计请求曾因 Nginx 默认 `client_max_body_size` 被拦为 413，且旧客户端把 HTML 错误页解析成 JSON 错误，真实 HTTP 状态码丢失，导致后台无记录且排查方向一度偏向解析/幂等/后台分页。
+- 决策：生产 `api.addwhatsapp.com` 的 Nginx 必须保留 `client_max_body_size 32m`，并把 `proxy_read_timeout`、`proxy_send_timeout`、`proxy_connect_timeout` 设置为不低于 `75s`，高于桌面端 60s 超时。修改配置后只允许 `nginx -t` 通过再 `systemctl reload nginx`，不使用 restart 作为常规操作。
+- 决策：桌面端发送前按 `JSON.stringify(payload).length` 做本地预检，默认阈值 `28MB`，超过后不发网络请求，pending reason 记为 `PERMANENT_PAYLOAD_TOO_LARGE`，并提示用户“该名单过大，请拆分后再导入”。
+- 约束：Nginx access log 必须保留包含 `$request_length` 的 API log_format，回归时同时看 `status` 和 `request_length`；默认 access log 的 `body_bytes_sent/response_bytes` 不是上传体积，不能用它判断请求体大小。
+- 约束：非 2xx Cloud API 响应必须保留 `error.status`，审计 pending reason 必须能区分 `PERMANENT_HTTP_413`、`HTTP_504`、`HTTP_401`、`NETWORK:*` 和 `PERMANENT_PAYLOAD_TOO_LARGE`，避免再次把必然失败的大名单静默重试或误判为普通网络问题。

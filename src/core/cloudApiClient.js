@@ -163,30 +163,20 @@ class CloudApiClient {
         body: options.body ? JSON.stringify(options.body) : undefined,
         signal: controller ? controller.signal : undefined
       });
+      const rawText = await response.text();
+      let parsed = null;
+      if (rawText) {
+        try { parsed = JSON.parse(rawText); } catch { parsed = null; }
+      }
       if (!response.ok) {
-        const rawBody = await readRawResponseBody(response);
-        let payload = null;
-        try {
-          payload = rawBody ? JSON.parse(rawBody) : null;
-        } catch {
-          payload = null;
-        }
-        const msg = payload && payload.error ? payload.error : `CLOUD_API_${response.status}`;
-        const detail = payload && payload.cause ? ` (cause: ${payload.cause})` : '';
-        const fallbackDetail = payload ? '' : formatResponseExcerpt(rawBody);
-        const error = new Error(`${msg}${detail}${fallbackDetail}`);
+        const serverMsg = parsed && parsed.error ? parsed.error : null;
+        const snippet = rawText ? rawText.replace(/\s+/g, ' ').slice(0, 200) : '';
+        const error = new Error(serverMsg || `CLOUD_API_${response.status}${snippet ? `: ${snippet}` : ''}`);
         error.status = response.status;
+        if (parsed && parsed.cause) error.cause = parsed.cause;
         throw error;
       }
-      const contentType = response.headers && typeof response.headers.get === 'function'
-        ? String(response.headers.get('content-type') || '')
-        : '';
-      if (contentType && !/\bjson\b/i.test(contentType)) {
-        const rawBody = typeof response.text === 'function' ? await response.text() : '';
-        return rawBody ? rawBody : null;
-      }
-      const payload = await response.json();
-      return payload;
+      return parsed ?? {};
     } catch (error) {
       if (error && error.name === 'AbortError') {
         const timeoutError = new Error('CLOUD_API_TIMEOUT');
@@ -198,24 +188,6 @@ class CloudApiClient {
       if (timer) clearTimeout(timer);
     }
   }
-}
-
-async function readRawResponseBody(response) {
-  if (response && typeof response.text === 'function') {
-    return response.text();
-  }
-  if (response && typeof response.json === 'function') {
-    const payload = await response.json();
-    return payload === undefined ? '' : JSON.stringify(payload);
-  }
-  return '';
-}
-
-function formatResponseExcerpt(rawBody) {
-  const text = String(rawBody || '').trim();
-  if (!text) return '';
-  const excerpt = text.length > 500 ? `${text.slice(0, 500)}...` : text;
-  return `: ${excerpt}`;
 }
 
 function mapCloudEntitlements(payload = {}) {

@@ -534,3 +534,25 @@
 - 结果：官网唯一可下载 EXE 为 latest 包，大小 `200439073` 字节，SHA256 `af7cdd7774c5b91a170864ab90c86f1b10337f259deba1acf1cb20fa122809cb`；`public/downloads/releases` 下不再有 `.exe` 旧包。
 - 验证：`npm test --prefix website` 6/6；`npm run build --prefix website` 成功；根项目 `npm test` 155/155。
 - 下一步：用户手动在生产服务器 `/opt/add-whatsapp` 执行 pull/build/restart/reload 后，线上用 `curl -L https://addwhatsapp.com/downloads/latest/update.json` 和 `curl -I https://addwhatsapp.com/downloads/latest/Add-WhatsApp.exe` 校验版本、大小和 SHA256。
+
+## 2026-06-06T02:04:56+08:00｜记录官网 latest 下载链路和按钮回归
+- 目标：把用户关心的官网 EXE 发布链路写清楚，并记录“旧版本不能下载，但最新版必须保留下载按钮”的最终口径。
+- 事实：当前官网下载不是直接跳 GitHub Releases；`website/lib/releases.js` 的 `latestRelease.downloadUrl` 指向站内 `/downloads/latest/Add-WhatsApp.exe`，用户点击后实际下载 `https://addwhatsapp.com/downloads/latest/Add-WhatsApp.exe`。
+- 链路：本地 `npm run build` 生成桌面 EXE；发布时把最新 EXE 复制为 `website/public/downloads/latest/Add-WhatsApp.exe`，同步 `website/public/downloads/latest/update.json` 和版本说明；提交并推送 GitHub main；生产服务器 `/opt/add-whatsapp` 再 `git pull --ff-only`、构建 website、重启 `add-whatsapp-website.service`、reload Nginx 后才算线上生效。
+- 结果：`website/public/downloads` 当前只保留 `latest/Add-WhatsApp.exe` 和 `latest/update.json`；旧版本页面只保留历史说明，不保留旧 EXE 下载入口；最新版卡片恢复且仅恢复一个 `下载最新版` 按钮。
+- 修复提交：`0ac3b4f Restore latest release download button only` 已推送到 `origin/main`。
+- 验证：`npm test --prefix website` 6/6；`npm run build --prefix website` 成功；构建后 `/releases` 为动态渲染；本地构建产物只包含 1 个 `下载最新版` 文案；服务器 `find website/public/downloads -maxdepth 4 -type f -print` 只看到 latest EXE 和 update.json。
+- 注意：`curl -L https://addwhatsapp.com/releases | grep -o "下载最新版" | wc -l` 可能因为 Next HTML 与 hydration/RSC 数据同时包含同一文案而显示 2；最终以浏览器可见按钮和源码结构测试为准。
+- 待处理：上传名单审计链路中 1.66 万行文件没有正确出现在后台/行数异常的问题尚未完成修复，后续需要继续从桌面导入、pending audit 兜底、API 接收、后台列表显示四段链路排查。
+
+## 2026-06-06T19:25:00+08:00｜修复 1.66 万行名单上传审计被 Nginx 413 拦截
+- 目标：解决桌面端导入 16630 行名单后后台“上传名单审计”缺记录的问题，并把根因和验证方法沉淀到日志。
+- 诊断：桌面端预检已能解析出 16630 行，说明不是表格解析失败；Nginx `error.log` 出现 `client intended to send too large body`，样本请求约 1.36MB/1.43MB，证明请求被默认 `client_max_body_size` 在 Nginx 层拦截成 413，Node API 和 PostgreSQL 根本没收到。
+- 诊断：旧 `cloudApiClient.request()` 在检查 `response.ok` 前直接 `response.json()`，Nginx HTML 错误页会抛 `Unexpected token '<'`，导致 413/504/401 状态码丢失；旧审计上传又是 `setImmediate` 静默发送，失败只 warn，进一步掩盖了真实原因。
+- 动作：桌面端修复非 2xx 响应解析，所有 HTTP 错误都带 `error.status`；审计上传增加 `contact-import-audit:uploading/uploaded/failed` 事件、pending reason 分类、永久失败标记、pending store 未初始化 warn、失败重试 giveUp/指数退避和 28MB 本地 body 预检。
+- 动作：桌面端把原始文件从 `originalBase64` 改为 `originalGzipBase64`，服务端 PostgreSQL runtime 优先解压新字段并回退兼容旧 `originalBase64`；`clientImportKey` 改为 `sha256(originalSha256:parsedRows.length)`，避免依赖 gzip 输出字节。
+- 动作：生产 Nginx 在 `api.addwhatsapp.com` 443 server 块设置 `client_max_body_size 32m`、`proxy_read_timeout 75s`、`proxy_send_timeout 75s`、`proxy_connect_timeout 75s`；移除误放在 `sites-enabled` 的 `.bak` 备份，避免 duplicate server warning；每次修改均 `nginx -t` 后 `systemctl reload nginx`。
+- 动作：为回归确认在 `/etc/nginx/nginx.conf` 的 `http {}` 中新增 `log_format api ... request_length=$request_length ...`，并在 API server 块启用 `access_log /var/log/nginx/access.log api;`。记录教训：`log_format` / `access_log` 是 Nginx 配置，不是 shell 命令。
+- 结果：后台“上传名单审计”能看到 16630 行记录；新 access log 能输出 `status` 和 `request_length`，用户验证出现 `status=201 request_length=442876`、`status=201 request_length=615442`，不再出现 413/504。
+- 验证：本地代码层面 `npm test` 通过 164/164；`npm test --prefix server` 通过 43/43；生产层面 `nginx -t` successful、`systemctl reload nginx` 完成、Nginx access log 新格式显示 POST `/v1/contact-imports` 返回 201 且带 request_length。
+- 下一步：保持 `request_length` 日志格式用于后续大名单回归；如果未来请求接近 28MB 客户端预检阈值，应提示用户拆分名单，而不是继续让 Nginx/API 白跑。

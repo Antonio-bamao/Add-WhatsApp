@@ -159,6 +159,8 @@ test('contact import audit uploads only manual imports and saves failed uploads 
   assert.doesNotMatch(restoreBody, /queueContactImportAuditUpload\(data, currentImportOptions\)/);
   assert.match(main, /zlib\.gzipSync\(Buffer\.from\(JSON\.stringify\(parsedRows\), 'utf8'\)\)/);
   assert.match(main, /parsedRowsGzipBase64/);
+  assert.match(main, /\.update\(`\$\{originalSha256\}:\$\{parsedRows\.length\}`\)/);
+  assert.doesNotMatch(main, /\.update\(`\$\{originalSha256\}:\$\{parsedRowsGzipBase64\}`\)/);
   assert.match(main, /clientImportKey/);
   assert.match(main, /PendingContactImportStore/);
   assert.match(main, /if \(!cloudController \|\| !pendingContactImportStore\)/);
@@ -169,12 +171,33 @@ test('contact import audit uploads only manual imports and saves failed uploads 
   assert.match(main, /clientImportKey:\s*payload\.clientImportKey/);
   assert.match(main, /originalSizeBytes:\s*payload\.originalSizeBytes/);
   assert.match(main, /bodyJsonLength:\s*JSON\.stringify\(payload\)\.length/);
+  assert.match(main, /CONTACT_IMPORT_AUDIT_DEFAULT_MAX_BODY_JSON_LENGTH\s*=\s*28\s*\*\s*1024\s*\*\s*1024/);
+  assert.match(main, /CONTACT_IMPORT_AUDIT_MAX_BODY_JSON_LENGTH/);
+  assert.match(main, /auditMeta\.bodyJsonLength\s*>\s*CONTACT_IMPORT_AUDIT_MAX_BODY_JSON_LENGTH/);
+  assert.match(main, /reason:\s*'PERMANENT_PAYLOAD_TOO_LARGE'/);
+  assert.match(main, /该名单过大，请拆分后再导入/);
+  assert.ok(
+    main.indexOf('auditMeta.bodyJsonLength > CONTACT_IMPORT_AUDIT_MAX_BODY_JSON_LENGTH')
+      < main.indexOf('cloudController.createContactImport(payload)')
+  );
   assert.match(main, /type:\s*'contact-import-audit:uploaded'/);
   assert.match(main, /type:\s*'contact-import-audit:failed'/);
-  assert.match(main, /recordPendingContactImportAudit\(payload,\s*contactImportAuditFailureReason\(error\)\)/);
+  assert.match(main, /handleContactImportAuditUploadFailure\(payload,\s*error\)/);
+  assert.match(main, /recordPendingContactImportAudit\(payload,\s*reason\)/);
   assert.match(main, /function contactImportAuditFailureReason\(error\)/);
-  assert.match(main, /return `HTTP_\$\{error\.status\}:\$\{message\}`/);
+  assert.match(main, /function contactImportAuditFailureStatus\(error\)/);
+  assert.match(main, /PERMANENT_HTTP_\$\{status\}/);
+  assert.match(main, /HTTP_\$\{status\}/);
+  assert.match(main, /NETWORK:\$\{message\}/);
+  assert.match(main, /contactImportAuditIsPermanentFailure\(status\)/);
+  assert.match(main, /需人工处理（体积\/参数），自动重试不会成功/);
   assert.match(main, /Contact import audit pending store is not initialized/);
   assert.match(main, /schedulePendingContactImportAuditRetry\(\)/);
+  assert.match(main, /pendingContactImportStore\.list\(\{\s*retryableOnly:\s*true/);
+  assert.match(main, /shouldRetryPendingContactImportAudit\(item,\s*now\)/);
+  assert.match(main, /contactImportAuditRetryDelayMs\(item\.attempts\)/);
+  assert.match(main, /item\.giveUp/);
+  assert.match(main, /String\(item\.reason \|\| ''\)\.startsWith\('PERMANENT_'\)/);
+  assert.match(main, /pendingContactImportStore\.markAttempt\(item\.clientImportKey,\s*contactImportAuditFailureReason/);
   assert.doesNotMatch(main, /parsedRows: Array\.isArray\(data\.rows\) \? data\.rows : \[\]/);
 });

@@ -3,6 +3,8 @@
 | 风险 | 触发条件 | 影响 | 缓解策略 |
 | --- | --- | --- | --- |
 | WhatsApp Web 自动化失效 | WhatsApp Web 页面或 `whatsapp-web.js` 行为变化 | 登录、检测或发送失败 | 保持自动化核心模块隔离，后续可单独适配 |
+| 大名单上传审计丢失或超时 | 用户导入上万行客户名单，请求体超过 Nginx/API 限制，或桌面端 pending audit/重试/服务端幂等任一环节失败 | 后台看不到真实上传文件、行数、SHA256 和账号归属，运营无法核对用户大名单 | 已将 Nginx `client_max_body_size` 调到 32m，并设置 `proxy_read_timeout/proxy_send_timeout/proxy_connect_timeout 75s`；桌面端改用 `originalGzipBase64`、保留 HTTP status、记录 pending reason、永久失败 giveUp、指数退避和 28MB 本地预检；Nginx access log 启用 `request_length`，后续用 `status/request_length` 回归确认无 413/504 |
+| 官网版本页下载按钮回归 | 修改旧版本下载入口时只看文案或只看旧卡片，没有同时验证最新版卡片 | 用户无法下载最新版，或旧版本重新暴露给用户 | 结构测试固定“旧版本无按钮、最新版有且只有一个按钮”；生产部署后用浏览器页面和 latest manifest 校验，不只依赖 `curl | grep` 文本次数 |
 | WhatsApp 登录缓存过期 | 本地 LocalAuth 仍存在但 WhatsApp Web 已登出、跳到 `post_logout` 或浏览器上下文被销毁 | 用户点击开始任务后看不到二维码，任务无法开始 | 仅在识别到失效信号时自动清理当前账号 `whatsapp-session` 并重试；发送任务页保留手动 `登录异常时重新扫码` 按钮，正常有效 session 不重复扫码 |
 | WhatsApp Web 版本/注入兼容性漂移 | WhatsApp Web 2.3000.x 继续灰度或改前端协议，npm 版 `whatsapp-web.js` 落后 | 页面 bootstrap 失败、跳 `post_logout`、二维码不出现 | 依赖优先使用作者 GitHub 主分支；固定已验证可访问的 WhatsApp Web HTML；失败时先验证 raw HTML URL、GitHub issue 和 Console，而不是先改代理/UA |
 | 用户电脑缺少兼容浏览器 | EXE 运行在未安装 Chrome 的电脑，旧逻辑降级 Edge 或找不到系统浏览器 | WhatsApp 自动化窗口停在 `about:blank`、二维码不出现，或启动直接失败 | EXE 随包携带 Puppeteer 固定 Chrome for Testing；运行时只解析 `resources\\chromium\\chrome-win64\\chrome.exe`，不再搜索系统 Chrome/Edge；打包前执行 `npm run prepare:browser` 并校验资源存在 |

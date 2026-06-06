@@ -32,3 +32,38 @@ test('stores pending contact import audits by client key and removes them after 
 
   assert.deepEqual(store.list(), []);
 });
+
+test('keeps permanent and exhausted contact import audits but excludes them from retry list', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'add-whatsapp-pending-contact-import-'));
+  const store = new PendingContactImportStore(path.join(dir, 'pending-contact-imports.json'));
+  const permanentPayload = {
+    clientImportKey: 'contact-import-permanent',
+    originalFileName: 'too-large.xlsx'
+  };
+  const exhaustedPayload = {
+    clientImportKey: 'contact-import-exhausted',
+    originalFileName: 'timeout.xlsx'
+  };
+  const retryablePayload = {
+    clientImportKey: 'contact-import-retryable',
+    originalFileName: 'temporary.xlsx'
+  };
+
+  store.upsert({ payload: permanentPayload, reason: 'PERMANENT_HTTP_413:CLOUD_API_413' });
+  store.upsert({ payload: exhaustedPayload, reason: 'HTTP_504:CLOUD_API_TIMEOUT' });
+  store.upsert({ payload: retryablePayload, reason: 'NETWORK:ECONNRESET' });
+  for (let i = 0; i < 8; i += 1) {
+    store.markAttempt('contact-import-exhausted', 'HTTP_504:CLOUD_API_TIMEOUT');
+  }
+
+  const allItems = store.list();
+  assert.equal(allItems.length, 3);
+  assert.equal(allItems.find(item => item.clientImportKey === 'contact-import-permanent').giveUp, true);
+  assert.equal(allItems.find(item => item.clientImportKey === 'contact-import-exhausted').giveUp, true);
+  assert.equal(allItems.find(item => item.clientImportKey === 'contact-import-retryable').giveUp, false);
+
+  assert.deepEqual(
+    store.list({ retryableOnly: true }).map(item => item.clientImportKey),
+    ['contact-import-retryable']
+  );
+});

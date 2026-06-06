@@ -627,7 +627,8 @@ test('parses JSON error responses after checking HTTP status', async () => {
     () => client.getEntitlements('expired-token'),
     (error) => {
       assert.equal(error.status, 401);
-      assert.equal(error.message, 'AUTH_REQUIRED (cause: missing_token)');
+      assert.equal(error.message, 'AUTH_REQUIRED');
+      assert.equal(error.cause, 'missing_token');
       return true;
     }
   );
@@ -641,7 +642,7 @@ test('handles successful non-JSON cloud API responses safely', async () => {
 
   const payload = await client.request('/v1/no-content');
 
-  assert.equal(payload, null);
+  assert.deepEqual(payload, {});
 });
 
 function response(status, payload) {
