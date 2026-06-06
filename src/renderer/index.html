@@ -803,6 +803,33 @@
               <button id="clearWhatsAppButton" class="button ghost" type="button">清除当前账号 WhatsApp 缓存</button>
             </article>
 
+            <article class="panel account-panel update-panel">
+              <div class="panel-head">
+                <div>
+                  <h3>软件更新</h3>
+                  <p>安装版会在空闲时下载更新，并在下次启动前完成安装。</p>
+                </div>
+                <span id="updateStatusText" class="table-state">正在读取</span>
+              </div>
+              <dl class="account-meta update-meta" aria-label="软件版本">
+                <div>
+                  <dt>当前版本</dt>
+                  <dd id="currentVersionValue">-</dd>
+                </div>
+                <div>
+                  <dt>目标版本</dt>
+                  <dd id="targetVersionValue">-</dd>
+                </div>
+              </dl>
+              <progress id="updateProgress" max="100" value="0" aria-label="更新下载进度"></progress>
+              <p id="updateErrorText" class="sync-state">当前安装包暂未签名，Windows 可能显示“未知发布者”。</p>
+              <div class="account-actions update-actions">
+                <button id="checkUpdateButton" class="button secondary" type="button">检查更新</button>
+                <button id="installUpdateButton" class="button primary" type="button" hidden>立即重启更新</button>
+                <button id="updateNotesButton" class="button ghost" type="button" disabled>查看更新说明</button>
+              </div>
+            </article>
+
             <article class="panel account-panel sync-panel">
               <div class="panel-head">
                 <div>

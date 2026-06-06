@@ -1,15 +1,15 @@
 export const latestRelease = {
-  version: "0.1.4",
-  fileName: "Add-WhatsApp.exe",
-  downloadUrl: "/downloads/latest/Add-WhatsApp.exe",
-  releaseDate: "2026-06-05",
-  sizeBytes: 200439073,
-  sha256: "af7cdd7774c5b91a170864ab90c86f1b10337f259deba1acf1cb20fa122809cb",
+  version: "0.1.5",
+  fileName: "Add-WhatsApp-Setup.exe",
+  downloadUrl: "/downloads/latest/Add-WhatsApp-Setup.exe",
+  releaseDate: "2026-06-06",
+  sizeBytes: 228629436,
+  sha256: "75c20a9c19e819b8a696c708673777f1e062e87e35be91d877c5aca2ffbef113",
   highlights: [
-    "Windows 便携版随包携带固定 Chromium 内核",
-    "不再依赖用户电脑安装 Chrome 或 Edge",
-    "修复部分电脑自动化浏览器停留在 about:blank 的问题",
-    "保留 WhatsApp 登录短路径、持久化存储授权和优雅关闭修复"
+    "迁移为 Windows 当前用户安装版，安装无需管理员权限",
+    "新增自动检查、空闲下载和下次启动安装",
+    "多工作台会在更新前保存进度并协同退出",
+    "更新异常时保留当前版本，并支持停发和撤销坏版本"
   ]
 };
 
@@ -21,6 +21,19 @@ export const releaseHistory = [
     sizeBytes: latestRelease.sizeBytes,
     sha256: latestRelease.sha256,
     highlights: latestRelease.highlights
+  },
+  {
+    version: "0.1.4",
+    fileName: "Add-WhatsApp.exe",
+    releaseDate: "2026-06-05",
+    sizeBytes: 200439073,
+    sha256: "af7cdd7774c5b91a170864ab90c86f1b10337f259deba1acf1cb20fa122809cb",
+    highlights: [
+      "Windows 便携版随包携带固定 Chromium 内核",
+      "不再依赖用户电脑安装 Chrome 或 Edge",
+      "修复部分电脑自动化浏览器停留在 about:blank 的问题",
+      "保留 WhatsApp 登录短路径、持久化存储授权和优雅关闭修复"
+    ]
   },
   {
     version: "0.1.3",

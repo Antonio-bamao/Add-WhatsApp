@@ -2681,6 +2681,28 @@ td {
   gap: 14px;
 }
 
+.update-panel {
+  gap: 14px;
+}
+
+.update-meta {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-bottom: 0;
+}
+
+.update-panel progress {
+  width: 100%;
+  height: 10px;
+  overflow: hidden;
+  accent-color: var(--wa-green);
+  border: 0;
+  border-radius: 999px;
+}
+
+.update-actions {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .cloud-account-panel {
   min-height: 250px;
 }
@@ -2781,6 +2803,11 @@ td {
 
   .account-panel:last-child {
     grid-column: auto;
+  }
+
+  .update-meta,
+  .update-actions {
+    grid-template-columns: 1fr;
   }
 
   .template-tab {

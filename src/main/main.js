@@ -36,6 +36,8 @@ const { createWhatsAppService } = require('./whatsappService');
 const { createCloudDesktopController } = require('./cloudDesktopController');
 const { restoreAuthenticatedSession: restoreAuthenticatedCloudSession } = require('./cloudSessionRestorer');
 const { WhatsAppSessionManager, createWhatsAppSessionConfig } = require('./whatsappSessionManager');
+const { createUpdateManager } = require('./appUpdater');
+const { WorkspaceProcessRegistry, workspaceRuntimeDirectory } = require('./workspaceProcessRegistry');
 const { LocalProxyBridge } = require('./proxyBridge');
 const {
   JsonProxySettingsStore,
@@ -57,6 +59,10 @@ const {
 
 const PROXY_MONITOR_INTERVAL_MS = 5 * 60 * 1000;
 const CLOUD_LEASE_RENEW_INTERVAL_MS = 30 * 1000;
+const UPDATE_STARTUP_DELAY_MS = 30 * 1000;
+const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
+const UPDATE_WORKSPACE_SHUTDOWN_TIMEOUT_MS = 120 * 1000;
+const TASK_SHUTDOWN_TIMEOUT_MS = 90 * 1000;
 const CONTACT_IMPORT_AUDIT_DEFAULT_MAX_BODY_JSON_LENGTH = 28 * 1024 * 1024;
 const CONTACT_IMPORT_AUDIT_MAX_BODY_JSON_LENGTH = Number(
   process.env.ADD_WHATSAPP_CONTACT_IMPORT_AUDIT_MAX_BODY_BYTES || CONTACT_IMPORT_AUDIT_DEFAULT_MAX_BODY_JSON_LENGTH
@@ -91,6 +97,12 @@ let activeRun = null;
 let proxyMonitorTimer = null;
 let activeProxyBridge = null;
 let cloudController = null;
+let updateManager = null;
+let updateStartupTimer = null;
+let updateCheckTimer = null;
+let updateRetryTimer = null;
+let workspaceProcessRegistry = null;
+let shutdownPreparationPromise = null;
 let subscriptionState = defaultSubscriptionState();
 const openSecondaryWorkspaces = new Set();
 const activeCloudWorkspaceLeases = new Map();
@@ -153,7 +165,7 @@ function createWindow() {
   mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'));
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   app.setAppUserModelId('com.addwhatsapp.desktop');
   Menu.setApplicationMenu(null);
   const userDataPath = app.getPath('userData');
@@ -172,10 +184,32 @@ app.whenReady().then(() => {
     proxyServer: workspaceProxyServer,
     createService: config => createWhatsAppService(app, event => sendToRenderer('task:event', event), config)
   });
+  workspaceProcessRegistry = new WorkspaceProcessRegistry({
+    directory: workspaceRuntimeDirectory(app.getPath('appData')),
+    workspaceId: workspaceId || 'main',
+    onShutdownRequested: async () => {
+      await quitCompletely({ reason: 'update-request' });
+    }
+  });
+  workspaceProcessRegistry.start();
+  if (app.isPackaged && !workspaceId) {
+    updateManager = createUpdateManager({
+      app,
+      userDataPath,
+      isTaskActive: () => Boolean(currentTask),
+      prepareForInstall: prepareForUpdateInstall,
+      onStateChanged: handleUpdateStateChanged
+    });
+    if (updateManager.getState().targetVersion) {
+      const installResult = await updateManager.installPending({ requireMandatory: true });
+      if (installResult.ok) return;
+    }
+  }
   restoreCloudEntitlements();
   restoreAuthenticatedSession();
   createWindow();
   createTray();
+  scheduleUpdateChecks();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -188,7 +222,6 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', event => {
   if (beforeQuitCleanupStarted) return;
-  beforeQuitCleanupStarted = true;
   event.preventDefault();
   quitCompletely().catch(error => {
     console.warn(`Quit cleanup failed: ${error.message}`);
@@ -357,30 +390,102 @@ async function showCloseChoice() {
   });
 }
 
-async function quitCompletely() {
-  isQuitting = true;
-  beforeQuitCleanupStarted = true;
-  stopRequested = true;
-  if (activeRun && historyStore) {
-    const history = historyStore.upsert({
-      ...activeRun,
-      finishedAt: new Date().toISOString(),
-      reason: 'closed',
-      message: '用户完全关闭软件，任务已停止并保留进度。',
-      stats: getStatsFromProgress(activeRun.progressPath)
-    });
-    sendToRenderer('history:updated', history);
-  }
-  try {
-    if (whatsappSessionManager) await whatsappSessionManager.destroy();
-    await stopActiveProxyBridge();
-  } catch {
-    // Ignore shutdown cleanup errors; quitting should still close every process.
-  }
-  if (tray) {
-    tray.destroy();
-    tray = null;
-  }
+function scheduleUpdateChecks() {
+  if (!updateManager) return;
+  updateStartupTimer = setTimeout(() => {
+    updateManager.checkForUpdates().catch(() => {});
+  }, UPDATE_STARTUP_DELAY_MS);
+  updateCheckTimer = setInterval(() => {
+    updateManager.checkForUpdates().catch(() => {});
+  }, UPDATE_CHECK_INTERVAL_MS);
+  if (typeof updateStartupTimer.unref === 'function') updateStartupTimer.unref();
+  if (typeof updateCheckTimer.unref === 'function') updateCheckTimer.unref();
+}
+
+function handleUpdateStateChanged(state) {
+  sendToRenderer('updates:state-changed', state);
+  if (updateRetryTimer) clearTimeout(updateRetryTimer);
+  updateRetryTimer = null;
+  const retryAtMs = Date.parse(state.retryAt);
+  if (!Number.isFinite(retryAtMs) || !updateManager) return;
+  updateRetryTimer = setTimeout(() => {
+    updateRetryTimer = null;
+    updateManager.checkForUpdates().catch(() => {});
+  }, Math.max(0, retryAtMs - Date.now()));
+  if (typeof updateRetryTimer.unref === 'function') updateRetryTimer.unref();
+}
+
+function clearUpdateTimers() {
+  if (updateStartupTimer) clearTimeout(updateStartupTimer);
+  if (updateCheckTimer) clearInterval(updateCheckTimer);
+  if (updateRetryTimer) clearTimeout(updateRetryTimer);
+  updateStartupTimer = null;
+  updateCheckTimer = null;
+  updateRetryTimer = null;
+}
+
+async function waitForCurrentTaskToStop(timeoutMs = TASK_SHUTDOWN_TIMEOUT_MS) {
+  if (!currentTask) return true;
+  const task = currentTask;
+  return Promise.race([
+    Promise.resolve(task).then(() => true, () => true),
+    new Promise(resolve => setTimeout(() => resolve(false), timeoutMs))
+  ]);
+}
+
+async function releaseAllCloudWorkspaceLeases() {
+  const workspaceIds = [...activeCloudWorkspaceLeases.keys()];
+  await Promise.allSettled(workspaceIds.map(id => releaseCloudWorkspaceLease(id)));
+}
+
+async function prepareForShutdown({ reason = 'closed' } = {}) {
+  if (shutdownPreparationPromise) return shutdownPreparationPromise;
+  shutdownPreparationPromise = (async () => {
+    isQuitting = true;
+    beforeQuitCleanupStarted = true;
+    stopRequested = true;
+    clearUpdateTimers();
+    if (workspaceProcessRegistry) workspaceProcessRegistry.setTaskActive(false);
+    const taskStopped = await waitForCurrentTaskToStop();
+    if (!taskStopped && activeRun && historyStore) {
+      const history = historyStore.upsert({
+        ...activeRun,
+        finishedAt: new Date().toISOString(),
+        reason,
+        message: '软件关闭前已请求停止任务并保留当前进度。',
+        stats: getStatsFromProgress(activeRun.progressPath)
+      });
+      sendToRenderer('history:updated', history);
+    }
+    try {
+      await releaseAllCloudWorkspaceLeases();
+      if (whatsappSessionManager) await whatsappSessionManager.destroy();
+      await stopActiveProxyBridge();
+    } catch (error) {
+      console.warn(`Shutdown cleanup warning: ${error.message}`);
+    }
+    if (tray) {
+      tray.destroy();
+      tray = null;
+    }
+    if (workspaceProcessRegistry) workspaceProcessRegistry.stop();
+    return { ok: true };
+  })();
+  return shutdownPreparationPromise;
+}
+
+async function prepareForUpdateInstall() {
+  if (!workspaceProcessRegistry) return { ok: false, errorCode: 'WORKSPACE_REGISTRY_UNAVAILABLE' };
+  workspaceProcessRegistry.requestShutdownOthers();
+  const workspacesClosed = await workspaceProcessRegistry.waitForOtherWorkspaces({
+    timeoutMs: UPDATE_WORKSPACE_SHUTDOWN_TIMEOUT_MS
+  });
+  if (!workspacesClosed.ok) return workspacesClosed;
+  return prepareForShutdown({ reason: 'updated' });
+}
+
+async function quitCompletely(options = {}) {
+  await prepareForShutdown(options);
   app.quit();
 }
 
@@ -595,6 +700,31 @@ ipcMain.handle('app:copy-text', async (_event, text) => {
   } catch (error) {
     return { ok: false, error: error.message };
   }
+});
+
+ipcMain.handle('updates:get-state', async () => {
+  if (updateManager) return updateManager.getState();
+  return {
+    status: app.isPackaged ? 'unavailable' : 'development',
+    currentVersion: app.getVersion(),
+    targetVersion: null,
+    percent: 0,
+    mandatory: false,
+    errorCode: app.isPackaged && workspaceId ? 'SECONDARY_WORKSPACE' : null,
+    retryAt: null,
+    unsigned: true,
+    releaseNotesUrl: 'https://addwhatsapp.com/releases'
+  };
+});
+
+ipcMain.handle('updates:check', async () => {
+  if (!updateManager) return { ok: false, errorCode: 'UPDATES_UNAVAILABLE' };
+  return updateManager.checkForUpdates();
+});
+
+ipcMain.handle('updates:install-pending', async () => {
+  if (!updateManager) return { ok: false, errorCode: 'UPDATES_UNAVAILABLE' };
+  return updateManager.installPending();
 });
 
 ipcMain.handle('cloud:manual-top-up', async (_event, payload = {}) => {
@@ -1092,6 +1222,7 @@ ipcMain.handle('task:start', async (_event, config) => {
   }
 
   stopRequested = false;
+  if (workspaceProcessRegistry) workspaceProcessRegistry.setTaskActive(true);
   currentTask = runTask(config || {});
   return { started: true };
 });
@@ -1218,6 +1349,8 @@ async function runTask(config) {
     currentTask = null;
     stopRequested = false;
     activeRun = null;
+    if (workspaceProcessRegistry) workspaceProcessRegistry.setTaskActive(false);
+    if (updateManager) updateManager.notifyTaskIdle().catch(() => {});
   }
 }
 

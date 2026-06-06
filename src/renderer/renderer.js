@@ -11,7 +11,8 @@ const state = {
   selectedQuotaCredits: 2000,
   statisticsDays: 365,
   statisticsMetric: 'sent',
-  analytics: null
+  analytics: null,
+  update: null
 };
 
 const CLOUD_ENTITLEMENT_REFRESH_MIN_INTERVAL_MS = 30 * 1000;
@@ -116,6 +117,14 @@ const elements = {
   proxySettingsButton: document.getElementById('proxySettingsButton'),
   logoutButton: document.getElementById('logoutButton'),
   clearWhatsAppButton: document.getElementById('clearWhatsAppButton'),
+  currentVersionValue: document.getElementById('currentVersionValue'),
+  targetVersionValue: document.getElementById('targetVersionValue'),
+  updateStatusText: document.getElementById('updateStatusText'),
+  updateProgress: document.getElementById('updateProgress'),
+  updateErrorText: document.getElementById('updateErrorText'),
+  updateNotesButton: document.getElementById('updateNotesButton'),
+  checkUpdateButton: document.getElementById('checkUpdateButton'),
+  installUpdateButton: document.getElementById('installUpdateButton'),
   syncPasswordInput: document.getElementById('syncPasswordInput'),
   exportSyncButton: document.getElementById('exportSyncButton'),
   importSyncButton: document.getElementById('importSyncButton'),
@@ -2202,7 +2211,104 @@ async function loadAuthenticatedWorkspace(bootstrap = null) {
   await refreshBillingOrders({ quiet: true });
 }
 
+function updateStatusLabel(update = {}) {
+  const labels = {
+    idle: '已是最新版',
+    development: '开发环境',
+    unavailable: '当前工作台不可用',
+    checking: '正在检查',
+    available: '发现新版本',
+    'waiting-for-idle': '等待任务结束',
+    downloading: '正在下载',
+    downloaded: '等待安装',
+    installing: '正在安装',
+    disabled: '更新已暂停',
+    revoked: '版本已撤销',
+    error: '更新异常',
+    suspended: '更新已熔断'
+  };
+  return labels[update.status] || '等待检查';
+}
+
+function updateErrorLabel(update = {}) {
+  const labels = {
+    UPDATE_CHECK_FAILED: '无法连接更新服务器，将按退避策略自动重试。',
+    UPDATE_DOWNLOAD_FAILED: '更新下载中断，旧版本可以继续使用。',
+    UPDATE_INTEGRITY_FAILED: '更新包校验失败，损坏缓存已清除，不会安装。',
+    UPDATE_DISK_FULL: '磁盘空间不足，更新未下载，旧版本可以继续使用。',
+    UPDATE_CACHE_UNWRITABLE: '更新缓存目录不可写，请检查磁盘权限。',
+    UPDATE_RUNTIME_ERROR: '更新器发生异常，旧版本可以继续使用。',
+    UPDATE_REVOKED: '该更新已被撤销，不会安装。',
+    UPDATE_DISABLED: '服务器已暂停本次更新。',
+    UPDATE_VERSION_MISMATCH: '更新元数据版本不一致，已阻止安装。',
+    UPDATE_POLICY_UNAVAILABLE: '无法确认更新策略，已保留当前版本。',
+    UPDATE_NOT_MANDATORY: '服务器已取消强制安装，可继续使用当前版本。',
+    WORKSPACES_BUSY: '其他工作台未能在 120 秒内安全退出，本次安装已取消。',
+    UPDATE_INSTALL_FAILED: '安装器未能启动，当前版本未被替换。',
+    UPDATE_INSTALL_SUSPENDED: '连续安装失败 3 次，已停止自动安装，请联系支持。',
+    SECONDARY_WORKSPACE: '独立工作台不单独检查更新，请在主工作台操作。'
+  };
+  if (update.errorCode && labels[update.errorCode]) {
+    const retryText = update.retryAt
+      ? ` 下次重试：${new Date(update.retryAt).toLocaleString()}`
+      : '';
+    return `${labels[update.errorCode]}${retryText}`;
+  }
+  if (update.retryAt) return `下次重试：${new Date(update.retryAt).toLocaleString()}`;
+  return update.unsigned
+    ? '当前安装包暂未签名，Windows 可能显示“未知发布者”。'
+    : '更新包由已验证发布者签名。';
+}
+
+function renderUpdateState(update = {}) {
+  state.update = update;
+  elements.currentVersionValue.textContent = update.currentVersion || '-';
+  elements.targetVersionValue.textContent = update.targetVersion || '-';
+  elements.updateStatusText.textContent = updateStatusLabel(update);
+  elements.updateProgress.value = Math.max(0, Math.min(100, Number(update.percent || 0)));
+  elements.updateErrorText.textContent = updateErrorLabel(update);
+  elements.installUpdateButton.hidden = update.status !== 'downloaded';
+  elements.installUpdateButton.disabled = update.status === 'installing';
+  elements.checkUpdateButton.disabled = ['checking', 'downloading', 'installing'].includes(update.status);
+  elements.updateNotesButton.disabled = !update.releaseNotesUrl;
+  elements.updateNotesButton.dataset.url = update.releaseNotesUrl || '';
+}
+
+async function refreshUpdateState() {
+  if (typeof window.addWhatsapp.getUpdateState !== 'function') {
+    renderUpdateState({
+      status: 'unavailable',
+      currentVersion: '-',
+      targetVersion: null,
+      percent: 0,
+      unsigned: true
+    });
+    return;
+  }
+  renderUpdateState(await window.addWhatsapp.getUpdateState());
+}
+
+async function checkForUpdates() {
+  if (typeof window.addWhatsapp.checkForUpdates !== 'function') return;
+  elements.checkUpdateButton.disabled = true;
+  const result = await window.addWhatsapp.checkForUpdates();
+  if (result && result.errorCode === 'UPDATES_UNAVAILABLE') {
+    elements.updateErrorText.textContent = '当前运行方式不支持自动更新，请使用主工作台安装版。';
+  }
+  await refreshUpdateState();
+}
+
+async function installPendingUpdate() {
+  if (typeof window.addWhatsapp.installPendingUpdate !== 'function') return;
+  elements.installUpdateButton.disabled = true;
+  const result = await window.addWhatsapp.installPendingUpdate();
+  if (!result || !result.ok) {
+    await refreshUpdateState();
+  }
+}
+
 async function bootstrapApp() {
+  await refreshUpdateState();
   const bootstrap = await window.addWhatsapp.getBootstrapState();
   applyAuthState(bootstrap.auth);
   if (bootstrap.auth && bootstrap.auth.error) {
@@ -2315,6 +2421,12 @@ elements.openWorkspaceButton.addEventListener('click', showWorkspaceRiskModal);
 elements.proxySettingsButton.addEventListener('click', showProxySettings);
 elements.logoutButton.addEventListener('click', logoutAccount);
 elements.clearWhatsAppButton.addEventListener('click', clearWhatsAppSession);
+elements.checkUpdateButton.addEventListener('click', checkForUpdates);
+elements.installUpdateButton.addEventListener('click', installPendingUpdate);
+elements.updateNotesButton.addEventListener('click', async () => {
+  const url = elements.updateNotesButton.dataset.url;
+  if (url) await window.addWhatsapp.openExternalUrl(url);
+});
 elements.exportSyncButton.addEventListener('click', exportSyncPackage);
 elements.importSyncButton.addEventListener('click', importSyncPackage);
 elements.membershipCard.addEventListener('pointermove', updateMembershipCardLight);
@@ -2376,6 +2488,9 @@ window.addWhatsapp.onAuthChanged(auth => {
   applyAuthState(auth);
   refreshCloudEntitlementsIfStale({ force: true }).catch(() => {});
 });
+if (typeof window.addWhatsapp.onUpdateStateChanged === 'function') {
+  window.addWhatsapp.onUpdateStateChanged(renderUpdateState);
+}
 window.addEventListener('focus', () => {
   refreshCloudEntitlementsIfStale().catch(() => {});
 });
