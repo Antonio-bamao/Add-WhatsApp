@@ -31,7 +31,9 @@ let runtimeState = {
   adminModules,
   actionQueue,
   auditTrail,
-  environmentStatus: "API 未连接"
+  environmentStatus: "API 未连接",
+  billingPolicy: null,
+  pendingUnpaidOrderCount: 0
 };
 
 let paymentEventsQuery = {
@@ -378,6 +380,115 @@ function orderStats(module) {
     { label: "待补偿订单", value: pendingCredit },
     { label: "回调事件", value: paymentEventRows(module).length }
   ];
+}
+
+function billingModeLabel(mode) {
+  return mode === "paid" ? "套餐与额度计费" : "全站免费";
+}
+
+function formatPolicyTime(value) {
+  if (!value) return "立即生效";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString("zh-CN", { hour12: false });
+}
+
+function datetimeLocalValue(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const pad = (part) => String(part).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function nextShanghaiMidnightLocalValue() {
+  const next = new Date();
+  next.setDate(next.getDate() + 1);
+  next.setHours(0, 0, 0, 0);
+  const pad = (value) => String(value).padStart(2, "0");
+  return `${next.getFullYear()}-${pad(next.getMonth() + 1)}-${pad(next.getDate())}T00:00`;
+}
+
+function billingPolicyConfirmationItems(targetMode) {
+  if (targetMode === "paid") {
+    return [
+      `当前未支付订单数量：${runtimeState.pendingUnpaidOrderCount || 0}`,
+      "正在运行的免费任务不会被中途收费。",
+      "新任务将在生效后按套餐、余额和每日上限处理。",
+      "旧客户端可能需要升级。"
+    ];
+  }
+  return [
+    "已产生的合法扣费不退还。",
+    "用户套餐、余额和订单不会清空。",
+    "新任务将免费执行，支付入口将关闭。"
+  ];
+}
+
+function renderBillingPolicyPanel() {
+  const policy = runtimeState.billingPolicy || { mode: "free_access", version: 1, updatedAt: "", updatedBy: "", effectiveAt: null };
+  const isPaid = policy.mode === "paid";
+  const pendingMode = policy.pendingMode || null;
+  const switchMode = pendingMode || policy.mode;
+  const switchIsPaid = switchMode === "paid";
+  const targetMode = switchMode;
+  const statusText = pendingMode
+    ? `${billingModeLabel(policy.mode)} → ${billingModeLabel(pendingMode)}`
+    : billingModeLabel(policy.mode);
+  const switchHint = pendingMode
+    ? `当前${billingModeLabel(policy.mode)}，计划切换到${billingModeLabel(pendingMode)}`
+    : (switchIsPaid ? "ON：套餐与额度计费中" : "OFF：全站免费运行中");
+  const effectiveAtValue = policy.effectiveAt
+    ? datetimeLocalValue(policy.effectiveAt)
+    : (switchIsPaid ? "" : nextShanghaiMidnightLocalValue());
+  return `
+    <section class="section-block billing-policy-panel">
+      <div class="billing-policy-head">
+        <div>
+          <p class="eyebrow">BILLING POLICY</p>
+          <h2>收费模式</h2>
+        </div>
+        <span class="status-pill status-pill--${isPaid ? "warn" : "good"}">${escapeHtml(statusText)}</span>
+      </div>
+      <dl class="billing-policy-meta">
+        <div><dt>策略版本</dt><dd>v${escapeHtml(policy.version || 1)}</dd></div>
+        <div><dt>更新时间</dt><dd>${escapeHtml(formatPolicyTime(policy.updatedAt))}</dd></div>
+        <div><dt>操作者</dt><dd>${escapeHtml(policy.updatedBy || "-")}</dd></div>
+        <div><dt>计划生效</dt><dd>${escapeHtml(formatPolicyTime(policy.effectiveAt))}</dd></div>
+      </dl>
+      <form class="billing-policy-form" data-operation-form="billing-policy">
+        <label class="billing-policy-switch">
+          <input data-billing-policy-toggle name="paid" type="checkbox" ${switchIsPaid ? "checked" : ""} />
+          <span class="billing-policy-toggle" aria-hidden="true">
+            <span class="billing-policy-toggle-track-text billing-policy-toggle-track-text--off">OFF</span>
+            <span class="billing-policy-toggle-track-text billing-policy-toggle-track-text--on">ON</span>
+            <span class="billing-policy-toggle-knob"></span>
+          </span>
+          <span class="billing-policy-switch-copy">
+            <strong>收费模式开关</strong>
+            <small>${escapeHtml(switchHint)}</small>
+          </span>
+        </label>
+        <label>
+          <span>生效时间</span>
+          <input data-billing-policy-effective-at name="effectiveAt" type="datetime-local" value="${escapeHtml(effectiveAtValue)}" />
+        </label>
+        <label>
+          <span>切换原因</span>
+          <input name="reason" placeholder="${isPaid ? "例如：开启免费推广期" : "例如：结束免费推广期"}" />
+        </label>
+        <input name="expectedVersion" type="hidden" value="${escapeHtml(policy.version || 1)}" />
+        <div class="billing-confirmation" data-billing-policy-confirm>
+          <strong>确认事项</strong>
+          <ul>
+            ${billingPolicyConfirmationItems(targetMode).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
+          </ul>
+        </div>
+        <small class="operation-status" data-operation-status="billing-policy"></small>
+        <button type="submit">保存收费模式</button>
+      </form>
+    </section>
+  `;
 }
 
 function userStatusOptions(selected) {
@@ -1075,6 +1186,8 @@ function renderPlansModulePage(module) {
       status: module.status
     })}
 
+    ${renderBillingPolicyPanel()}
+
     <section class="summary-grid module-summary" aria-label="套餐限额统计">
       <div class="summary-tile"><span>${module.metricLabel}</span><strong>${module.metric}</strong></div>
       <div class="summary-tile"><span>${usageModule?.metricLabel || "用量"}</span><strong>${usageModule?.metric || "0"}</strong></div>
@@ -1144,6 +1257,17 @@ async function postAdminOperation(path, body) {
   return payload;
 }
 
+async function putAdminOperation(path, body) {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    method: "PUT",
+    headers: adminHeaders(),
+    body: JSON.stringify(body)
+  });
+  const payload = await response.json();
+  if (!response.ok) throw new Error(payload.error || `ADMIN_OPERATION_${response.status}`);
+  return payload;
+}
+
 function formPayload(form) {
   return Object.fromEntries(new FormData(form).entries());
 }
@@ -1196,6 +1320,18 @@ async function submitUserStatusChange(form) {
   return postAdminOperation(`/v1/admin/users/${encodeURIComponent(identifier)}/status`, {
     status: body.status,
     reason: body.reason
+  });
+}
+
+async function submitBillingPolicyUpdate(form) {
+  const body = formPayload(form);
+  const paid = Boolean(form.querySelector("[data-billing-policy-toggle]")?.checked);
+  const effectiveAt = String(body.effectiveAt || "").trim();
+  return putAdminOperation("/v1/admin/billing-policy", {
+    mode: paid ? "paid" : "free_access",
+    expectedVersion: Number(body.expectedVersion),
+    effectiveAt: effectiveAt || null,
+    reason: body.reason || (paid ? "启用收费模式" : "关闭收费模式")
   });
 }
 
@@ -1310,7 +1446,8 @@ async function handleOperationSubmit(event) {
     "order-mark-paid": submitOrderMarkPaid,
     "order-compensate": submitOrderCompensation,
     "workspace-release": submitWorkspaceRelease,
-    "user-status": submitUserStatusChange
+    "user-status": submitUserStatusChange,
+    "billing-policy": submitBillingPolicyUpdate
   };
   const handler = handlers[formName];
   if (!handler) return;
@@ -1322,7 +1459,12 @@ async function handleOperationSubmit(event) {
     await loadConsoleSnapshot();
     setOperationStatus(formName, "已提交，快照已刷新。", "good");
   } catch (error) {
-    const message = error.message === "ADMIN_LOGIN_REQUIRED" ? "请先登录管理员账号。" : `提交失败：${error.message}`;
+    if (error.message === "BILLING_POLICY_VERSION_CONFLICT") {
+      await loadConsoleSnapshot();
+    }
+    const message = error.message === "ADMIN_LOGIN_REQUIRED"
+      ? "请先登录管理员账号。"
+      : (error.message === "BILLING_POLICY_VERSION_CONFLICT" ? "策略版本冲突，已重新加载真实状态。" : `提交失败：${error.message}`);
     setOperationStatus(formName, message, "danger");
   }
 }
@@ -1404,7 +1546,9 @@ function applyConsoleSnapshot(snapshot) {
     })),
     actionQueue: snapshot.actionQueue || actionQueue,
     auditTrail: snapshot.auditTrail || auditTrail,
-    environmentStatus: connectedEnvironmentStatus()
+    environmentStatus: connectedEnvironmentStatus(),
+    billingPolicy: snapshot.billingPolicy || null,
+    pendingUnpaidOrderCount: Number(snapshot.pendingUnpaidOrderCount || 0)
   };
   renderRoute();
 }
@@ -1528,6 +1672,7 @@ Object.assign(window, {
   submitOrderCompensation,
   submitWorkspaceRelease,
   submitUserStatusChange,
+  submitBillingPolicyUpdate,
   updateUserPlan,
   revokeUserSessions,
   openUserEditModal,
@@ -1535,6 +1680,7 @@ Object.assign(window, {
   saveUserEditModal,
   renderUserEditModal,
   renderUsersModulePage,
+  renderBillingPolicyPanel,
   formatUserUid,
   renderRoute
 });

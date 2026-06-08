@@ -15,7 +15,17 @@ test('saves and loads cloud session tokens without storing passwords', () => {
     user: { id: 'user-1', username: 'cloud-user' },
     accessToken: 'access-1',
     refreshToken: 'refresh-1',
-    entitlements: { planId: 'advanced' }
+    entitlements: { planId: 'advanced' },
+    appPolicy: {
+      billing: {
+        mode: 'free_access',
+        version: 3,
+        fetchedAt: '2026-06-08T12:00:00.000Z',
+        cacheExpiresAt: '2026-06-09T12:00:00.000Z',
+        keyId: 'billing-policy-2026-01',
+        signature: 'signed-policy'
+      }
+    }
   });
 
   const raw = fs.readFileSync(sessionPath, 'utf8');
@@ -27,7 +37,17 @@ test('saves and loads cloud session tokens without storing passwords', () => {
     user: { id: 'user-1', username: 'cloud-user' },
     accessToken: 'access-1',
     refreshToken: 'refresh-1',
-    entitlements: { planId: 'advanced' }
+    entitlements: { planId: 'advanced' },
+    appPolicy: {
+      billing: {
+        mode: 'free_access',
+        version: 3,
+        fetchedAt: '2026-06-08T12:00:00.000Z',
+        cacheExpiresAt: '2026-06-09T12:00:00.000Z',
+        keyId: 'billing-policy-2026-01',
+        signature: 'signed-policy'
+      }
+    }
   });
 });
 

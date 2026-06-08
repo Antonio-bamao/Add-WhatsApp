@@ -458,6 +458,204 @@ h3 {
   margin-bottom: 20px;
 }
 
+.billing-policy-panel {
+  display: grid;
+  gap: 16px;
+}
+
+.billing-policy-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.billing-policy-head h2 {
+  margin-bottom: 0;
+}
+
+.billing-policy-meta {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0;
+}
+
+.billing-policy-meta div {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfcfa;
+  padding: 12px;
+}
+
+.billing-policy-meta dt {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.billing-policy-meta dd {
+  margin: 5px 0 0;
+  overflow-wrap: anywhere;
+  font-weight: 800;
+}
+
+.billing-policy-form {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.75fr) minmax(220px, 1fr) minmax(220px, 1fr) auto;
+  gap: 12px;
+  align-items: end;
+}
+
+.billing-policy-form label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.billing-policy-form input {
+  width: 100%;
+  min-height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #ffffff;
+  padding: 8px 10px;
+  color: var(--text);
+}
+
+.billing-policy-form button {
+  min-height: 38px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--brand);
+  color: #ffffff;
+  padding: 8px 13px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.billing-policy-switch {
+  position: relative;
+  grid-template-columns: auto 1fr;
+  gap: 10px !important;
+  align-items: center;
+  color: var(--text) !important;
+  cursor: pointer;
+}
+
+.billing-policy-switch input {
+  position: absolute;
+  width: 1px;
+  min-height: 1px;
+  opacity: 0;
+}
+
+.billing-policy-toggle {
+  position: relative;
+  display: inline-grid;
+  grid-template-columns: 1fr 1fr;
+  align-items: center;
+  width: 86px;
+  height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #edf2ec;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.06);
+  color: var(--muted);
+  transition: background 160ms ease, border-color 160ms ease, color 160ms ease;
+}
+
+.billing-policy-toggle-track-text {
+  position: relative;
+  z-index: 1;
+  text-align: center;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.05em;
+}
+
+.billing-policy-toggle-track-text--off {
+  color: var(--brand-dark);
+}
+
+.billing-policy-toggle-track-text--on {
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.billing-policy-toggle-knob {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  background: #ffffff;
+  box-shadow: 0 5px 14px rgba(14, 43, 31, 0.18);
+  transition: transform 160ms ease;
+}
+
+.billing-policy-switch input:checked + .billing-policy-toggle {
+  border-color: var(--brand);
+  background: var(--brand);
+}
+
+.billing-policy-switch input:checked + .billing-policy-toggle .billing-policy-toggle-knob {
+  transform: translateX(48px);
+}
+
+.billing-policy-switch input:checked + .billing-policy-toggle .billing-policy-toggle-track-text--off {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.billing-policy-switch input:checked + .billing-policy-toggle .billing-policy-toggle-track-text--on {
+  color: #ffffff;
+}
+
+.billing-policy-switch input:focus-visible + .billing-policy-toggle {
+  outline: 3px solid rgba(21, 146, 106, 0.18);
+  outline-offset: 3px;
+}
+
+.billing-policy-switch-copy {
+  display: grid;
+  gap: 2px;
+}
+
+.billing-policy-switch-copy strong {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.billing-policy-switch-copy small {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.billing-confirmation {
+  grid-column: 1 / -1;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--warn-bg);
+  padding: 12px 14px;
+  color: var(--warn);
+}
+
+.billing-confirmation strong {
+  display: block;
+  margin-bottom: 6px;
+}
+
+.billing-confirmation ul {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding-left: 18px;
+}
+
 .orders-workspace {
   display: grid;
   gap: 20px;
@@ -1046,6 +1244,11 @@ code {
     grid-template-columns: 1fr;
   }
 
+  .billing-policy-meta,
+  .billing-policy-form {
+    grid-template-columns: 1fr;
+  }
+
   .event-toolbar {
     display: grid;
   }
@@ -1273,6 +1476,7 @@ code {
   .event-summary,
   .section-head,
   .users-panel-head,
+  .billing-policy-head,
   .record-pagination {
     gap: 10px;
   }

@@ -307,4 +307,34 @@ describe("admin console structure", () => {
     assert.match(css, /\.modal-user-summary\s*{[^}]*grid-template-columns:\s*1fr/s);
     assert.match(css, /min-height:\s*44px/);
   });
+
+  it("adds the billing policy switch to the plans page with confirmation copy and API handling", () => {
+    const js = readText("public/admin.js");
+    const css = readText("public/admin.css");
+
+    assert.match(js, /renderBillingPolicyPanel/);
+    assert.match(js, /datetimeLocalValue/);
+    assert.match(js, /pendingMode/);
+    assert.match(js, /submitBillingPolicyUpdate/);
+    assert.match(js, /\/v1\/admin\/billing-policy/);
+    assert.match(js, /method:\s*"PUT"/);
+    assert.match(js, /data-billing-policy-toggle/);
+    assert.match(js, /data-billing-policy-effective-at/);
+    assert.match(js, /data-billing-policy-confirm/);
+    assert.match(js, /BILLING_POLICY_VERSION_CONFLICT/);
+    assert.match(js, /收费模式开关/);
+    assert.match(js, /OFF：全站免费运行中/);
+    assert.match(js, /ON：套餐与额度计费中/);
+    assert.match(js, /全站免费/);
+    assert.match(js, /套餐与额度计费/);
+    assert.match(js, /正在运行的免费任务不会被中途收费/);
+    assert.match(js, /已产生的合法扣费不退还/);
+    assert.match(js, /renderPlansModulePage[\s\S]*renderBillingPolicyPanel/);
+    assert.match(css, /\.billing-policy-panel/);
+    assert.match(css, /\.billing-policy-switch/);
+    assert.match(css, /\.billing-policy-toggle/);
+    assert.match(css, /\.billing-policy-toggle-knob/);
+    assert.match(css, /input:checked \+ \.billing-policy-toggle/);
+    assert.match(css, /\.billing-confirmation/);
+  });
 });

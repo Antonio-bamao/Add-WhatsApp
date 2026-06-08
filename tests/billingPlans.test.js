@@ -72,10 +72,16 @@ test('keeps account balance separate from daily throttling limits', () => {
 
 test('caps requested task limits by the active package daily limit', () => {
   const advanced = createEntitlementState('advanced');
+  const freeAccess = {
+    ...advanced,
+    billingMode: 'free_access',
+    unlimitedDailyUsage: true
+  };
 
   assert.equal(resolveTaskDailyLimit(advanced, 80), 80);
   assert.equal(resolveTaskDailyLimit(advanced, 500), 200);
   assert.equal(resolveTaskDailyLimit(advanced, 0), 200);
+  assert.equal(resolveTaskDailyLimit(freeAccess, 500), 500);
 });
 
 test('blocks paid tasks when there is no balance or daily allowance', () => {
@@ -91,6 +97,27 @@ test('blocks paid tasks when there is no balance or daily allowance', () => {
     balanceCredits: 0,
     usedToday: 9
   });
+  const freeAccessMode = {
+    ...createEntitlementState('advanced', {
+      balanceCredits: 0,
+      usedToday: 0
+    }),
+    billingMode: 'free_access'
+  };
+  const freeAccessPolicy = {
+    ...createEntitlementState('advanced', {
+      balanceCredits: 0,
+      usedToday: 0
+    }),
+    billingPolicy: { mode: 'free_access', version: 7 }
+  };
+  const unlimitedOverlay = {
+    ...createEntitlementState('advanced', {
+      balanceCredits: 0,
+      usedToday: 0
+    }),
+    unlimitedDailyUsage: true
+  };
 
   assert.deepEqual(resolveTaskStartAccess(noBalance), {
     ok: false,
@@ -103,6 +130,9 @@ test('blocks paid tasks when there is no balance or daily allowance', () => {
     message: '当前专业版今日可用上限已用完，请等服务器 00:00 重置后继续。'
   });
   assert.deepEqual(resolveTaskStartAccess(free), { ok: true });
+  assert.deepEqual(resolveTaskStartAccess(freeAccessMode), { ok: true });
+  assert.deepEqual(resolveTaskStartAccess(freeAccessPolicy), { ok: true });
+  assert.deepEqual(resolveTaskStartAccess(unlimitedOverlay), { ok: true });
 });
 
 test('returns clear locked messages for features outside the active package', () => {
@@ -121,6 +151,11 @@ test('returns clear locked messages for features outside the active package', ()
 test('limits each language template pool by package', () => {
   const advanced = createEntitlementState('advanced');
   const business = createEntitlementState('business');
+  const freeAccessAdvanced = {
+    ...advanced,
+    billingMode: 'free_access',
+    effectiveTemplateLimit: null
+  };
 
   assert.deepEqual(resolveTemplateAccess(advanced, { languageCounts: { en: 2, es: 1, fr: 2 } }), { ok: true, remaining: 0 });
   assert.deepEqual(resolveTemplateAccess(advanced, { languageCounts: { en: 3, es: 1, fr: 2 } }), {
@@ -130,16 +165,32 @@ test('limits each language template pool by package', () => {
     message: '当前进阶版每种语言最多保存 2 条文案模板，请删除多余文案或升级套餐。'
   });
   assert.deepEqual(resolveTemplateAccess(business, { languageCounts: { en: 100, es: 100, fr: 100 } }), { ok: true, remaining: null });
+  assert.deepEqual(resolveTemplateAccess(freeAccessAdvanced, { languageCounts: { en: 100, es: 100, fr: 100 } }), { ok: true, remaining: null });
 });
 
 test('limits secondary workspace launches by the active package', () => {
   const advanced = createEntitlementState('advanced');
+  const freeAccessAdvanced = {
+    ...advanced,
+    billingMode: 'free_access',
+    effectiveCapabilities: {
+      ...advanced.capabilities,
+      secondaryWorkspace: true
+    },
+    effectiveWorkspaceLimit: 5
+  };
 
   assert.deepEqual(canOpenSecondaryWorkspace(advanced, 0), { ok: true, remaining: 1 });
   assert.deepEqual(canOpenSecondaryWorkspace(advanced, 1), {
     ok: false,
     remaining: 0,
     error: '当前进阶版最多同时使用 2 个工作台，请关闭已有独立工作台或升级套餐。'
+  });
+  assert.deepEqual(canOpenSecondaryWorkspace(freeAccessAdvanced, 3), { ok: true, remaining: 1 });
+  assert.deepEqual(canOpenSecondaryWorkspace(freeAccessAdvanced, 4), {
+    ok: false,
+    remaining: 0,
+    error: '当前进阶版最多同时使用 5 个工作台，请关闭已有独立工作台或升级套餐。'
   });
 });
 

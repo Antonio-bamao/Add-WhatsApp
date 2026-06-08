@@ -30,7 +30,7 @@ function jsonResponse(response, statusCode, payload) {
     "content-type": "application/json; charset=utf-8",
     "access-control-allow-origin": "*",
     "access-control-allow-headers": "content-type, authorization",
-    "access-control-allow-methods": "GET, POST, OPTIONS"
+    "access-control-allow-methods": "GET, POST, PUT, OPTIONS"
   });
   response.end(JSON.stringify(payload));
 }
@@ -40,7 +40,7 @@ function textResponse(response, statusCode, text) {
     "content-type": "text/plain; charset=utf-8",
     "access-control-allow-origin": "*",
     "access-control-allow-headers": "content-type, authorization",
-    "access-control-allow-methods": "GET, POST, OPTIONS"
+    "access-control-allow-methods": "GET, POST, PUT, OPTIONS"
   });
   response.end(text);
 }
@@ -64,7 +64,7 @@ function fileResponse(response, statusCode, { body, contentType, fileName }) {
     "access-control-allow-origin": "*",
     "access-control-allow-headers": "content-type, authorization",
     "access-control-expose-headers": "content-disposition",
-    "access-control-allow-methods": "GET, POST, OPTIONS"
+    "access-control-allow-methods": "GET, POST, PUT, OPTIONS"
   });
   response.end(body);
 }
@@ -153,10 +153,11 @@ async function withTimeoutSignal(fn, timeoutMs, timeoutMessage) {
 function errorStatus(error) {
   if (/TIMEOUT/.test(error.message)) return 504;
   if (/ADMIN_FORBIDDEN/.test(error.message)) return 403;
+  if (/BILLING_DISABLED/.test(error.message)) return 409;
   if (/SIGNATURE/.test(error.message)) return 401;
   if (/UNAUTHORIZED|AUTH_FAILED|NOT_ACTIVE/.test(error.message)) return 401;
   if (/NOT_FOUND/.test(error.message)) return 404;
-  if (/LIMIT|INSUFFICIENT|NO_AVAILABLE|ALREADY_PAID|CLOSED|DOWNGRADE/.test(error.message)) return 409;
+  if (/LIMIT|INSUFFICIENT|NO_AVAILABLE|ALREADY_PAID|CLOSED|DOWNGRADE|CONFLICT/.test(error.message)) return 409;
   if (/INVALID|REQUIRED|WEAK|EXISTS|MISMATCH|TOO_LARGE/.test(error.message)) return 400;
   return 500;
 }
@@ -183,6 +184,13 @@ export function createAppServer(options = {}) {
       if (request.method === "GET" && url.pathname === "/v1/admin/console") {
         await authAdminId(runtime, request);
         jsonResponse(response, 200, await runtime.getAdminConsoleSnapshot());
+        return;
+      }
+
+      if (request.method === "PUT" && url.pathname === "/v1/admin/billing-policy") {
+        const adminUserId = await authAdminId(runtime, request);
+        const body = await readJson(request);
+        jsonResponse(response, 200, await runtime.updateBillingPolicy({ ...body, adminUserId, ip: clientIp(request) }));
         return;
       }
 
@@ -260,10 +268,30 @@ export function createAppServer(options = {}) {
         return;
       }
 
+      if (request.method === "GET" && url.pathname === "/v1/app-policy") {
+        await authUserId(runtime, request);
+        jsonResponse(response, 200, await runtime.getAppPolicy());
+        return;
+      }
+
       if (request.method === "POST" && url.pathname === "/v1/credits/consume") {
         const userId = await authUserId(runtime, request);
         const body = await readJson(request);
         jsonResponse(response, 200, await runtime.consumeCredit({ ...body, userId }));
+        return;
+      }
+
+      if (request.method === "POST" && url.pathname === "/v1/task-billing-sessions") {
+        const userId = await authUserId(runtime, request);
+        const body = await readJson(request);
+        jsonResponse(response, 201, await runtime.createTaskBillingSession({ ...body, userId }));
+        return;
+      }
+
+      if (request.method === "POST" && /^\/v1\/task-billing-sessions\/[^/]+\/close$/.test(url.pathname)) {
+        const userId = await authUserId(runtime, request);
+        const sessionId = decodeURIComponent(url.pathname.split("/")[3]);
+        jsonResponse(response, 200, await runtime.closeTaskBillingSession({ userId, sessionId }));
         return;
       }
 
@@ -277,6 +305,8 @@ export function createAppServer(options = {}) {
       if (request.method === "POST" && url.pathname === "/v1/orders") {
         const userId = await authUserId(runtime, request);
         const body = await readJson(request);
+        const billingPolicy = await runtime.getBillingPolicy();
+        if (billingPolicy.mode === "free_access") throw new Error("BILLING_DISABLED");
         jsonResponse(response, 201, await runtime.createOrder({ ...body, userId }));
         return;
       }

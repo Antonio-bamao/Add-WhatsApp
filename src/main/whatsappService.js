@@ -80,7 +80,8 @@ function buildWhatsAppClientOptions({
       remotePath: WHATSAPP_WEB_VERSION_REMOTE_PATH
     },
     puppeteer: {
-      browserWSEndpoint
+      browserWSEndpoint,
+      defaultViewport: null
     }
   };
 }
@@ -100,12 +101,17 @@ function buildWhatsAppBrowserLaunchOptions({
     '--no-crashpad',
     '--disable-breakpad',
     '--disable-blink-features=AutomationControlled',
-    '--window-size=1100,760'
+    '--force-device-scale-factor=1',
+    '--high-dpi-support=1',
+    '--no-startup-window',
+    '--window-size=1366,900'
   ];
   if (proxyServer) args.push(`--proxy-server=${proxyServer}`);
 
   return {
     headless: false,
+    defaultViewport: null,
+    waitForInitialPage: false,
     executablePath,
     ignoreDefaultArgs: ['--enable-automation'],
     userDataDir: getLocalAuthProfilePath(sessionPath, clientId),
@@ -456,6 +462,12 @@ class WhatsAppService {
           }
           if (url === 'about:blank') {
             blankTicks += 1;
+            if (blankTicks === 1) {
+              this.emit({
+                type: 'auth:blank-page',
+                message: 'WhatsApp Web 页面仍停留在 about:blank，通常表示当前电脑网络、VPN、代理或防火墙暂时无法访问 web.whatsapp.com，正在继续等待页面加载...'
+              });
+            }
             // 3 seconds per tick * 8 = 24 seconds
             if (blankTicks >= 8) {
               finish(reject, new Error('无法连接到 WhatsApp 服务器（浏览器停留在空白页）。请检查您的网络连接。若在中国大陆境内使用，必须开启全局系统 VPN / 代理软件。'));

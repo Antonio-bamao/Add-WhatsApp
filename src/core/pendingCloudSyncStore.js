@@ -14,8 +14,13 @@ class PendingCloudSyncStore {
     const payload = this.#read();
     const taskId = String(item && item.taskId ? item.taskId : '');
     if (!taskId) throw new Error('PENDING_SYNC_TASK_REQUIRED');
+    const existingItem = payload.items.find(existing => existing.taskId === taskId) || {};
+    const hasBillingSessionId = Object.prototype.hasOwnProperty.call(item || {}, 'billingSessionId');
+    const hasBillingPolicySnapshot = Object.prototype.hasOwnProperty.call(item || {}, 'billingPolicySnapshot');
     const nextItem = {
       taskId,
+      billingSessionId: hasBillingSessionId ? item.billingSessionId || null : existingItem.billingSessionId || null,
+      billingPolicySnapshot: hasBillingPolicySnapshot ? item.billingPolicySnapshot || null : existingItem.billingPolicySnapshot || null,
       sentRows: Array.isArray(item.sentRows) ? item.sentRows : [],
       workspaceId: item.workspaceId || 'main',
       sentAt: item.sentAt || new Date().toISOString(),

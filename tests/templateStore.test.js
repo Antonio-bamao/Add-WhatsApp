@@ -38,6 +38,24 @@ test('saves templates and removes blank lines', () => {
   assert.equal(loaded.fr.length, 4);
 });
 
+test('saves finite package template boundaries without refilling removed rows', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'add-whatsapp-templates-'));
+  const filePath = path.join(dir, 'templates.json');
+  const store = new JsonTemplateStore(filePath);
+
+  store.save({
+    en: ['EN 1', 'EN 2'],
+    es: ['ES 1', 'ES 2'],
+    fr: ['FR 1', 'FR 2']
+  }, { fillDefaults: false });
+
+  const raw = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+  assert.deepEqual(raw.en, ['EN 1', 'EN 2']);
+  assert.deepEqual(raw.es, ['ES 1', 'ES 2']);
+  assert.deepEqual(raw.fr, ['FR 1', 'FR 2']);
+  assert.deepEqual(new JsonTemplateStore(filePath).load({ fillDefaults: false }).en, ['EN 1', 'EN 2']);
+});
+
 test('falls back to default language when a saved pool is empty', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'add-whatsapp-templates-'));
   const filePath = path.join(dir, 'templates.json');

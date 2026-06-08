@@ -41,11 +41,33 @@ class CloudApiClient {
     });
   }
 
+  async getAppPolicy(accessToken) {
+    return this.request('/v1/app-policy', {
+      headers: { authorization: `Bearer ${accessToken}` }
+    });
+  }
+
   async consumeCredit(accessToken, payload) {
     return this.request('/v1/credits/consume', {
       method: 'POST',
       headers: { authorization: `Bearer ${accessToken}` },
       body: payload
+    });
+  }
+
+  async createTaskBillingSession(accessToken, payload) {
+    return this.request('/v1/task-billing-sessions', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${accessToken}` },
+      body: payload
+    });
+  }
+
+  async closeTaskBillingSession(accessToken, sessionId) {
+    return this.request(`/v1/task-billing-sessions/${encodeURIComponent(sessionId)}/close`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${accessToken}` },
+      body: {}
     });
   }
 
@@ -203,7 +225,16 @@ function mapCloudEntitlements(payload = {}) {
     availableNow: Number.isFinite(Number(payload.availableToday)) ? Number(payload.availableToday) : entitlement.availableNow,
     nextResetAt: payload.resetAt || entitlement.nextResetAt,
     catalog: planCatalog(),
-    resetPolicy: '每日上限按服务器 Asia/Shanghai 业务日重置，未使用账户余额长期保留。'
+    resetPolicy: '每日上限按服务器 Asia/Shanghai 业务日重置，未使用账户余额长期保留。',
+    billingPolicy: payload.billingPolicy || null,
+    billingMode: payload.billingMode || (payload.billingPolicy && payload.billingPolicy.mode) || 'paid',
+    unlimitedDailyUsage: Boolean(payload.unlimitedDailyUsage),
+    hideBillingNavigation: Boolean(payload.hideBillingNavigation),
+    effectiveCapabilities: payload.effectiveCapabilities || { ...entitlement.capabilities },
+    effectiveWorkspaceLimit: payload.effectiveWorkspaceLimit ?? entitlement.plan.workspaceLimit,
+    effectiveTemplateLimit: Object.prototype.hasOwnProperty.call(payload, 'effectiveTemplateLimit')
+      ? payload.effectiveTemplateLimit
+      : entitlement.plan.templateLimit
   };
 }
 

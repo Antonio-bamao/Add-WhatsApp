@@ -22,14 +22,16 @@ const DEFAULT_TEMPLATES = {
   ]
 };
 
-function cleanTemplates(value) {
+function cleanTemplates(value, options = {}) {
+  const fillDefaults = options.fillDefaults !== false;
+  const minimumPerLanguage = fillDefaults ? 4 : 1;
   const result = {};
   for (const language of ['en', 'es', 'fr']) {
     const pool = Array.isArray(value && value[language]) ? value[language] : [];
     const cleaned = pool.map(item => String(item).trim()).filter(Boolean);
     result[language] = [...cleaned];
     for (const template of DEFAULT_TEMPLATES[language]) {
-      if (result[language].length >= 4) break;
+      if (result[language].length >= minimumPerLanguage) break;
       if (!result[language].includes(template)) result[language].push(template);
     }
   }
@@ -64,18 +66,18 @@ class JsonTemplateStore {
     this.filePath = filePath;
   }
 
-  load() {
-    if (!fs.existsSync(this.filePath)) return cleanTemplates(DEFAULT_TEMPLATES);
+  load(options = {}) {
+    if (!fs.existsSync(this.filePath)) return cleanTemplates(DEFAULT_TEMPLATES, options);
     try {
-      return cleanTemplates(JSON.parse(fs.readFileSync(this.filePath, 'utf-8')));
+      return cleanTemplates(JSON.parse(fs.readFileSync(this.filePath, 'utf-8')), options);
     } catch {
-      return cleanTemplates(DEFAULT_TEMPLATES);
+      return cleanTemplates(DEFAULT_TEMPLATES, options);
     }
   }
 
-  save(templates) {
+  save(templates, options = {}) {
     fs.mkdirSync(path.dirname(this.filePath), { recursive: true });
-    const cleaned = cleanTemplates(templates);
+    const cleaned = cleanTemplates(templates, options);
     fs.writeFileSync(this.filePath, JSON.stringify(cleaned, null, 2));
     return cleaned;
   }
