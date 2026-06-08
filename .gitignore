@@ -24,6 +24,7 @@ release/
 website/.next/
 website/out/
 website/.visual-check/
+.worktrees/
 
 # Local environment
 .env
