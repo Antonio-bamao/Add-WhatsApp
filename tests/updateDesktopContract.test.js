@@ -63,7 +63,7 @@ test('Windows build is a per-user x64 NSIS installer with a generic update provi
   const packageJson = JSON.parse(read('package.json'));
   const builderConfig = read('electron-builder.config.js');
 
-  assert.equal(packageJson.version, '0.1.5');
+  assert.equal(packageJson.version, '0.1.6');
   assert.match(packageJson.scripts.build, /electron-builder --config electron-builder\.config\.js --win nsis --x64/);
   assert.ok(packageJson.dependencies['electron-updater']);
   assert.ok(packageJson.dependencies['electron-log']);
@@ -82,7 +82,7 @@ test('website policy supports stop, mandatory install, and revoked versions', ()
 
   assert.equal(policy.schemaVersion, 1);
   assert.equal(policy.enabled, true);
-  assert.equal(policy.version, '0.1.5');
+  assert.equal(policy.version, '0.1.6');
   assert.equal(policy.mandatoryOnNextLaunch, true);
   assert.deepEqual(policy.revokedVersions, []);
   assert.equal(policy.fileName, 'Add-WhatsApp-Setup.exe');

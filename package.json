@@ -1,6 +1,6 @@
 {
   "name": "add-whatsapp-desktop",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "WhatsApp contact follow-up desktop automation tool",
   "author": "Add WhatsApp",
   "main": "src/main/main.js",

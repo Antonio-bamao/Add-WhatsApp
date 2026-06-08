@@ -621,3 +621,13 @@
 - 代码边界：原代码虽然会在 WhatsApp 页面连续停留 `about:blank` 后报错并关闭浏览器，但中途没有运行日志提示，用户会误以为二维码刷新逻辑卡死。
 - 动作：增加 `auth:blank-page` 事件，在第一次检测到 WhatsApp Web 页面仍是 `about:blank` 时就提示“当前电脑网络、VPN、代理或防火墙可能无法访问 web.whatsapp.com，正在继续等待页面加载”。
 - 验证：先补红灯测试确认旧代码不会发出 `auth:blank-page`；修复后 `node --test tests\whatsappService.test.js` 通过 14/14。
+
+## 2026-06-08T23:52:58+08:00｜发布 0.1.6 安装版和自动更新工件
+- 目标：把全站免费策略、计费边界稳定性、WhatsApp 启动窗口和 about:blank 诊断修复合并到 `main`，并发布为 `0.1.6`，供已安装 `0.1.5` 的客户端通过软件内自动更新升级。
+- 动作：将 `codex/free-operation-mode` worktree 提交 `c5dc90e Stabilize free access policy and WhatsApp launch` 后合并回 `main`，合并提交为 `6bafc58 Merge free operation mode and WhatsApp fixes`；新增 `server/src/services/billingPolicy.js` 已纳入版本库。
+- 动作：桌面端版本升到 `0.1.6`，执行 `npm run build` 生成 `dist\Add-WhatsApp-Setup-0.1.6.exe` 和 blockmap；执行 `npm run publish:update` 同步 `website/public/downloads/latest/Add-WhatsApp-Setup.exe`、`latest/update.json`、`updates/win/stable/Add-WhatsApp-Setup-0.1.6.exe`、blockmap 和 `latest.yml`。
+- 结果：`0.1.6` 安装器大小 `228812557` 字节，SHA256 `2769d401276553a952c42f35d02583fa2bcb4c2d05f6b0b9632c922f474fb0ae`，SHA512 `KZsrjUlkOTfKkUoXt3AXtePq+ZgUwmeWs0p9RAgRBpCiE+Ai7d5E6BeBZcG9lWWVqUd4iRUl/sF+GSY9BwPB5A==`；官网版本记录最新项改为 0.1.6，并保留 0.1.5 历史记录。
+- 验证：`npm test` 通过 214/214；`npm test --prefix server` 通过 48/48（PostgreSQL 实库测试因无 DATABASE_URL skip）；`npm test --prefix admin` 通过 12/12；`npm test --prefix website` 通过 6/6；`npm run build` 成功；`npm run build --prefix website` 成功。
+- 服务器部署命令：生产机进入 `/opt/add-whatsapp` 后先看 `git status --short`，如只有服务器本地 lockfile 变脏可 `git restore package-lock.json website/package-lock.json` 或 stash；随后执行 `git pull --ff-only origin main`、`git lfs pull`、`npm ci`、`npm ci --prefix website`、`npm run build --prefix website`、`systemctl restart add-whatsapp-website.service`、`nginx -t`、`systemctl reload nginx`。本轮包含服务端 schema/runtime 变更，如果生产 API 也运行同仓代码，建议同步执行 `npm ci --prefix server` 并重启 `add-whatsapp-api.service`。
+- 线上验证标准：`curl -s https://addwhatsapp.com/downloads/latest/update.json` 必须显示 `version=0.1.6`、`sizeBytes=228812557` 和上述 SHA256；`curl -I -H "Range: bytes=0-0" https://addwhatsapp.com/downloads/updates/win/stable/Add-WhatsApp-Setup-0.1.6.exe` 必须返回 `206 Partial Content`；已安装 0.1.5 的客户端启动后应能在设置页/自动更新状态看到 0.1.6 更新。
+- 限制：安装包仍未做 Authenticode 签名，Smart App Control / SmartScreen 低信誉拦截风险仍存在；自动更新链路依赖服务器完成 Git LFS 拉取和 website 重建，GitHub push 本身不会让线上官网立即生效。

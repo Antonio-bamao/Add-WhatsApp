@@ -122,7 +122,7 @@ describe("public website structure", () => {
 
     assert.equal(updateJson.schemaVersion, 1);
     assert.equal(updateJson.enabled, true);
-    assert.equal(updateJson.version, "0.1.5");
+    assert.equal(updateJson.version, "0.1.6");
     assert.equal(updateJson.mandatoryOnNextLaunch, true);
     assert.deepEqual(updateJson.revokedVersions, []);
     assert.equal(updateJson.fileName, "Add-WhatsApp-Setup.exe");
@@ -136,8 +136,8 @@ describe("public website structure", () => {
     const stableDir = path.join(websiteRoot, "public/downloads/updates/win/stable");
     assert.ok(fs.existsSync(latestInstaller));
     assert.equal(updateJson.sizeBytes, fs.statSync(latestInstaller).size);
-    assert.ok(fs.existsSync(path.join(stableDir, "Add-WhatsApp-Setup-0.1.5.exe")));
-    assert.ok(fs.existsSync(path.join(stableDir, "Add-WhatsApp-Setup-0.1.5.exe.blockmap")));
+    assert.ok(fs.existsSync(path.join(stableDir, "Add-WhatsApp-Setup-0.1.6.exe")));
+    assert.ok(fs.existsSync(path.join(stableDir, "Add-WhatsApp-Setup-0.1.6.exe.blockmap")));
     assert.ok(fs.existsSync(path.join(stableDir, "latest.yml")));
     assert.ok(!fs.existsSync(path.join(websiteRoot, "public/downloads/latest/Add-WhatsApp.exe")));
     const releaseBinaries = listFiles(path.join(websiteRoot, "public/downloads/releases"))

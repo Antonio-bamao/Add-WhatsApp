@@ -1,8 +1,8 @@
-version: 0.1.5
+version: 0.1.6
 files:
-  - url: Add-WhatsApp-Setup-0.1.5.exe
-    sha512: F5m1g6CDswI1Yom63UPw1vnLaIRx4x0tPqltG9jIDwmvAnsmsXETgidjDJtyA5TC/xhH10S7wecRDdBofgHdfQ==
-    size: 228629436
-path: Add-WhatsApp-Setup-0.1.5.exe
-sha512: F5m1g6CDswI1Yom63UPw1vnLaIRx4x0tPqltG9jIDwmvAnsmsXETgidjDJtyA5TC/xhH10S7wecRDdBofgHdfQ==
-releaseDate: '2026-06-06T14:08:41.616Z'
+  - url: Add-WhatsApp-Setup-0.1.6.exe
+    sha512: KZsrjUlkOTfKkUoXt3AXtePq+ZgUwmeWs0p9RAgRBpCiE+Ai7d5E6BeBZcG9lWWVqUd4iRUl/sF+GSY9BwPB5A==
+    size: 228812557
+path: Add-WhatsApp-Setup-0.1.6.exe
+sha512: KZsrjUlkOTfKkUoXt3AXtePq+ZgUwmeWs0p9RAgRBpCiE+Ai7d5E6BeBZcG9lWWVqUd4iRUl/sF+GSY9BwPB5A==
+releaseDate: '2026-06-08T15:50:42.774Z'
