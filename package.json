@@ -1,6 +1,6 @@
 {
   "name": "add-whatsapp-desktop",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "WhatsApp contact follow-up desktop automation tool",
   "author": "Add WhatsApp",
   "main": "src/main/main.js",
@@ -36,6 +36,7 @@
     "asarUnpack": [
       "**/chromium/**"
     ],
+    "afterPack": "scripts/after-pack-icon.js",
     "win": {
       "target": [
         {
@@ -77,6 +78,7 @@
   "devDependencies": {
     "electron": "^31.7.7",
     "electron-builder": "^24.13.3",
+    "rcedit": "^5.0.2",
     "yaml": "^2.8.1"
   }
 }

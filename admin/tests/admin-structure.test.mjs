@@ -325,6 +325,9 @@ describe("admin console structure", () => {
     assert.match(js, /收费模式开关/);
     assert.match(js, /OFF：全站免费运行中/);
     assert.match(js, /ON：套餐与额度计费中/);
+    assert.match(js, /留空立即生效/);
+    assert.match(js, /const effectiveAtValue = policy\.effectiveAt[\s\S]*: "";/);
+    assert.doesNotMatch(js, /nextShanghaiMidnightLocalValue/);
     assert.match(js, /全站免费/);
     assert.match(js, /套餐与额度计费/);
     assert.match(js, /正在运行的免费任务不会被中途收费/);

@@ -60,7 +60,7 @@ const {
 
 const PROXY_MONITOR_INTERVAL_MS = 5 * 60 * 1000;
 const CLOUD_LEASE_RENEW_INTERVAL_MS = 30 * 1000;
-const UPDATE_STARTUP_DELAY_MS = 30 * 1000;
+const UPDATE_STARTUP_DELAY_MS = 5 * 1000;
 const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const UPDATE_WORKSPACE_SHUTDOWN_TIMEOUT_MS = 120 * 1000;
 const TASK_SHUTDOWN_TIMEOUT_MS = 90 * 1000;
@@ -434,8 +434,20 @@ function scheduleUpdateChecks() {
   if (typeof updateCheckTimer.unref === 'function') updateCheckTimer.unref();
 }
 
+function shouldSurfaceMandatoryUpdate(state = {}) {
+  return Boolean(
+    state.mandatory &&
+    state.targetVersion &&
+    ['available', 'waiting-for-idle', 'downloading', 'downloaded', 'installing', 'error'].includes(state.status)
+  );
+}
+
 function handleUpdateStateChanged(state) {
   sendToRenderer('updates:state-changed', state);
+  if (shouldSurfaceMandatoryUpdate(state) && mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.show();
+    mainWindow.focus();
+  }
   if (updateRetryTimer) clearTimeout(updateRetryTimer);
   updateRetryTimer = null;
   const retryAtMs = Date.parse(state.retryAt);

@@ -1,16 +1,16 @@
 {
   "schemaVersion": 1,
   "enabled": true,
-  "version": "0.1.6",
+  "version": "0.1.7",
   "mandatoryOnNextLaunch": true,
   "revokedVersions": [],
   "fileName": "Add-WhatsApp-Setup.exe",
   "downloadUrl": "/downloads/latest/Add-WhatsApp-Setup.exe",
   "updateFeedUrl": "/downloads/updates/win/stable/",
   "releaseDate": "2026-06-08",
-  "sizeBytes": 228812557,
-  "sha256": "2769d401276553a952c42f35d02583fa2bcb4c2d05f6b0b9632c922f474fb0ae",
-  "sha512": "KZsrjUlkOTfKkUoXt3AXtePq+ZgUwmeWs0p9RAgRBpCiE+Ai7d5E6BeBZcG9lWWVqUd4iRUl/sF+GSY9BwPB5A==",
+  "sizeBytes": 228876916,
+  "sha256": "dff058a5d8b838fc7096e82e922cd8561d050014f3933128500610313e278c1e",
+  "sha512": "IjD08Ms1U3MSQ6GdYsK5P3bxXd9YoBfjwJkSkP7rk+xfYz/SsoW67We4ZqGQAEGSgxk2S5I65fL03PvsWrHKUA==",
   "notesUrl": "/releases",
   "releaseNotesUrl": "https://addwhatsapp.com/releases"
 }

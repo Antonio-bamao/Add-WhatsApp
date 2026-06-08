@@ -401,14 +401,6 @@ function datetimeLocalValue(value) {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
-function nextShanghaiMidnightLocalValue() {
-  const next = new Date();
-  next.setDate(next.getDate() + 1);
-  next.setHours(0, 0, 0, 0);
-  const pad = (value) => String(value).padStart(2, "0");
-  return `${next.getFullYear()}-${pad(next.getMonth() + 1)}-${pad(next.getDate())}T00:00`;
-}
-
 function billingPolicyConfirmationItems(targetMode) {
   if (targetMode === "paid") {
     return [
@@ -440,7 +432,7 @@ function renderBillingPolicyPanel() {
     : (switchIsPaid ? "ON：套餐与额度计费中" : "OFF：全站免费运行中");
   const effectiveAtValue = policy.effectiveAt
     ? datetimeLocalValue(policy.effectiveAt)
-    : (switchIsPaid ? "" : nextShanghaiMidnightLocalValue());
+    : "";
   return `
     <section class="section-block billing-policy-panel">
       <div class="billing-policy-head">
@@ -470,7 +462,7 @@ function renderBillingPolicyPanel() {
           </span>
         </label>
         <label>
-          <span>生效时间</span>
+          <span>生效时间（可选，留空立即生效）</span>
           <input data-billing-policy-effective-at name="effectiveAt" type="datetime-local" value="${escapeHtml(effectiveAtValue)}" />
         </label>
         <label>

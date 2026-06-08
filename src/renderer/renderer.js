@@ -15,7 +15,8 @@ const state = {
   statisticsDays: 365,
   statisticsMetric: 'sent',
   analytics: null,
-  update: null
+  update: null,
+  mandatoryUpdateInstallRequested: false
 };
 
 const CLOUD_ENTITLEMENT_REFRESH_MIN_INTERVAL_MS = 60 * 1000;
@@ -132,6 +133,13 @@ const elements = {
   updateNotesButton: document.getElementById('updateNotesButton'),
   checkUpdateButton: document.getElementById('checkUpdateButton'),
   installUpdateButton: document.getElementById('installUpdateButton'),
+  forcedUpdateModal: document.getElementById('forcedUpdateModal'),
+  forcedUpdateTitle: document.getElementById('forcedUpdateTitle'),
+  forcedUpdateDetail: document.getElementById('forcedUpdateDetail'),
+  forcedUpdateProgress: document.getElementById('forcedUpdateProgress'),
+  forcedUpdateStatus: document.getElementById('forcedUpdateStatus'),
+  forcedUpdateInstallButton: document.getElementById('forcedUpdateInstallButton'),
+  forcedUpdateRetryButton: document.getElementById('forcedUpdateRetryButton'),
   syncPasswordInput: document.getElementById('syncPasswordInput'),
   exportSyncButton: document.getElementById('exportSyncButton'),
   importSyncButton: document.getElementById('importSyncButton'),
@@ -2444,6 +2452,60 @@ function updateErrorLabel(update = {}) {
     : '更新包由已验证发布者签名。';
 }
 
+function shouldShowForcedUpdateModal(update = {}) {
+  return Boolean(
+    update.mandatory &&
+    update.targetVersion &&
+    ['available', 'waiting-for-idle', 'downloading', 'downloaded', 'installing', 'error'].includes(update.status)
+  );
+}
+
+function forcedUpdateDetailLabel(update = {}) {
+  const versionText = update.targetVersion ? ` ${update.targetVersion}` : '';
+  if (update.status === 'waiting-for-idle') return `新版本${versionText}必须安装。当前任务结束后会继续下载更新。`;
+  if (update.status === 'downloading') return `新版本${versionText}必须安装。正在下载更新包。`;
+  if (update.status === 'downloaded') return `新版本${versionText}已下载完成，软件正在准备重启安装。`;
+  if (update.status === 'installing') return `新版本${versionText}正在安装，软件会自动重启。`;
+  if (update.status === 'error') return `新版本${versionText}必须安装，但当前更新流程遇到异常。`;
+  return `新版本${versionText}必须安装。更新包准备完成后会自动重启。`;
+}
+
+function renderForcedUpdateModal(update = {}) {
+  if (!elements.forcedUpdateModal) return;
+  const shouldShow = shouldShowForcedUpdateModal(update);
+  elements.forcedUpdateModal.hidden = !shouldShow;
+  if (!shouldShow) {
+    state.mandatoryUpdateInstallRequested = false;
+    return;
+  }
+  const percent = Math.max(0, Math.min(100, Number(update.percent || 0)));
+  elements.forcedUpdateTitle.textContent = update.status === 'downloaded'
+    ? '更新已下载，正在重启安装'
+    : '发现必须安装的新版本';
+  elements.forcedUpdateDetail.textContent = forcedUpdateDetailLabel(update);
+  elements.forcedUpdateProgress.value = percent;
+  elements.forcedUpdateStatus.textContent = update.status === 'error'
+    ? updateErrorLabel(update)
+    : `${updateStatusLabel(update)}${percent ? ` · ${Math.round(percent)}%` : ''}`;
+  elements.forcedUpdateInstallButton.hidden = false;
+  elements.forcedUpdateInstallButton.disabled = update.status !== 'downloaded' || state.mandatoryUpdateInstallRequested;
+  elements.forcedUpdateRetryButton.hidden = update.status !== 'error';
+  elements.forcedUpdateRetryButton.disabled = update.status === 'checking';
+}
+
+function maybeInstallMandatoryUpdate(update = {}) {
+  if (update.status === 'error') {
+    state.mandatoryUpdateInstallRequested = false;
+    return;
+  }
+  if (update.mandatory && update.status === 'downloaded' && !state.mandatoryUpdateInstallRequested) {
+    state.mandatoryUpdateInstallRequested = true;
+    installPendingUpdate({ automatic: true }).catch(() => {
+      state.mandatoryUpdateInstallRequested = false;
+    });
+  }
+}
+
 function renderUpdateState(update = {}) {
   state.update = update;
   elements.currentVersionValue.textContent = update.currentVersion || '-';
@@ -2456,6 +2518,8 @@ function renderUpdateState(update = {}) {
   elements.checkUpdateButton.disabled = ['checking', 'downloading', 'installing'].includes(update.status);
   elements.updateNotesButton.disabled = !update.releaseNotesUrl;
   elements.updateNotesButton.dataset.url = update.releaseNotesUrl || '';
+  renderForcedUpdateModal(update);
+  maybeInstallMandatoryUpdate(update);
 }
 
 async function refreshUpdateState() {
@@ -2482,11 +2546,20 @@ async function checkForUpdates() {
   await refreshUpdateState();
 }
 
-async function installPendingUpdate() {
+async function installPendingUpdate(options = {}) {
   if (typeof window.addWhatsapp.installPendingUpdate !== 'function') return;
   elements.installUpdateButton.disabled = true;
+  if (elements.forcedUpdateInstallButton) elements.forcedUpdateInstallButton.disabled = true;
   const result = await window.addWhatsapp.installPendingUpdate();
   if (!result || !result.ok) {
+    if (options.automatic) {
+      state.mandatoryUpdateInstallRequested = false;
+      if (elements.forcedUpdateStatus) {
+        elements.forcedUpdateStatus.textContent = result && result.error
+          ? result.error
+          : '自动安装没有启动，请点击立即重启更新。';
+      }
+    }
     await refreshUpdateState();
   }
 }
@@ -2607,6 +2680,12 @@ elements.logoutButton.addEventListener('click', logoutAccount);
 elements.clearWhatsAppButton.addEventListener('click', clearWhatsAppSession);
 elements.checkUpdateButton.addEventListener('click', checkForUpdates);
 elements.installUpdateButton.addEventListener('click', installPendingUpdate);
+if (elements.forcedUpdateInstallButton) {
+  elements.forcedUpdateInstallButton.addEventListener('click', installPendingUpdate);
+}
+if (elements.forcedUpdateRetryButton) {
+  elements.forcedUpdateRetryButton.addEventListener('click', checkForUpdates);
+}
 elements.updateNotesButton.addEventListener('click', async () => {
   const url = elements.updateNotesButton.dataset.url;
   if (url) await window.addWhatsapp.openExternalUrl(url);

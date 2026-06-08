@@ -854,6 +854,29 @@
       </main>
     </div>
 
+    <div id="forcedUpdateModal" class="modal-backdrop forced-update-modal" hidden>
+      <section class="app-modal forced-update-dialog" role="dialog" aria-modal="true" aria-labelledby="forcedUpdateTitle">
+        <div class="modal-mark risk-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24">
+            <path d="M12 2a10 10 0 1 0 10 10 1 1 0 1 0-2 0 8 8 0 1 1-2.34-5.66H16a1 1 0 1 0 0 2h4a1 1 0 0 0 1-1v-4a1 1 0 1 0-2 0v1.52A9.96 9.96 0 0 0 12 2Zm1 5a1 1 0 1 0-2 0v5c0 .27.11.52.29.71l3 3a1 1 0 0 0 1.42-1.42L13 11.59V7Z" />
+          </svg>
+        </div>
+        <div>
+          <p class="eyebrow">软件更新</p>
+          <h3 id="forcedUpdateTitle">发现必须安装的新版本</h3>
+          <p id="forcedUpdateDetail">正在准备更新包，完成后会自动重启安装。</p>
+        </div>
+        <div class="forced-update-progress">
+          <progress id="forcedUpdateProgress" max="100" value="0" aria-label="强制更新下载进度"></progress>
+          <p id="forcedUpdateStatus" class="sync-state">等待更新状态。</p>
+        </div>
+        <div class="modal-actions forced-update-actions">
+          <button id="forcedUpdateInstallButton" class="button primary" type="button" disabled>立即重启更新</button>
+          <button id="forcedUpdateRetryButton" class="button secondary" type="button" hidden>重新检查</button>
+        </div>
+      </section>
+    </div>
+
     <div id="paymentSuccessModal" class="modal-backdrop" hidden>
       <section class="app-modal" role="dialog" aria-modal="true" aria-labelledby="paymentSuccessTitle">
         <div class="modal-mark" aria-hidden="true">
