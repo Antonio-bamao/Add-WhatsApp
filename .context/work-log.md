@@ -556,3 +556,21 @@
 - 结果：后台“上传名单审计”能看到 16630 行记录；新 access log 能输出 `status` 和 `request_length`，用户验证出现 `status=201 request_length=442876`、`status=201 request_length=615442`，不再出现 413/504。
 - 验证：本地代码层面 `npm test` 通过 164/164；`npm test --prefix server` 通过 43/43；生产层面 `nginx -t` successful、`systemctl reload nginx` 完成、Nginx access log 新格式显示 POST `/v1/contact-imports` 返回 201 且带 request_length。
 - 下一步：保持 `request_length` 日志格式用于后续大名单回归；如果未来请求接近 28MB 客户端预检阈值，应提示用户拆分名单，而不是继续让 Nginx/API 白跑。
+
+## 2026-06-06T22:45:00+08:00｜落地 Windows 自动更新安装版并同步官网发布链路
+- 目标：把最后一个大功能“无需用户每次手动去官网下载新包”的自动更新链路落地，同时记录安装、卸载、签名和官网部署边界。
+- 决策：从 Windows `portable` 便携版迁移为 x64、当前用户、one-click NSIS 安装版，首个安装版版本为 `0.1.5`。现有 `0.1.4` 便携版用户仍需最后手动安装一次，后续通过 `electron-updater` 走自建 generic 更新源 `https://addwhatsapp.com/downloads/updates/win/stable/`。
+- 动作：新增 `src/main/updateManager.js`、`src/main/appUpdater.js` 和 `src/main/workspaceProcessRegistry.js`；主进程仅在打包后的主工作台启用更新，启动 30 秒后检查、每 6 小时检查一次，网络/清单失败按 15 分钟、1 小时、6 小时退避。
+- 动作：更新下载在任务运行时进入 `waiting-for-idle`，任务空闲后自动下载；`autoInstallOnAppQuit=false`，下载完成后持久化 pending 版本、校验状态、是否强制安装和失败次数；下次启动先读服务器策略，只有策略仍启用且 `mandatoryOnNextLaunch=true` 且版本未撤销才进入安装门禁。
+- 动作：安装前调用 `prepareForShutdown()` 保存任务进度、释放云端工作台租约、停止代理、销毁 WhatsApp Chromium；所有工作台通过共享 runtime 目录登记 PID、任务状态和心跳，安装前发出关闭指令并等待最多 120 秒，超时取消安装且不强杀进程。
+- 动作：补齐异常边界：撤销版本、版本不一致、SHA-512/完整性失败、磁盘不足、缓存不可写、策略不可用、服务器取消强制、旧 pending 已安装、较新策略替换旧 pending、安装器返回后仍启动旧版本时计一次安装失败；连续安装失败 3 次进入熔断，避免用户永久卡死在安装门禁。
+- 动作：设置页新增“软件更新”面板，显示当前版本、目标版本、状态、下载进度、错误、重试时间和更新说明；preload/IPC 新增 `updates:get-state`、`updates:check`、`updates:install-pending`、`updates:state-changed`。
+- 动作：`package.json` 版本升到 `0.1.5`，构建目标改为 NSIS x64；新增 `electron-updater`、`electron-log`、`yaml`。为避免未签名构建在普通 Windows 用户下下载 winCodeSign 并因 symlink 权限失败，新增 `electron-builder.config.js`：未配置证书时关闭 `signAndEditExecutable`，配置 `CSC_LINK` / `CSC_KEY_PASSWORD` 后自动打开签名入口。
+- 动作：新增 `scripts/publish-update-assets.js` 和 `scripts/verify-update-host.js`。发布脚本校验 `latest.yml` 的版本、路径、SHA-512 和大小，复制版本化安装包/blockmap、官网下载别名和 `update.json`，支持 `--phase=artifacts` / `--phase=metadata` 两阶段发布，并只保留当前及前两个版本。线上校验脚本验证 `Content-Length`、Range `206` 和完整 SHA-512。
+- 动作：官网从 `/downloads/latest/Add-WhatsApp.exe` 切换到 `/downloads/latest/Add-WhatsApp-Setup.exe`，同时发布版本化 `updates/win/stable/Add-WhatsApp-Setup-0.1.5.exe`、blockmap、`latest.yml` 和新版 `update.json`。`website/next.config.mjs` 对元数据和 latest alias 设置 `no-store`，版本化更新工件设置长期 immutable 缓存；`.gitattributes` 将大体积 EXE 交给 Git LFS。
+- 结果：最终生成 `dist\Add-WhatsApp-Setup-0.1.5.exe`，大小 `228629436` 字节，SHA256 `75c20a9c19e819b8a696c708673777f1e062e87e35be91d877c5aca2ffbef113`，Authenticode 状态为 `NotSigned`，符合本期“预留签名但暂未购买证书”的假设。安装后程序目录为当前用户 `AppData\Local\Programs\add-whatsapp-desktop`，桌面只放快捷方式；卸载入口为系统“已安装的应用”或安装目录里的 `Uninstall Add WhatsApp.exe`，默认保留用户数据和 WhatsApp 缓存。
+- 结果：本地 `codex/auto-update` 已合并到 `main` 并推送 `origin/main`，合并提交 `fc35ea6 Merge auto update implementation`；Git LFS 已上传安装器。注意：官网线上不会因为 GitHub push 自动更新，仍必须在生产机 `/opt/add-whatsapp` 手动 pull/build/restart/reload。
+- 验证：根项目 `npm test` 通过 200/200；`npm test --prefix website` 通过 6/6；`npm run build --prefix website` 成功；`npm run build` 成功生成 NSIS 安装器和 blockmap；`npm run publish:update` 成功；安装器、官网 latest alias、版本化安装器 SHA256 一致；`dist\win-unpacked\resources\app-update.yml` 指向 generic feed；asar 抽查包含 updater 模块和 `electron-updater`/`electron-log`。
+- 线上部署命令：生产机进入 `/opt/add-whatsapp` 后，若 `git status --short` 只有服务器本地 lockfile 变脏，可 `git restore package-lock.json website/package-lock.json` 或按需 stash；随后 `git pull --ff-only origin main`、`git lfs pull`、`npm ci`、`npm ci --prefix website`、`npm run build --prefix website`、`systemctl restart add-whatsapp-website.service`、`nginx -t`、`systemctl reload nginx`。本轮通常不需要重启 API。
+- 线上验证标准：`curl -s https://addwhatsapp.com/downloads/latest/update.json` 必须显示 `version=0.1.5`、`sizeBytes=228629436`、SHA256 `75c20a...ef113`；`curl -I https://addwhatsapp.com/downloads/latest/Add-WhatsApp-Setup.exe` 返回真实安装包大小；`curl -I -H "Range: bytes=0-0" https://addwhatsapp.com/downloads/updates/win/stable/Add-WhatsApp-Setup-0.1.5.exe` 必须返回 `206 Partial Content`。
+- 当前限制：尚未完成生产域名部署后的 `npm run verify:update:host` 校验，也尚未在两台干净 Windows 虚拟机完成 `0.1.5 -> 0.1.6` 实机升级演练。Windows Smart App Control 会拦截未签名安装包，无法对单个 exe 加白名单；普通用户正式发布前应购买代码签名证书，最好 EV，其次 OV。

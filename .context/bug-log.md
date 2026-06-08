@@ -130,3 +130,19 @@
 - 最终线上验证：Nginx 配置 reload 后，`grep 'POST /v1/contact-imports' /var/log/nginx/access.log | grep -oE 'status=[0-9]{3}|request_length=[0-9]+' | paste - -` 显示新请求 `status=201 request_length=442876`、`status=201 request_length=615442`。后台“上传名单审计”已能看到 16630 行记录，`POST /v1/contact-imports` 不再出现 413/504，本轮用户确认“这个 bug 总算是完美解决了”。
 - 预防：以后处理大文件/审计上传问题，必须同时查客户端异常、pending reason、Nginx `error.log`、Nginx access log 的 `status/request_length`、API 日志和后台记录；不能只看桌面 UI 或默认 access log 的 `response_bytes`。Nginx 配置项必须写入配置文件并 `nginx -t && systemctl reload nginx`，不能在 shell 直接执行配置语句。
 - 状态：fixed and recorded。
+
+## 2026-06-06: 未签名 NSIS 安装包被 Windows Smart App Control 阻止
+- 现象：用户下载 `Add-WhatsApp-Setup.exe` 后，Windows 11 弹窗提示“智能应用控制已阻止可能不安全的应用”，原因是“无法验证其发布者，无法确认它是否能安全运行”，只有“正常”和“从 Microsoft Store 获取应用”按钮，没有“仍要运行”入口。
+- 根因：当前 `0.1.5` 安装包按本期假设未做 Authenticode 代码签名。Smart App Control 与普通 SmartScreen 不同，它没有针对单个 exe 的白名单按钮；未签名/低信誉新安装器会被直接拦截。改文件名、压缩包或换下载地址都不是可靠解决方案。
+- 临时自测：开发者本人可在 Windows 设置中进入 `隐私和安全性 -> Windows 安全中心 -> 应用和浏览器控制 -> 智能应用控制设置` 关闭 Smart App Control；若只是 Internet Zone 标记导致拦截，可右键 exe 属性勾选“解除锁定”，或执行 `Unblock-File "$env:USERPROFILE\Downloads\Add-WhatsApp-Setup.exe"`。
+- 正式解决：购买 Windows 代码签名证书并给安装包签名。当前 `electron-builder.config.js` 已预留条件签名入口；配置 `CSC_LINK` 和 `CSC_KEY_PASSWORD` 后 `npm run build` 会启用签名。EV 证书建立 SmartScreen 信任更快，OV 证书也能签名但新软件仍可能需要信誉积累。
+- 预防：以后对外发布前必须区分“打包成功”和“可被普通 Windows 用户顺利安装”。未签名包只能用于内部测试；对外下载页需要在签名前明确提示未知发布者风险，签名后重新打包、重新发布更新工件、重新校验 SHA/Range。
+- 状态：known release blocker for public trust。
+
+## 2026-06-06: 自动更新安装器发布后服务器必须执行 Git LFS 拉取
+- 现象：本地和 GitHub 已经包含 `0.1.5` 安装器，但生产官网是否更新仍取决于 `/opt/add-whatsapp` 服务器部署。用户疑惑本机 VS Code 里工作区干净，为什么服务器 `git status --short` 还会显示 `M package-lock.json` 和 `M website/package-lock.json`。
+- 根因：本机 Windows 仓库和服务器 `/opt/add-whatsapp` 是两份不同工作区。本机干净不代表服务器干净。服务器上历史执行 `npm install` / `npm ci` 或 Node/npm 版本差异可能重写 lockfile，导致 `git pull --ff-only` 被本地改动阻挡。
+- 处理：服务器部署前先 `git status --short`。若只有 `package-lock.json` / `website/package-lock.json` 脏且确认不需要保留，可 `git restore package-lock.json website/package-lock.json`；若不确定则 `git stash push -m "server-local-lockfiles-before-0.1.5-deploy" -- package-lock.json website/package-lock.json` 后再 pull。
+- 新增关键点：`0.1.5` 的 `Add-WhatsApp-Setup.exe` 约 229MB，已通过 Git LFS 管理。服务器 `git pull` 后必须执行 `git lfs pull`，否则线上可能只有几 KB 的 LFS 指针文件，官网下载和自动更新都会拿到坏文件。
+- 预防：每次更新官网安装包必须在服务器执行完整部署并校验：`git pull --ff-only origin main`、`git lfs pull`、`npm ci --prefix website`、`npm run build --prefix website`、重启 website、`nginx -t`、reload Nginx；随后用线上 `curl` 验证 `update.json`、latest installer 大小、`latest.yml`、版本化 installer Range `206` 和 SHA。
+- 状态：recorded。
