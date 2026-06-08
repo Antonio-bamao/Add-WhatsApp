@@ -119,6 +119,7 @@ describe("public website structure", () => {
 
   it("publishes the latest download manifest and referenced Windows binaries", () => {
     const updateJson = readJson("public/downloads/latest/update.json");
+    const releasesData = readText("lib/releases.js");
 
     assert.equal(updateJson.schemaVersion, 1);
     assert.equal(updateJson.enabled, true);
@@ -138,6 +139,9 @@ describe("public website structure", () => {
     assert.equal(updateJson.sizeBytes, fs.statSync(latestInstaller).size);
     assert.ok(fs.existsSync(path.join(stableDir, "Add-WhatsApp-Setup-0.1.7.exe")));
     assert.ok(fs.existsSync(path.join(stableDir, "Add-WhatsApp-Setup-0.1.7.exe.blockmap")));
+    assert.match(releasesData, /version:\s*"0\.1\.7"/);
+    assert.match(releasesData, new RegExp(`sizeBytes:\\s*${updateJson.sizeBytes}`));
+    assert.match(releasesData, new RegExp(`sha256:\\s*"${updateJson.sha256}"`));
     assert.ok(fs.existsSync(path.join(stableDir, "latest.yml")));
     assert.ok(!fs.existsSync(path.join(websiteRoot, "public/downloads/latest/Add-WhatsApp.exe")));
     const releaseBinaries = listFiles(path.join(websiteRoot, "public/downloads/releases"))

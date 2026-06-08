@@ -1,15 +1,15 @@
 export const latestRelease = {
-  version: "0.1.6",
+  version: "0.1.7",
   fileName: "Add-WhatsApp-Setup.exe",
   downloadUrl: "/downloads/latest/Add-WhatsApp-Setup.exe",
   releaseDate: "2026-06-08",
-  sizeBytes: 228812557,
-  sha256: "2769d401276553a952c42f35d02583fa2bcb4c2d05f6b0b9632c922f474fb0ae",
+  sizeBytes: 228876916,
+  sha256: "dff058a5d8b838fc7096e82e922cd8561d050014f3933128500610313e278c1e",
   highlights: [
-    "后台新增全站免费和套餐计费模式切换",
-    "修复免费/收费切换后的任务、模板和工作台边界",
-    "修复 WhatsApp 登录页压缩、双窗口和 about:blank 诊断提示",
-    "增强任务计费会话和离线补同步稳定性"
+    "新增强制更新弹窗，必须升级时会自动提示并重启安装",
+    "后台收费模式生效时间默认留空，避免误排程到次日",
+    "修复 Windows 桌面快捷方式显示 Electron 默认图标",
+    "缩短自动更新启动检查延迟"
   ]
 };
 
@@ -21,6 +21,19 @@ export const releaseHistory = [
     sizeBytes: latestRelease.sizeBytes,
     sha256: latestRelease.sha256,
     highlights: latestRelease.highlights
+  },
+  {
+    version: "0.1.6",
+    fileName: "Add-WhatsApp-Setup.exe",
+    releaseDate: "2026-06-08",
+    sizeBytes: 228812557,
+    sha256: "2769d401276553a952c42f35d02583fa2bcb4c2d05f6b0b9632c922f474fb0ae",
+    highlights: [
+      "后台新增全站免费和套餐计费模式切换",
+      "修复免费/收费切换后的任务、模板和工作台边界",
+      "修复 WhatsApp 登录页压缩、双窗口和 about:blank 诊断提示",
+      "增强任务计费会话和离线补同步稳定性"
+    ]
   },
   {
     version: "0.1.5",
