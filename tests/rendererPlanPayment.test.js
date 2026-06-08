@@ -504,6 +504,451 @@ test('keeps plan cards visible when refreshed cloud entitlements omit the catalo
   assert.equal(document.getElementById('balanceCreditsMetric').textContent, '5,500');
 });
 
+test('contracts templates and workspace affordance after policy switches back to paid mode', async () => {
+  const root = path.join(__dirname, '..');
+  const rendererCode = fs.readFileSync(path.join(root, 'src', 'renderer', 'renderer.js'), 'utf-8');
+  const document = createFakeDocument();
+  const saveCalls = [];
+  let authChanged = null;
+  const baseSubscription = {
+    ...createEntitlementState('advanced', { balanceCredits: 0, usedToday: 0, usedThisMonth: 0 }),
+    catalog: planCatalog(),
+    openSecondaryCount: 3
+  };
+  const freeSubscription = {
+    ...baseSubscription,
+    billingMode: 'free_access',
+    billingPolicy: { mode: 'free_access', version: 1 },
+    unlimitedDailyUsage: true,
+    hideBillingNavigation: true,
+    effectiveWorkspaceLimit: 5,
+    effectiveTemplateLimit: null,
+    effectiveCapabilities: {
+      ...baseSubscription.capabilities,
+      secondaryWorkspace: true,
+      proxySettings: true,
+      onlinePayment: false
+    }
+  };
+  const paidSubscription = {
+    ...baseSubscription,
+    billingMode: 'paid',
+    billingPolicy: { mode: 'paid', version: 2 },
+    unlimitedDailyUsage: false,
+    hideBillingNavigation: false,
+    effectiveWorkspaceLimit: 2,
+    effectiveTemplateLimit: 2,
+    effectiveCapabilities: { ...baseSubscription.capabilities }
+  };
+  const context = vm.createContext({
+    alert() {},
+    console,
+    document,
+    localStorage: createFakeStorage(),
+    window: {
+      addEventListener() {},
+      addWhatsapp: {
+        getBootstrapState: async () => ({
+          auth: {
+            authenticated: true,
+            user: { username: 'cloud-user' },
+            subscription: freeSubscription,
+            workspace: { isSecondary: false }
+          }
+        }),
+        getTemplates: async () => ({
+          en: ['EN 1', 'EN 2', 'EN 3'],
+          es: ['ES 1', 'ES 2', 'ES 3'],
+          fr: ['FR 1', 'FR 2', 'FR 3']
+        }),
+        saveTemplates: async (templates) => {
+          saveCalls.push(templates);
+          return { ok: true, templates };
+        },
+        refreshCloudEntitlements: async () => ({ ok: true, subscription: paidSubscription }),
+        listPaymentOrders: async () => ({ ok: true, items: [], total: 0 }),
+        onTaskEvent() {},
+        onHistoryUpdated() {},
+        onShowCloseChoice() {},
+        onAuthChanged(callback) {
+          authChanged = callback;
+        }
+      }
+    }
+  });
+
+  vm.runInContext(rendererCode, context, { filename: 'renderer.js' });
+  await flushAsync();
+  await flushAsync();
+
+  authChanged({
+    authenticated: true,
+    user: { username: 'cloud-user' },
+    subscription: paidSubscription,
+    workspace: { isSecondary: false }
+  });
+  await flushAsync();
+  await flushAsync();
+
+  assert.equal(saveCalls.length, 1);
+  assert.equal(JSON.stringify(saveCalls[0]), JSON.stringify({
+    en: ['EN 1', 'EN 2'],
+    es: ['ES 1', 'ES 2'],
+    fr: ['FR 1', 'FR 2']
+  }));
+  assert.match(document.getElementById('templateSaveState').textContent, /已移除 3 条超出文案/);
+  assert.equal(document.getElementById('openWorkspaceButton').disabled, true);
+  assert.match(document.getElementById('openWorkspaceButton').title, /最多同时使用 2 个工作台/);
+  assert.match(
+    document.getElementById('logList').children.map(child => child.textContent).join('\n'),
+    /工作台边界已收缩/
+  );
+});
+
+test('allows starting a task after forced refresh switches a zero-balance account to free access', async () => {
+  const root = path.join(__dirname, '..');
+  const rendererCode = fs.readFileSync(path.join(root, 'src', 'renderer', 'renderer.js'), 'utf-8');
+  const document = createFakeDocument();
+  const startCalls = [];
+  const subscription = {
+    ...createEntitlementState('advanced', { balanceCredits: 0, usedToday: 0, usedThisMonth: 0 }),
+    catalog: planCatalog(),
+    openSecondaryCount: 0
+  };
+  const freeSubscription = {
+    ...subscription,
+    unlimitedDailyUsage: true,
+    hideBillingNavigation: true,
+    billingMode: 'free_access',
+    availableNow: 0,
+    dailyRemaining: 0
+  };
+  const context = vm.createContext({
+    alert() {},
+    console,
+    document,
+    localStorage: createFakeStorage(),
+    window: {
+      addEventListener() {},
+      addWhatsapp: {
+        getBootstrapState: async () => ({
+          auth: {
+            authenticated: true,
+            user: { username: 'cloud-user' },
+            subscription,
+            workspace: { isSecondary: false }
+          }
+        }),
+        getTemplates: async () => ({ en: [], es: [], fr: [] }),
+        refreshCloudEntitlements: async () => ({
+          ok: true,
+          subscription: freeSubscription
+        }),
+        startTask: async (payload) => {
+          startCalls.push(payload);
+          return { started: true };
+        },
+        listPaymentOrders: async () => ({ ok: true, items: [], total: 0 }),
+        onTaskEvent() {},
+        onHistoryUpdated() {},
+        onShowCloseChoice() {},
+        onAuthChanged() {}
+      }
+    }
+  });
+
+  vm.runInContext(rendererCode, context, { filename: 'renderer.js' });
+  await flushAsync();
+
+  vm.runInContext(`
+    state.imported = {
+      stats: { valid: 1 },
+      rows: [{ rowNumber: 1, phone: "15550000000", valid: true }],
+      progress: { available: true, total: 1, processed: 0 }
+    };
+    startTask();
+  `, context);
+  await flushAsync();
+  await flushAsync();
+
+  assert.equal(startCalls.length, 1);
+});
+
+test('allows starting a task when refreshed policy says free access even if unlimited flag is missing', async () => {
+  const root = path.join(__dirname, '..');
+  const rendererCode = fs.readFileSync(path.join(root, 'src', 'renderer', 'renderer.js'), 'utf-8');
+  const document = createFakeDocument();
+  const startCalls = [];
+  const subscription = {
+    ...createEntitlementState('advanced', { balanceCredits: 0, usedToday: 0, usedThisMonth: 0 }),
+    catalog: planCatalog(),
+    openSecondaryCount: 0
+  };
+  const freePolicySubscription = {
+    ...subscription,
+    billingMode: 'free_access',
+    billingPolicy: { mode: 'free_access', version: 7 },
+    availableNow: 0,
+    dailyRemaining: 0
+  };
+  const context = vm.createContext({
+    alert() {},
+    console,
+    document,
+    localStorage: createFakeStorage(),
+    window: {
+      addEventListener() {},
+      addWhatsapp: {
+        getBootstrapState: async () => ({
+          auth: {
+            authenticated: true,
+            user: { username: 'cloud-user' },
+            subscription,
+            workspace: { isSecondary: false }
+          }
+        }),
+        getTemplates: async () => ({ en: [], es: [], fr: [] }),
+        refreshCloudEntitlements: async () => ({
+          ok: true,
+          subscription: freePolicySubscription
+        }),
+        startTask: async (payload) => {
+          startCalls.push(payload);
+          return { started: true };
+        },
+        listPaymentOrders: async () => ({ ok: true, items: [], total: 0 }),
+        onTaskEvent() {},
+        onHistoryUpdated() {},
+        onShowCloseChoice() {},
+        onAuthChanged() {}
+      }
+    }
+  });
+
+  vm.runInContext(rendererCode, context, { filename: 'renderer.js' });
+  await flushAsync();
+
+  vm.runInContext(`
+    state.imported = {
+      stats: { valid: 1 },
+      rows: [{ rowNumber: 1, phone: "15550000000", valid: true }],
+      progress: { available: true, total: 1, processed: 0 }
+    };
+    startTask();
+  `, context);
+  await flushAsync();
+  await flushAsync();
+
+  assert.equal(startCalls.length, 1);
+});
+
+test('syncs subscription from main before task start when renderer still has stale paid balance', async () => {
+  const root = path.join(__dirname, '..');
+  const rendererCode = fs.readFileSync(path.join(root, 'src', 'renderer', 'renderer.js'), 'utf-8');
+  const document = createFakeDocument();
+  const startCalls = [];
+  const staleSubscription = {
+    ...createEntitlementState('advanced', { balanceCredits: 0, usedToday: 0, usedThisMonth: 0 }),
+    catalog: planCatalog(),
+    openSecondaryCount: 0
+  };
+  const mainSubscription = {
+    ...staleSubscription,
+    billingMode: 'free_access',
+    billingPolicy: { mode: 'free_access', version: 7 },
+    unlimitedDailyUsage: true,
+    hideBillingNavigation: true
+  };
+  const context = vm.createContext({
+    alert() {},
+    console,
+    document,
+    localStorage: createFakeStorage(),
+    window: {
+      addEventListener() {},
+      addWhatsapp: {
+        getBootstrapState: async () => ({
+          auth: {
+            authenticated: true,
+            user: { username: 'cloud-user' },
+            subscription: staleSubscription,
+            workspace: { isSecondary: false }
+          }
+        }),
+        getTemplates: async () => ({ en: [], es: [], fr: [] }),
+        refreshCloudEntitlements: async () => ({ ok: true, skipped: true }),
+        getSubscriptionState: async () => mainSubscription,
+        startTask: async (payload) => {
+          startCalls.push(payload);
+          return { started: true };
+        },
+        listPaymentOrders: async () => ({ ok: true, items: [], total: 0 }),
+        onTaskEvent() {},
+        onHistoryUpdated() {},
+        onShowCloseChoice() {},
+        onAuthChanged() {}
+      }
+    }
+  });
+
+  vm.runInContext(rendererCode, context, { filename: 'renderer.js' });
+  await flushAsync();
+
+  vm.runInContext(`
+    state.imported = {
+      stats: { valid: 1 },
+      rows: [{ rowNumber: 1, phone: "15550000000", valid: true }],
+      progress: { available: true, total: 1, processed: 0 }
+    };
+    startTask();
+  `, context);
+  await flushAsync();
+  await flushAsync();
+
+  assert.equal(startCalls.length, 1);
+});
+
+test('keeps the task button clickable so paid-mode balance errors are shown in the log', async () => {
+  const root = path.join(__dirname, '..');
+  const rendererCode = fs.readFileSync(path.join(root, 'src', 'renderer', 'renderer.js'), 'utf-8');
+  const document = createFakeDocument();
+  const subscription = {
+    ...createEntitlementState('advanced', { balanceCredits: 0, usedToday: 0, usedThisMonth: 0 }),
+    billingMode: 'paid',
+    billingPolicy: { mode: 'paid', version: 8 },
+    catalog: planCatalog(),
+    openSecondaryCount: 0
+  };
+  const context = vm.createContext({
+    alert() {},
+    console,
+    document,
+    localStorage: createFakeStorage(),
+    window: {
+      addEventListener() {},
+      addWhatsapp: {
+        getBootstrapState: async () => ({
+          auth: {
+            authenticated: true,
+            user: { username: 'cloud-user' },
+            subscription,
+            workspace: { isSecondary: false }
+          }
+        }),
+        getTemplates: async () => ({ en: [], es: [], fr: [] }),
+        refreshCloudEntitlements: async () => ({ ok: true, subscription }),
+        getSubscriptionState: async () => subscription,
+        startTask: async () => ({ started: false, error: 'SHOULD_NOT_START' }),
+        listPaymentOrders: async () => ({ ok: true, items: [], total: 0 }),
+        onTaskEvent() {},
+        onHistoryUpdated() {},
+        onShowCloseChoice() {},
+        onAuthChanged() {}
+      }
+    }
+  });
+
+  vm.runInContext(rendererCode, context, { filename: 'renderer.js' });
+  await flushAsync();
+
+  vm.runInContext(`
+    state.imported = {
+      stats: { valid: 1 },
+      rows: [{ rowNumber: 1, phone: "15550000000", valid: true }],
+      progress: { available: true, total: 1, processed: 0 }
+    };
+    updateActionLocks();
+  `, context);
+
+  const runButton = document.getElementById('runButton');
+  assert.equal(runButton.disabled, false);
+  assert.match(runButton.title, /账户余额为 0/);
+
+  runButton.click();
+  await flushAsync();
+  await flushAsync();
+
+  assert.match(
+    document.getElementById('logList').children.map(child => child.textContent).join('\n'),
+    /账户余额为 0/
+  );
+});
+
+test('announces billing policy changes discovered by online polling', async () => {
+  const root = path.join(__dirname, '..');
+  const rendererCode = fs.readFileSync(path.join(root, 'src', 'renderer', 'renderer.js'), 'utf-8');
+  const document = createFakeDocument();
+  const intervals = [];
+  const initialSubscription = {
+    ...createEntitlementState('advanced', { balanceCredits: 0, usedToday: 0, usedThisMonth: 0 }),
+    billingMode: 'free_access',
+    billingPolicy: { mode: 'free_access', version: 7 },
+    unlimitedDailyUsage: true,
+    hideBillingNavigation: true,
+    catalog: planCatalog(),
+    openSecondaryCount: 0
+  };
+  const changedSubscription = {
+    ...createEntitlementState('advanced', { balanceCredits: 0, usedToday: 0, usedThisMonth: 0 }),
+    billingMode: 'paid',
+    billingPolicy: { mode: 'paid', version: 8 },
+    unlimitedDailyUsage: false,
+    hideBillingNavigation: false,
+    catalog: planCatalog(),
+    openSecondaryCount: 0
+  };
+  let refreshCount = 0;
+  const context = vm.createContext({
+    alert() {},
+    console,
+    document,
+    localStorage: createFakeStorage(),
+    setInterval(callback, intervalMs) {
+      intervals.push({ callback, intervalMs });
+      return intervals.length;
+    },
+    window: {
+      addEventListener() {},
+      addWhatsapp: {
+        getBootstrapState: async () => ({
+          auth: {
+            authenticated: true,
+            user: { username: 'cloud-user' },
+            subscription: initialSubscription,
+            workspace: { isSecondary: false }
+          }
+        }),
+        getTemplates: async () => ({ en: [], es: [], fr: [] }),
+        refreshCloudEntitlements: async () => {
+          refreshCount += 1;
+          return {
+            ok: true,
+            subscription: refreshCount <= 1 ? initialSubscription : changedSubscription
+          };
+        },
+        listPaymentOrders: async () => ({ ok: true, items: [], total: 0 }),
+        onTaskEvent() {},
+        onHistoryUpdated() {},
+        onShowCloseChoice() {},
+        onAuthChanged() {}
+      }
+    }
+  });
+
+  vm.runInContext(rendererCode, context, { filename: 'renderer.js' });
+  await flushAsync();
+  await flushAsync();
+
+  assert.ok(intervals.some(item => item.intervalMs <= 60 * 1000));
+  await intervals[intervals.length - 1].callback();
+  await flushAsync();
+  await flushAsync();
+
+  const logText = document.getElementById('logList').children.map(child => child.textContent).join('\n');
+  assert.match(logText, /运营策略已更新/);
+  assert.match(logText, /套餐与额度计费/);
+});
+
 test('shows payment success, refreshes the current plan, and keeps plan payments on the plan page', async () => {
   const root = path.join(__dirname, '..');
   const rendererCode = fs.readFileSync(path.join(root, 'src', 'renderer', 'renderer.js'), 'utf-8');
@@ -587,7 +1032,7 @@ test('shows payment success, refreshes the current plan, and keeps plan payments
   const professionalButton = document.querySelector('[data-plan-pay="professional"]');
   professionalButton.click();
   await flushAsync();
-  await intervals[1]();
+  await intervals[intervals.length - 1]();
   await flushAsync();
 
   assert.equal(document.getElementById('paymentSuccessModal').hidden, false);
@@ -729,6 +1174,27 @@ function createFakeDocument() {
           return element;
         });
       }
+      if (selector === '[data-template-tab]') {
+        return ['en', 'es', 'fr'].map(language => {
+          const element = this.getElementById(`templateTab${language}`);
+          element.dataset.templateTab = language;
+          return element;
+        });
+      }
+      if (selector === '[data-language]') {
+        return ['en', 'es', 'fr'].map(language => {
+          const element = this.getElementById(`templatePane${language}`);
+          element.dataset.language = language;
+          return element;
+        });
+      }
+      if (selector === '[data-template-add]') {
+        return ['en', 'es', 'fr'].map(language => {
+          const element = this.getElementById(`templateAdd${language}`);
+          element.dataset.templateAdd = language;
+          return element;
+        });
+      }
       if (selector === '[data-proxy-lookup]') return [];
       return [];
     }
@@ -809,6 +1275,15 @@ class FakeElement {
     return child;
   }
 
+  prepend(child) {
+    if (child.parentNode && child.parentNode !== this) {
+      child.parentNode.children = child.parentNode.children.filter(item => item !== child);
+    }
+    child.parentNode = this;
+    this.children = [child, ...this.children.filter(item => item !== child)];
+    return child;
+  }
+
   querySelector(selector) {
     if (selector === '[data-plan-pay]') {
       return this.children.find(child => child.dataset.planPay) || null;
@@ -824,9 +1299,11 @@ class FakeElement {
 
   querySelectorAll(selector) {
     if (selector === '.template-editor') {
-      return this.children.filter(child => child.className === 'template-editor');
+      return findDescendants(this, child => child.className === 'template-editor');
     }
-    if (selector === '.template-item-head span') return [];
+    if (selector === '.template-item-head span') {
+      return findDescendants(this, child => child.tagName === 'span');
+    }
     return [];
   }
 
@@ -846,7 +1323,11 @@ class FakeElement {
   }
 
   focus() {}
-  remove() {}
+  remove() {
+    if (!this.parentNode) return;
+    this.parentNode.children = this.parentNode.children.filter(child => child !== this);
+    this.parentNode = null;
+  }
   removeAttribute() {}
   setAttribute(name, value) {
     this[name] = value;
@@ -854,4 +1335,16 @@ class FakeElement {
   getAttribute(name) {
     return this[name];
   }
+}
+
+function findDescendants(root, predicate) {
+  const matches = [];
+  const visit = (node) => {
+    for (const child of node.children || []) {
+      if (predicate(child)) matches.push(child);
+      visit(child);
+    }
+  };
+  visit(root);
+  return matches;
 }

@@ -1,5 +1,13 @@
 import crypto from "node:crypto";
 import zlib from "node:zlib";
+import {
+  billingPolicyValueJson,
+  buildBillingPolicyUpdate,
+  createDefaultBillingPolicy,
+  entitlementBillingOverlay,
+  resolveBillingPolicyForNow,
+  signedAppPolicyResponse
+} from "./billingPolicy.js";
 
 export const PLAN_CATALOG = Object.freeze({
   free: {
@@ -43,6 +51,11 @@ export const PLAN_CATALOG = Object.freeze({
     templateLimit: 8
   }
 });
+
+function getStoreBillingPolicy(store) {
+  if (!store.billingPolicy) store.billingPolicy = createDefaultBillingPolicy(store.now());
+  return resolveBillingPolicyForNow(store.billingPolicy, store.now());
+}
 
 const PLAN_RANKS = Object.freeze({
   free: 0,
@@ -449,6 +462,9 @@ export function createCloudStore(options = {}) {
     contactImports: new Map(),
     referralCodes: new Map(),
     workspaceLeases: new Map(),
+    taskBillingSessions: new Map(),
+    taskUsageEvents: [],
+    billingPolicy: createDefaultBillingPolicy(fixedNow || new Date()),
     auditLogs: [],
     accessTokens: new Map(),
     adminUsers: new Map([
@@ -593,6 +609,7 @@ export function getEntitlements(store, userId) {
   getUser(store, userId);
   const subscription = getSubscription(store, userId);
   const plan = getPlan(subscription.planId);
+  const billingPolicy = getBillingPolicy(store);
   const balanceCredits = balanceFor(store, userId);
   const dailyUsage = getOrCreateDailyUsage(store, userId, plan);
   const monthlyUsage = getOrCreateMonthlyUsage(store, userId, plan);
@@ -614,8 +631,39 @@ export function getEntitlements(store, userId) {
     templateLimit: plan.templateLimit,
     referralCode,
     businessDate: dailyUsage.businessDate,
-    resetAt: `${dailyUsage.businessDate}T24:00:00+08:00`
+    resetAt: `${dailyUsage.businessDate}T24:00:00+08:00`,
+    ...entitlementBillingOverlay(billingPolicy, plan)
   };
+}
+
+export function getBillingPolicy(store) {
+  return getStoreBillingPolicy(store);
+}
+
+export function getAppPolicy(store) {
+  return signedAppPolicyResponse(getBillingPolicy(store), store.now());
+}
+
+export function updateBillingPolicy(store, { adminUserId, mode, effectiveAt = null, expectedVersion, reason, ip }) {
+  const before = getBillingPolicy(store);
+  const after = buildBillingPolicyUpdate(before, {
+    mode,
+    effectiveAt,
+    expectedVersion,
+    adminUserId,
+    now: store.now()
+  });
+  store.billingPolicy = after;
+  appendAuditLog(store, {
+    adminUserId,
+    action: "billing.policy_update",
+    targetType: "system_setting",
+    targetId: "billing_policy",
+    before,
+    after: { ...after, reason: reason || "billing policy update", valueJson: billingPolicyValueJson(after) },
+    ip
+  });
+  return { ...after };
 }
 
 export function adjustCredits(store, { adminUserId, userId, account, amount, reason, ip }) {
@@ -644,22 +692,134 @@ export function adjustCredits(store, { adminUserId, userId, account, amount, rea
   return { userId, account: user.username, ...after };
 }
 
-export function consumeCredit(store, { userId, idempotencyKey, taskId, contactHash, workspaceId, sentAt }) {
+export function createTaskBillingSession(store, { userId, taskId, workspaceId = "main", clientVersion, deviceId }) {
+  getUser(store, userId);
+  if (!taskId) throw new Error("TASK_ID_REQUIRED");
+  const existing = [...store.taskBillingSessions.values()].find((session) => session.userId === userId && session.taskId === taskId);
+  if (existing) return publicTaskBillingSession(existing);
+  const subscription = getSubscription(store, userId);
+  const policy = getBillingPolicy(store);
+  const startedAt = isoNow(store);
+  const session = {
+    id: createId("billing_session"),
+    userId,
+    taskId,
+    workspaceId,
+    mode: policy.mode,
+    policyVersion: policy.version,
+    planIdSnapshot: subscription.planId,
+    clientVersion: clientVersion || "",
+    deviceId: deviceId || "",
+    startedAt,
+    expiresAt: new Date(store.now().getTime() + 24 * 60 * 60 * 1000).toISOString(),
+    closedAt: null,
+    status: "active"
+  };
+  store.taskBillingSessions.set(session.id, session);
+  return publicTaskBillingSession(session);
+}
+
+export function closeTaskBillingSession(store, { userId, sessionId }) {
+  const session = store.taskBillingSessions.get(sessionId);
+  if (!session || session.userId !== userId) throw new Error("TASK_BILLING_SESSION_MISMATCH");
+  if (session.status !== "closed") {
+    session.status = "closed";
+    session.closedAt = isoNow(store);
+  }
+  return publicTaskBillingSession(session);
+}
+
+function publicTaskBillingSession(session) {
+  return {
+    sessionId: session.id,
+    taskId: session.taskId,
+    workspaceId: session.workspaceId,
+    mode: session.mode,
+    policyVersion: session.policyVersion,
+    planIdSnapshot: session.planIdSnapshot,
+    startedAt: session.startedAt,
+    expiresAt: session.expiresAt,
+    closedAt: session.closedAt,
+    status: session.status
+  };
+}
+
+function requireTaskBillingSession(store, { userId, taskId, workspaceId, billingSessionId }) {
+  if (!billingSessionId) return null;
+  const session = store.taskBillingSessions.get(billingSessionId);
+  if (!session || session.userId !== userId || session.taskId !== taskId || session.workspaceId !== workspaceId) {
+    throw new Error("TASK_BILLING_SESSION_MISMATCH");
+  }
+  if (session.status === "closed") throw new Error("TASK_BILLING_SESSION_CLOSED");
+  if (new Date(session.expiresAt) <= store.now()) {
+    session.status = "expired";
+    throw new Error("TASK_BILLING_SESSION_EXPIRED");
+  }
+  return session;
+}
+
+function recordTaskUsageEvent(store, { userId, taskId, billingSessionId, mode, idempotencyKey, contactHash }) {
+  const existing = store.taskUsageEvents.find((entry) => entry.idempotencyKey === idempotencyKey);
+  if (existing) return { event: existing, idempotentReplay: true };
+  const event = {
+    id: createId("usage_event"),
+    userId,
+    taskId,
+    billingSessionId,
+    mode,
+    idempotencyKey,
+    contactHash: contactHash || null,
+    createdAt: isoNow(store)
+  };
+  store.taskUsageEvents.push(event);
+  return { event, idempotentReplay: false };
+}
+
+function incrementSuccessfulUsage(store, userId, plan) {
+  const dailyUsage = getOrCreateDailyUsage(store, userId, plan);
+  const monthlyUsage = getOrCreateMonthlyUsage(store, userId, plan);
+  dailyUsage.usedCount += 1;
+  dailyUsage.updatedAt = isoNow(store);
+  monthlyUsage.usedCount += 1;
+  monthlyUsage.updatedAt = isoNow(store);
+}
+
+export function consumeCredit(store, { userId, idempotencyKey, taskId, billingSessionId, contactHash, workspaceId, sentAt }) {
   getUser(store, userId);
   if (!idempotencyKey) throw new Error("IDEMPOTENCY_KEY_REQUIRED");
+  const taskSession = requireTaskBillingSession(store, { userId, taskId, workspaceId, billingSessionId });
+  const existingUsageEvent = store.taskUsageEvents.find((entry) => entry.idempotencyKey === idempotencyKey);
+  if (existingUsageEvent) {
+    return { ...getEntitlements(store, userId), idempotentReplay: true, usageEventId: existingUsageEvent.id };
+  }
   const existing = store.creditLedger.find((entry) => entry.idempotencyKey === idempotencyKey);
   if (existing) {
     const entitlement = getEntitlements(store, userId);
     return { ...entitlement, idempotentReplay: true, ledgerId: existing.id };
   }
 
+  const subscription = getSubscription(store, userId);
+  const plan = getPlan(subscription.planId);
+  const currentPolicy = getBillingPolicy(store);
+  const effectiveMode = taskSession && (taskSession.mode === "free_access" || currentPolicy.mode === "free_access")
+    ? "free_access"
+    : "paid";
+  if (effectiveMode === "free_access") {
+    const { event } = recordTaskUsageEvent(store, {
+      userId,
+      taskId,
+      billingSessionId: taskSession.id,
+      mode: effectiveMode,
+      idempotencyKey,
+      contactHash
+    });
+    incrementSuccessfulUsage(store, userId, plan);
+    return { ...getEntitlements(store, userId), idempotentReplay: false, usageEventId: event.id };
+  }
+
   const entitlement = getEntitlements(store, userId);
   if (entitlement.availableToday <= 0) throw new Error("NO_AVAILABLE_CREDITS");
 
-  const subscription = getSubscription(store, userId);
-  const plan = getPlan(subscription.planId);
-  const dailyUsage = getOrCreateDailyUsage(store, userId, plan);
-  const monthlyUsage = getOrCreateMonthlyUsage(store, userId, plan);
   const { entry } = appendLedger(store, {
     userId,
     type: "consume",
@@ -670,10 +830,7 @@ export function consumeCredit(store, { userId, idempotencyKey, taskId, contactHa
     note: `workspace=${workspaceId};sent_at=${sentAt}`
   });
 
-  dailyUsage.usedCount += 1;
-  dailyUsage.updatedAt = isoNow(store);
-  monthlyUsage.usedCount += 1;
-  monthlyUsage.updatedAt = isoNow(store);
+  incrementSuccessfulUsage(store, userId, plan);
 
   return { ...getEntitlements(store, userId), idempotentReplay: false, ledgerId: entry.id };
 }
@@ -908,11 +1065,12 @@ export function processPendingOrderCredits(store, { limit = 20 } = {}) {
 
 export function issueWorkspaceLease(store, { userId, deviceId, workspaceKind, processNonce }) {
   getUser(store, userId);
-  const plan = getPlan(getSubscription(store, userId).planId);
+  const entitlements = getEntitlements(store, userId);
+  const workspaceLimit = entitlements.effectiveWorkspaceLimit || entitlements.workspaceLimit;
   const activeLeases = [...store.workspaceLeases.values()].filter(
     (lease) => lease.userId === userId && lease.status === "active" && new Date(lease.expiresAt) > store.now()
   );
-  if (activeLeases.length >= plan.workspaceLimit) {
+  if (activeLeases.length >= workspaceLimit) {
     throw new Error("WORKSPACE_LIMIT_REACHED");
   }
 
@@ -929,7 +1087,7 @@ export function issueWorkspaceLease(store, { userId, deviceId, workspaceKind, pr
     releasedAt: null
   };
   store.workspaceLeases.set(lease.id, lease);
-  return { leaseId: lease.id, expiresAt: lease.expiresAt, activeCount: activeLeases.length + 1, workspaceLimit: plan.workspaceLimit };
+  return { leaseId: lease.id, expiresAt: lease.expiresAt, activeCount: activeLeases.length + 1, workspaceLimit };
 }
 
 export function renewWorkspaceLease(store, { userId, leaseId }) {
@@ -1238,6 +1396,8 @@ export function getAdminConsoleSnapshot(store) {
   return {
     source: "server-local-preview",
     generatedAt: isoNow(store),
+    billingPolicy: getBillingPolicy(store),
+    pendingUnpaidOrderCount: orders.filter((order) => order.status !== "paid").length,
     summary: {
       users: users.length,
       plans: plans.length,
@@ -1281,6 +1441,11 @@ export function createMemoryRuntime(options = {}) {
     loginAdmin: (body) => loginAdmin(store, body),
     logoutAdmin: (accessToken) => logoutAdmin(store, accessToken),
     getEntitlements: (userId) => getEntitlements(store, userId),
+    getBillingPolicy: () => getBillingPolicy(store),
+    getAppPolicy: () => getAppPolicy(store),
+    updateBillingPolicy: (body) => updateBillingPolicy(store, body),
+    createTaskBillingSession: (body) => createTaskBillingSession(store, body),
+    closeTaskBillingSession: (body) => closeTaskBillingSession(store, body),
     consumeCredit: (body) => consumeCredit(store, body),
     createOrder: (body) => createOrder(store, body),
     getOrderForPayment: (body) => getOrderForPayment(store, body),

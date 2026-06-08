@@ -9,6 +9,9 @@ import {
   consumeCredit,
   createCloudStore,
   createOrder,
+  closeTaskBillingSession,
+  createTaskBillingSession,
+  getBillingPolicy,
   getEntitlements,
   getOrderForPayment,
   getOrderStatus,
@@ -22,11 +25,22 @@ import {
   expireOrder,
   releaseWorkspaceLease,
   renewWorkspaceLease,
-  registerUser
+  registerUser,
+  updateBillingPolicy
 } from "../src/services/billingService.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const serverRoot = path.resolve(__dirname, "..");
+
+function switchStoreToPaid(store) {
+  updateBillingPolicy(store, {
+    adminUserId: "admin-preview",
+    mode: "paid",
+    expectedVersion: getBillingPolicy(store).version,
+    reason: "test paid mode"
+  });
+  return store;
+}
 
 describe("cloud billing service", () => {
   it("defines the required PostgreSQL tables from the commercialization plan", () => {
@@ -46,6 +60,9 @@ describe("cloud billing service", () => {
       "referral_codes",
       "referral_records",
       "workspace_leases",
+      "task_billing_sessions",
+      "task_usage_events",
+      "system_settings",
       "admin_users",
       "admin_sessions",
       "admin_audit_logs"
@@ -66,6 +83,83 @@ describe("cloud billing service", () => {
     assert.match(schema, /INSERT INTO admin_users/i);
     assert.match(schema, /'yojiro'/);
     assert.doesNotMatch(schema, /AdminPass123|yojiro123/);
+    assert.match(schema, /INSERT INTO system_settings/i);
+    assert.match(schema, /billing_policy/);
+    assert.match(schema, /"mode":"paid"/);
+  });
+
+  it("defaults to free access and exposes effective commercial entitlements without altering stored plan data", () => {
+    const store = createCloudStore({ now: new Date("2026-06-08T10:00:00+08:00") });
+    const user = registerUser(store, { username: "free-mode-user", password: "StrongPass123", planId: "free" });
+
+    const policy = getBillingPolicy(store);
+    const entitlements = getEntitlements(store, user.id);
+
+    assert.equal(policy.mode, "free_access");
+    assert.equal(policy.version, 1);
+    assert.equal(entitlements.planId, "free");
+    assert.equal(entitlements.balanceCredits, 0);
+    assert.deepEqual(entitlements.billingPolicy, policy);
+    assert.equal(entitlements.billingMode, "free_access");
+    assert.equal(entitlements.unlimitedDailyUsage, true);
+    assert.equal(entitlements.hideBillingNavigation, true);
+    assert.equal(entitlements.effectiveWorkspaceLimit, 5);
+    assert.equal(entitlements.effectiveTemplateLimit, null);
+    assert.equal(entitlements.effectiveCapabilities.exportPreview, true);
+    assert.equal(entitlements.effectiveCapabilities.secondaryWorkspace, true);
+    assert.equal(entitlements.effectiveCapabilities.proxySettings, true);
+    assert.equal(entitlements.effectiveCapabilities.customTemplates, true);
+  });
+
+  it("lets admins version billing policy changes and records an audit log", () => {
+    const store = createCloudStore({ now: new Date("2026-06-08T10:00:00+08:00") });
+
+    const updated = updateBillingPolicy(store, {
+      adminUserId: "admin-preview",
+      mode: "paid",
+      effectiveAt: "2026-06-09T00:00:00+08:00",
+      expectedVersion: 1,
+      reason: "结束免费推广期",
+      ip: "10.0.0.9"
+    });
+
+    assert.equal(updated.mode, "free_access");
+    assert.equal(updated.pendingMode, "paid");
+    assert.equal(updated.version, 2);
+    assert.equal(updated.effectiveAt, "2026-06-09T00:00:00+08:00");
+    assert.equal(updated.updatedBy, "admin-preview");
+    assert.throws(
+      () => updateBillingPolicy(store, { adminUserId: "admin-preview", mode: "free_access", expectedVersion: 1 }),
+      /BILLING_POLICY_VERSION_CONFLICT/
+    );
+    assert.equal(store.auditLogs.at(-1).action, "billing.policy_update");
+    assert.equal(store.auditLogs.at(-1).ip, "10.0.0.9");
+  });
+
+  it("keeps a scheduled billing policy inactive until its effective time", () => {
+    const store = createCloudStore({ now: new Date("2026-06-08T10:00:00+08:00") });
+    const user = registerUser(store, { username: "scheduled-policy-user", password: "StrongPass123", planId: "advanced" });
+
+    updateBillingPolicy(store, {
+      adminUserId: "admin-preview",
+      mode: "paid",
+      effectiveAt: "2026-06-09T00:00:00+08:00",
+      expectedVersion: 1,
+      reason: "明天恢复收费"
+    });
+
+    const beforeEffective = getEntitlements(store, user.id);
+    assert.equal(beforeEffective.billingMode, "free_access");
+    assert.equal(beforeEffective.billingPolicy.mode, "free_access");
+    assert.equal(beforeEffective.billingPolicy.pendingMode, "paid");
+    assert.equal(beforeEffective.unlimitedDailyUsage, true);
+
+    store.now = () => new Date("2026-06-09T00:00:01+08:00");
+    const afterEffective = getEntitlements(store, user.id);
+    assert.equal(afterEffective.billingMode, "paid");
+    assert.equal(afterEffective.billingPolicy.mode, "paid");
+    assert.equal(afterEffective.billingPolicy.pendingMode, null);
+    assert.equal(afterEffective.unlimitedDailyUsage, false);
   });
 
   it("provides local Docker and migration entrypoints for visible PostgreSQL setup", () => {
@@ -139,6 +233,59 @@ describe("cloud billing service", () => {
     assert.equal(duplicate.idempotentReplay, true);
     assert.equal(getEntitlements(store, user.id).balanceCredits, 49);
     assert.equal(store.creditLedger.filter((entry) => entry.type === "consume").length, 1);
+  });
+
+  it("tracks free task usage without writing negative credit ledger entries", () => {
+    const store = createCloudStore({ now: new Date("2026-06-08T10:00:00+08:00") });
+    const user = registerUser(store, { username: "free-task-user", password: "StrongPass123", planId: "free" });
+    const session = createTaskBillingSession(store, {
+      userId: user.id,
+      taskId: "task-free-1",
+      workspaceId: "main",
+      clientVersion: "0.1.6",
+      deviceId: "desktop-1"
+    });
+
+    const first = consumeCredit(store, {
+      userId: user.id,
+      idempotencyKey: "free-task:1",
+      taskId: "task-free-1",
+      billingSessionId: session.sessionId,
+      contactHash: "contact-1",
+      workspaceId: "main",
+      sentAt: "2026-06-08T10:01:00+08:00"
+    });
+    const duplicate = consumeCredit(store, {
+      userId: user.id,
+      idempotencyKey: "free-task:1",
+      taskId: "task-free-1",
+      billingSessionId: session.sessionId,
+      contactHash: "contact-1",
+      workspaceId: "main",
+      sentAt: "2026-06-08T10:01:00+08:00"
+    });
+
+    assert.equal(session.mode, "free_access");
+    assert.equal(first.idempotentReplay, false);
+    assert.equal(duplicate.idempotentReplay, true);
+    assert.equal(getEntitlements(store, user.id).balanceCredits, 0);
+    assert.equal(getEntitlements(store, user.id).usedToday, 1);
+    assert.equal(store.creditLedger.filter((entry) => entry.type === "consume").length, 0);
+    assert.equal(store.taskUsageEvents.length, 1);
+
+    closeTaskBillingSession(store, { userId: user.id, sessionId: session.sessionId });
+    assert.throws(
+      () => consumeCredit(store, {
+        userId: user.id,
+        idempotencyKey: "free-task:2",
+        taskId: "task-free-1",
+        billingSessionId: session.sessionId,
+        contactHash: "contact-2",
+        workspaceId: "main",
+        sentAt: "2026-06-08T10:02:00+08:00"
+      }),
+      /TASK_BILLING_SESSION_CLOSED/
+    );
   });
 
   it("only changes balances through ledger entries and audit-backed admin adjustments", () => {
@@ -291,6 +438,7 @@ describe("cloud billing service", () => {
 
   it("enforces workspace lease limits from the active plan", () => {
     const store = createCloudStore();
+    switchStoreToPaid(store);
     const user = registerUser(store, { username: "lease-user", password: "StrongPass123", planId: "advanced" });
 
     issueWorkspaceLease(store, { userId: user.id, deviceId: "device-1", workspaceKind: "primary", processNonce: "p1" });

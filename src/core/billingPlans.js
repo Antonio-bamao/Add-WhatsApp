@@ -156,9 +156,45 @@ function planFrom(value) {
   return getPlan();
 }
 
+function effectiveCapabilitiesFor(entitlementOrPlan) {
+  const plan = planFrom(entitlementOrPlan);
+  if (entitlementOrPlan && entitlementOrPlan.effectiveCapabilities) {
+    return { ...entitlementOrPlan.effectiveCapabilities };
+  }
+  return { ...(plan.capabilities || {}) };
+}
+
+function effectiveTemplateLimitFor(entitlementOrPlan) {
+  const plan = planFrom(entitlementOrPlan);
+  if (entitlementOrPlan && Object.prototype.hasOwnProperty.call(entitlementOrPlan, 'effectiveTemplateLimit')) {
+    return entitlementOrPlan.effectiveTemplateLimit;
+  }
+  return plan.templateLimit;
+}
+
+function effectiveWorkspaceLimitFor(entitlementOrPlan) {
+  const plan = planFrom(entitlementOrPlan);
+  if (entitlementOrPlan && Object.prototype.hasOwnProperty.call(entitlementOrPlan, 'effectiveWorkspaceLimit')) {
+    return Number(entitlementOrPlan.effectiveWorkspaceLimit);
+  }
+  return Number(plan.workspaceLimit);
+}
+
+function isFreeAccessEntitlement(entitlement) {
+  return Boolean(
+    entitlement
+    && (
+      entitlement.unlimitedDailyUsage
+      || entitlement.billingMode === 'free_access'
+      || (entitlement.billingPolicy && entitlement.billingPolicy.mode === 'free_access')
+    )
+  );
+}
+
 function resolveFeatureAccess(entitlementOrPlan, feature) {
   const plan = planFrom(entitlementOrPlan);
-  if (plan.capabilities && plan.capabilities[feature]) return { ok: true };
+  const capabilities = effectiveCapabilitiesFor(entitlementOrPlan);
+  if (capabilities && capabilities[feature]) return { ok: true };
   const labels = {
     exportPreview: '导出预检属于进阶版及以上功能',
     secondaryWorkspace: '新建工作台属于进阶版及以上功能',
@@ -174,6 +210,7 @@ function resolveFeatureAccess(entitlementOrPlan, feature) {
 
 function resolveTaskStartAccess(entitlement) {
   const state = entitlement && entitlement.plan ? entitlement : createEntitlementState();
+  if (isFreeAccessEntitlement(state)) return { ok: true };
   const plan = state.plan;
   const dailyRemaining = Math.max(0, Number(state.dailyRemaining || 0));
   const availableNow = Math.max(0, Number(state.availableNow || 0));
@@ -197,7 +234,7 @@ function resolveTaskStartAccess(entitlement) {
 
 function resolveTemplateAccess(entitlementOrPlan, { languageCounts = null, customCount = 0 } = {}) {
   const plan = planFrom(entitlementOrPlan);
-  const limit = plan.templateLimit;
+  const limit = effectiveTemplateLimitFor(entitlementOrPlan);
   if (limit === null || limit === undefined) return { ok: true, remaining: null };
   const counts = languageCounts && typeof languageCounts === 'object'
     ? Object.values(languageCounts).map(value => Math.max(0, Number(value) || 0))
@@ -216,21 +253,25 @@ function resolveTemplateAccess(entitlementOrPlan, { languageCounts = null, custo
 function resolveTaskDailyLimit(entitlement, requestedLimit) {
   const plan = entitlement && entitlement.plan ? entitlement.plan : getPlan();
   const requested = Number(requestedLimit || 0);
+  if (isFreeAccessEntitlement(entitlement) && Number.isFinite(requested) && requested > 0) {
+    return Math.max(1, Math.floor(requested));
+  }
   if (!Number.isFinite(requested) || requested <= 0) return plan.dailyLimit;
   return Math.min(Math.max(1, Math.floor(requested)), plan.dailyLimit);
 }
 
 function canOpenSecondaryWorkspace(entitlement, openSecondaryCount = 0) {
   const plan = entitlement && entitlement.plan ? entitlement.plan : getPlan();
-  const access = resolveFeatureAccess(plan, 'secondaryWorkspace');
+  const access = resolveFeatureAccess(entitlement || plan, 'secondaryWorkspace');
   if (!access.ok) return { ok: false, remaining: 0, error: access.message };
-  const allowedSecondary = Math.max(0, plan.workspaceLimit - 1);
+  const workspaceLimit = Math.max(1, effectiveWorkspaceLimitFor(entitlement || plan) || 1);
+  const allowedSecondary = Math.max(0, workspaceLimit - 1);
   const remaining = Math.max(0, allowedSecondary - openSecondaryCount);
   if (remaining <= 0) {
     return {
       ok: false,
       remaining: 0,
-      error: `当前${plan.name}最多同时使用 ${plan.workspaceLimit} 个工作台，请关闭已有独立工作台或升级套餐。`
+      error: `当前${plan.name}最多同时使用 ${workspaceLimit} 个工作台，请关闭已有独立工作台或升级套餐。`
     };
   }
   return { ok: true, remaining };
@@ -267,6 +308,9 @@ module.exports = {
   DAY_MS,
   canOpenSecondaryWorkspace,
   createEntitlementState,
+  effectiveCapabilitiesFor,
+  effectiveTemplateLimitFor,
+  effectiveWorkspaceLimitFor,
   getPlan,
   planCatalog,
   resolveFeatureAccess,

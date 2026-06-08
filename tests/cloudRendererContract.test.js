@@ -137,6 +137,25 @@ test('pricing page exposes official WeChat Native payment actions instead of mai
   assert.ok(fs.existsSync(path.join(root, 'assets', 'pay', 'alipay-qr.png')));
 });
 
+test('free access policy hides billing navigation and uses effective capability fields', () => {
+  const renderer = fs.readFileSync(path.join(root, 'src', 'renderer', 'renderer.js'), 'utf-8');
+
+  assert.match(renderer, /function billingNavigationHidden/);
+  assert.match(renderer, /hideBillingNavigation/);
+  assert.match(renderer, /plansToggle\.hidden/);
+  assert.match(renderer, /plansSubnav\.hidden/);
+  assert.match(renderer, /effectiveCapabilities/);
+  assert.match(renderer, /effectiveWorkspaceLimit/);
+  assert.match(renderer, /effectiveTemplateLimit/);
+  assert.match(renderer, /unlimitedDailyUsage/);
+  assert.match(renderer, /lastBillingPolicyVersion/);
+  assert.match(renderer, /运营策略已更新/);
+  assert.match(renderer, /CLOUD_POLICY_POLL_BASE_INTERVAL_MS\s*=\s*30\s*\*\s*1000/);
+  assert.match(renderer, /CLOUD_POLICY_POLL_JITTER_MS\s*=\s*15\s*\*\s*1000/);
+  assert.match(renderer, /refreshCloudEntitlementsIfStale\(\{\s*force:\s*true\s*\}\)/);
+  assert.doesNotMatch(renderer, /当前.*账户余额为 0[\s\S]*free_access/);
+});
+
 test('task controls enforce package daily limit and 44 second minimum delay', () => {
   const html = fs.readFileSync(path.join(root, 'src', 'renderer', 'index.html'), 'utf-8');
   const renderer = fs.readFileSync(path.join(root, 'src', 'renderer', 'renderer.js'), 'utf-8');
@@ -144,7 +163,7 @@ test('task controls enforce package daily limit and 44 second minimum delay', ()
 
   assert.match(html, /id="delayMinInput" type="number" min="44" value="44"/);
   assert.match(html, /id="delayMaxInput" type="number" min="44"/);
-  assert.match(renderer, /elements\.dailyLimitInput\.value = String\(plan\.dailyLimit\)/);
+  assert.match(renderer, /elements\.dailyLimitInput\.value = String\(effectivePlan\.dailyLimit\)/);
   assert.match(renderer, /Math\.max\(44, minDelay\)/);
   assert.match(main, /Math\.max\(44, Number\(config\.delayMinSeconds \|\| 44\)\)/);
 });

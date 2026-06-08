@@ -49,6 +49,73 @@ test('logs in to the cloud API and fetches entitlements with bearer auth', async
   assert.equal(requests.length, 2);
 });
 
+test('fetches the signed app policy with bearer auth', async () => {
+  const client = new CloudApiClient({
+    baseUrl: 'http://127.0.0.1:4110',
+    fetchImpl: async (url, options = {}) => {
+      assert.equal(url, 'http://127.0.0.1:4110/v1/app-policy');
+      assert.equal(options.headers.authorization, 'Bearer access-1');
+      return response(200, {
+        billing: {
+          mode: 'free_access',
+          version: 3,
+          effectiveAt: null,
+          fetchedAt: '2026-06-08T12:00:00.000Z',
+          cacheExpiresAt: '2026-06-09T12:00:00.000Z',
+          keyId: 'billing-policy-2026-01',
+          signature: 'signed-policy'
+        },
+        minimumBillingClientVersion: '0.1.6'
+      });
+    }
+  });
+
+  const policy = await client.getAppPolicy('access-1');
+
+  assert.equal(policy.billing.mode, 'free_access');
+  assert.equal(policy.billing.version, 3);
+  assert.equal(policy.minimumBillingClientVersion, '0.1.6');
+});
+
+test('creates and closes task billing sessions with bearer auth', async () => {
+  const requests = [];
+  const client = new CloudApiClient({
+    baseUrl: 'http://127.0.0.1:4110',
+    fetchImpl: async (url, options = {}) => {
+      requests.push({ url, options });
+      if (url === 'http://127.0.0.1:4110/v1/task-billing-sessions') {
+        assert.equal(options.method, 'POST');
+        assert.equal(options.headers.authorization, 'Bearer access-1');
+        assert.deepEqual(JSON.parse(options.body), {
+          taskId: 'task-1',
+          workspaceId: 'main',
+          clientVersion: '0.1.6',
+          deviceId: 'desktop-1'
+        });
+        return response(201, { sessionId: 'billing-session-1', mode: 'free_access', status: 'active' });
+      }
+      if (url === 'http://127.0.0.1:4110/v1/task-billing-sessions/billing-session-1/close') {
+        assert.equal(options.method, 'POST');
+        assert.equal(options.headers.authorization, 'Bearer access-1');
+        return response(200, { sessionId: 'billing-session-1', status: 'closed' });
+      }
+      throw new Error(`unexpected ${url}`);
+    }
+  });
+
+  const session = await client.createTaskBillingSession('access-1', {
+    taskId: 'task-1',
+    workspaceId: 'main',
+    clientVersion: '0.1.6',
+    deviceId: 'desktop-1'
+  });
+  const closed = await client.closeTaskBillingSession('access-1', 'billing-session-1');
+
+  assert.equal(session.sessionId, 'billing-session-1');
+  assert.equal(closed.status, 'closed');
+  assert.equal(requests.length, 2);
+});
+
 test('registers a database account and returns the issued cloud session', async () => {
   const client = new CloudApiClient({
     baseUrl: 'http://127.0.0.1:4110',
@@ -121,6 +188,38 @@ test('maps cloud entitlements into desktop subscription state shape', () => {
   assert.equal(mapped.availableNow, 988);
   assert.equal(mapped.nextResetAt, '2026-05-29T00:00:00+08:00');
   assert.match(mapped.resetPolicy, /服务器 Asia\/Shanghai/);
+});
+
+test('maps free access policy into effective desktop capabilities without replacing stored plan', () => {
+  const mapped = mapCloudEntitlements({
+    userId: 'user-free',
+    planId: 'free',
+    balanceCredits: 0,
+    usedToday: 999,
+    usedThisMonth: 2000,
+    availableToday: 0,
+    billingPolicy: { mode: 'free_access', version: 5 },
+    billingMode: 'free_access',
+    unlimitedDailyUsage: true,
+    hideBillingNavigation: true,
+    effectiveWorkspaceLimit: 5,
+    effectiveTemplateLimit: null,
+    effectiveCapabilities: {
+      exportPreview: true,
+      secondaryWorkspace: true,
+      proxySettings: true,
+      customTemplates: true
+    }
+  });
+
+  assert.equal(mapped.plan.id, 'free');
+  assert.equal(mapped.billingMode, 'free_access');
+  assert.equal(mapped.hideBillingNavigation, true);
+  assert.equal(mapped.unlimitedDailyUsage, true);
+  assert.equal(mapped.effectiveWorkspaceLimit, 5);
+  assert.equal(mapped.effectiveTemplateLimit, null);
+  assert.equal(mapped.effectiveCapabilities.exportPreview, true);
+  assert.equal(mapped.effectiveCapabilities.secondaryWorkspace, true);
 });
 
 test('issues workspace leases with bearer auth', async () => {

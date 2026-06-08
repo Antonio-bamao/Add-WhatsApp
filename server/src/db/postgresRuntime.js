@@ -1,6 +1,16 @@
 import crypto from "node:crypto";
 import zlib from "node:zlib";
 import { Pool } from "pg";
+import {
+  BILLING_POLICY_KEY,
+  billingPolicyValueJson,
+  buildBillingPolicyUpdate,
+  createDefaultBillingPolicy,
+  entitlementBillingOverlay,
+  normalizeBillingPolicyRecord,
+  resolveBillingPolicyForNow,
+  signedAppPolicyResponse
+} from "../services/billingPolicy.js";
 
 function createId(prefix) {
   return `${prefix}_${crypto.randomUUID()}`;
@@ -15,6 +25,7 @@ const ADMIN_ACCESS_TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
 const CONTACT_IMPORT_MAX_BYTES = 25 * 1024 * 1024;
 const migratedOrderLifecyclePools = new WeakSet();
 const migratedContactImportPools = new WeakSet();
+const migratedBillingPolicyPools = new WeakSet();
 const PLAN_RANKS = Object.freeze({
   free: 0,
   advanced: 1,
@@ -436,6 +447,43 @@ async function appendLedger(client, { userId, type, amount, idempotencyKey, rela
   return { entry, idempotentReplay: false };
 }
 
+function publicTaskBillingSession(row) {
+  return {
+    sessionId: row.id,
+    taskId: row.task_id,
+    workspaceId: row.workspace_id,
+    mode: row.mode,
+    policyVersion: Number(row.policy_version),
+    planIdSnapshot: row.plan_id_snapshot,
+    startedAt: row.started_at,
+    expiresAt: row.expires_at,
+    closedAt: row.closed_at,
+    status: row.status
+  };
+}
+
+async function insertTaskUsageEvent(client, { userId, taskId, billingSessionId, mode, idempotencyKey, contactHash }) {
+  const existing = await client.query("SELECT * FROM task_usage_events WHERE idempotency_key = $1", [idempotencyKey]);
+  if (existing.rows[0]) return { event: existing.rows[0], idempotentReplay: true };
+  const event = {
+    id: createId("usage_event"),
+    userId,
+    taskId,
+    billingSessionId,
+    mode,
+    idempotencyKey,
+    contactHash: contactHash || null,
+    createdAt: isoNow()
+  };
+  await client.query(
+    `INSERT INTO task_usage_events
+      (id, user_id, task_id, billing_session_id, mode, idempotency_key, contact_hash, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+    [event.id, userId, taskId, billingSessionId, mode, idempotencyKey, event.contactHash, event.createdAt]
+  );
+  return { event, idempotentReplay: false };
+}
+
 async function appendAuditLog(client, { adminUserId, action, targetType, targetId, before, after, ip }) {
   const entry = {
     id: createId("audit"),
@@ -455,6 +503,71 @@ async function appendAuditLog(client, { adminUserId, action, targetType, targetI
     [entry.id, entry.adminUserId, entry.targetType, entry.targetId, entry.action, entry.beforeJson, entry.afterJson, entry.ip, entry.createdAt]
   );
   return entry;
+}
+
+async function ensureBillingPolicyTables(client, db) {
+  if (!db || migratedBillingPolicyPools.has(db)) return;
+  await client.query(
+    `CREATE TABLE IF NOT EXISTS system_settings (
+      key TEXT PRIMARY KEY,
+      value_json TEXT NOT NULL,
+      version INTEGER NOT NULL,
+      updated_at TEXT NOT NULL,
+      updated_by TEXT
+    )`
+  );
+  await client.query(
+    `CREATE TABLE IF NOT EXISTS task_billing_sessions (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id),
+      task_id TEXT NOT NULL,
+      workspace_id TEXT NOT NULL,
+      mode TEXT NOT NULL,
+      policy_version INTEGER NOT NULL,
+      plan_id_snapshot TEXT,
+      client_version TEXT,
+      device_id TEXT,
+      started_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      closed_at TEXT,
+      status TEXT NOT NULL,
+      UNIQUE (user_id, task_id)
+    )`
+  );
+  await client.query(
+    `CREATE TABLE IF NOT EXISTS task_usage_events (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id),
+      task_id TEXT NOT NULL,
+      billing_session_id TEXT NOT NULL,
+      mode TEXT NOT NULL,
+      idempotency_key TEXT NOT NULL UNIQUE,
+      contact_hash TEXT,
+      created_at TEXT NOT NULL
+    )`
+  );
+  migratedBillingPolicyPools.add(db);
+}
+
+async function getBillingPolicyForClient(client, { forUpdate = false, db = null } = {}) {
+  await ensureBillingPolicyTables(client, db);
+  const lock = forUpdate ? " FOR UPDATE" : "";
+  const result = await client.query(`SELECT * FROM system_settings WHERE key = $1${lock}`, [BILLING_POLICY_KEY]);
+  if (result.rows[0]) {
+    return normalizeBillingPolicyRecord({
+      valueJson: result.rows[0].value_json,
+      version: result.rows[0].version,
+      updatedAt: result.rows[0].updated_at,
+      updatedBy: result.rows[0].updated_by,
+      now: new Date()
+    });
+  }
+  const policy = createDefaultBillingPolicy(new Date(), { mode: "paid" });
+  await client.query(
+    "INSERT INTO system_settings (key, value_json, version, updated_at, updated_by) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (key) DO NOTHING",
+    [BILLING_POLICY_KEY, billingPolicyValueJson(policy), policy.version, policy.updatedAt, policy.updatedBy]
+  );
+  return resolveBillingPolicyForNow(policy);
 }
 
 async function ensureOrderLifecycleColumns(client, db) {
@@ -728,6 +841,7 @@ export function createPostgresRuntime({ databaseUrl, pool } = {}) {
         await requireActiveUser(client, userId);
         const subscription = await getSubscription(client, userId);
         const plan = await getPlan(client, subscription?.plan_id || "free");
+        const billingPolicy = await getBillingPolicyForClient(client, { db });
         const { daily, monthly } = await getOrCreateUsage(client, userId, plan);
         const balanceCredits = await balanceFor(client, userId);
         const remainingByLimit = Math.max(0, Number(daily.daily_limit) - Number(daily.used_count));
@@ -748,8 +862,56 @@ export function createPostgresRuntime({ databaseUrl, pool } = {}) {
           templateLimit: plan.templateLimit,
           referralCode: referral.rows[0]?.code || null,
           businessDate: daily.business_date,
-          resetAt: `${daily.business_date}T24:00:00+08:00`
+          resetAt: `${daily.business_date}T24:00:00+08:00`,
+          ...entitlementBillingOverlay(billingPolicy, plan)
         };
+      } finally {
+        client.release();
+      }
+    },
+
+    async getBillingPolicy() {
+      const client = await db.connect();
+      try {
+        return await getBillingPolicyForClient(client, { db });
+      } finally {
+        client.release();
+      }
+    },
+
+    async getAppPolicy() {
+      return signedAppPolicyResponse(await this.getBillingPolicy());
+    },
+
+    async updateBillingPolicy({ adminUserId, mode, effectiveAt = null, expectedVersion, reason, ip }) {
+      const client = await db.connect();
+      try {
+        await client.query("BEGIN");
+        const before = await getBillingPolicyForClient(client, { forUpdate: true, db });
+        const after = buildBillingPolicyUpdate(before, {
+          mode,
+          effectiveAt,
+          expectedVersion,
+          adminUserId
+        });
+        await client.query(
+          "UPDATE system_settings SET value_json = $1, version = $2, updated_at = $3, updated_by = $4 WHERE key = $5",
+          [billingPolicyValueJson(after), after.version, after.updatedAt, after.updatedBy, BILLING_POLICY_KEY]
+        );
+        await appendAuditLog(client, {
+          adminUserId,
+          action: "billing.policy_update",
+          targetType: "system_setting",
+          targetId: BILLING_POLICY_KEY,
+          before,
+          after: { ...after, reason: reason || "billing policy update" },
+          ip
+        });
+        await client.query("COMMIT");
+        return after;
+      } catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
       } finally {
         client.release();
       }
@@ -791,15 +953,122 @@ export function createPostgresRuntime({ databaseUrl, pool } = {}) {
       }
     },
 
-    async consumeCredit({ userId, idempotencyKey, taskId, contactHash, workspaceId, sentAt }) {
+    async createTaskBillingSession({ userId, taskId, workspaceId = "main", clientVersion, deviceId }) {
+      if (!taskId) throw new Error("TASK_ID_REQUIRED");
+      const client = await db.connect();
+      try {
+        await client.query("BEGIN");
+        await ensureBillingPolicyTables(client, db);
+        await requireActiveUser(client, userId);
+        const existing = await client.query("SELECT * FROM task_billing_sessions WHERE user_id = $1 AND task_id = $2", [userId, taskId]);
+        if (existing.rows[0]) {
+          await client.query("COMMIT");
+          return publicTaskBillingSession(existing.rows[0]);
+        }
+        const subscription = await getSubscription(client, userId);
+        const policy = await getBillingPolicyForClient(client, { db });
+        const startedAt = isoNow();
+        const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+        const id = createId("billing_session");
+        const inserted = await client.query(
+          `INSERT INTO task_billing_sessions
+            (id, user_id, task_id, workspace_id, mode, policy_version, plan_id_snapshot, client_version, device_id, started_at, expires_at, closed_at, status)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NULL, 'active')
+           RETURNING *`,
+          [
+            id,
+            userId,
+            taskId,
+            workspaceId,
+            policy.mode,
+            policy.version,
+            subscription?.plan_id || "free",
+            clientVersion || "",
+            deviceId || "",
+            startedAt,
+            expiresAt
+          ]
+        );
+        await client.query("COMMIT");
+        return publicTaskBillingSession(inserted.rows[0]);
+      } catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+      } finally {
+        client.release();
+      }
+    },
+
+    async closeTaskBillingSession({ userId, sessionId }) {
+      const client = await db.connect();
+      try {
+        await client.query("BEGIN");
+        await ensureBillingPolicyTables(client, db);
+        const existing = await client.query("SELECT * FROM task_billing_sessions WHERE id = $1 AND user_id = $2 FOR UPDATE", [sessionId, userId]);
+        const session = existing.rows[0];
+        if (!session) throw new Error("TASK_BILLING_SESSION_MISMATCH");
+        const closedAt = session.closed_at || isoNow();
+        const updated = await client.query(
+          "UPDATE task_billing_sessions SET status = 'closed', closed_at = $1 WHERE id = $2 RETURNING *",
+          [closedAt, sessionId]
+        );
+        await client.query("COMMIT");
+        return publicTaskBillingSession(updated.rows[0]);
+      } catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+      } finally {
+        client.release();
+      }
+    },
+
+    async consumeCredit({ userId, idempotencyKey, taskId, billingSessionId, contactHash, workspaceId, sentAt }) {
       if (!idempotencyKey) throw new Error("IDEMPOTENCY_KEY_REQUIRED");
       const client = await db.connect();
       try {
         await client.query("BEGIN");
+        await ensureBillingPolicyTables(client, db);
+        if (billingSessionId) {
+          const existingUsage = await client.query("SELECT id FROM task_usage_events WHERE idempotency_key = $1", [idempotencyKey]);
+          if (existingUsage.rows[0]) {
+            await client.query("COMMIT");
+            return { ...(await this.getEntitlements(userId)), idempotentReplay: true, usageEventId: existingUsage.rows[0].id };
+          }
+        }
         const existing = await client.query("SELECT id FROM credit_ledger WHERE idempotency_key = $1", [idempotencyKey]);
         if (existing.rows[0]) {
           await client.query("COMMIT");
           return { ...(await this.getEntitlements(userId)), idempotentReplay: true, ledgerId: existing.rows[0].id };
+        }
+        const subscription = await getSubscription(client, userId);
+        const plan = await getPlan(client, subscription?.plan_id || "free");
+        if (billingSessionId) {
+          const sessionResult = await client.query("SELECT * FROM task_billing_sessions WHERE id = $1 FOR UPDATE", [billingSessionId]);
+          const session = sessionResult.rows[0];
+          if (!session || session.user_id !== userId || session.task_id !== taskId || session.workspace_id !== workspaceId) {
+            throw new Error("TASK_BILLING_SESSION_MISMATCH");
+          }
+          if (session.status === "closed") throw new Error("TASK_BILLING_SESSION_CLOSED");
+          if (new Date(session.expires_at) <= new Date()) {
+            await client.query("UPDATE task_billing_sessions SET status = 'expired' WHERE id = $1", [billingSessionId]);
+            throw new Error("TASK_BILLING_SESSION_EXPIRED");
+          }
+          const policy = await getBillingPolicyForClient(client, { db });
+          if (session.mode === "free_access" || policy.mode === "free_access") {
+            const { event } = await insertTaskUsageEvent(client, {
+              userId,
+              taskId,
+              billingSessionId,
+              mode: "free_access",
+              idempotencyKey,
+              contactHash
+            });
+            const { daily, monthly } = await getOrCreateUsage(client, userId, plan);
+            await client.query("UPDATE usage_daily SET used_count = used_count + 1, updated_at = $1 WHERE id = $2", [isoNow(), daily.id]);
+            await client.query("UPDATE usage_monthly SET used_count = used_count + 1, updated_at = $1 WHERE id = $2", [isoNow(), monthly.id]);
+            await client.query("COMMIT");
+            return { ...(await this.getEntitlements(userId)), idempotentReplay: false, usageEventId: event.id };
+          }
         }
         const entitlement = await this.getEntitlements(userId);
         if (entitlement.availableToday <= 0) throw new Error("NO_AVAILABLE_CREDITS");
@@ -812,8 +1081,6 @@ export function createPostgresRuntime({ databaseUrl, pool } = {}) {
           relatedContactHash: contactHash,
           note: `workspace=${workspaceId};sent_at=${sentAt}`
         });
-        const subscription = await getSubscription(client, userId);
-        const plan = await getPlan(client, subscription?.plan_id || "free");
         const { daily, monthly } = await getOrCreateUsage(client, userId, plan);
         await client.query("UPDATE usage_daily SET used_count = used_count + 1, updated_at = $1 WHERE id = $2", [isoNow(), daily.id]);
         await client.query("UPDATE usage_monthly SET used_count = used_count + 1, updated_at = $1 WHERE id = $2", [isoNow(), monthly.id]);
@@ -1246,12 +1513,14 @@ export function createPostgresRuntime({ databaseUrl, pool } = {}) {
         await requireActiveUser(client, userId);
         const subscription = await getSubscription(client, userId);
         const plan = await getPlan(client, subscription?.plan_id || "free");
+        const billingPolicy = await getBillingPolicyForClient(client, { db });
+        const workspaceLimit = billingPolicy.mode === "free_access" ? 5 : plan.workspaceLimit;
         const active = await client.query(
           "SELECT COUNT(*)::int AS count FROM workspace_leases WHERE user_id = $1 AND status = 'active' AND expires_at > $2",
           [userId, isoNow()]
         );
         const activeCount = Number(active.rows[0].count || 0);
-        if (activeCount >= plan.workspaceLimit) throw new Error("WORKSPACE_LIMIT_REACHED");
+        if (activeCount >= workspaceLimit) throw new Error("WORKSPACE_LIMIT_REACHED");
         const lease = {
           id: createId("lease"),
           expiresAt: new Date(Date.now() + 60 * 1000).toISOString(),
@@ -1262,7 +1531,7 @@ export function createPostgresRuntime({ databaseUrl, pool } = {}) {
            VALUES ($1, $2, $3, $4, $5, 'active', $6, $7, $7, NULL)`,
           [lease.id, userId, deviceId, workspaceKind, processNonce, lease.expiresAt, lease.now]
         );
-        return { leaseId: lease.id, expiresAt: lease.expiresAt, activeCount: activeCount + 1, workspaceLimit: plan.workspaceLimit };
+        return { leaseId: lease.id, expiresAt: lease.expiresAt, activeCount: activeCount + 1, workspaceLimit };
       } finally {
         client.release();
       }
@@ -1484,11 +1753,14 @@ export function createPostgresRuntime({ databaseUrl, pool } = {}) {
         const referralCodes = await client.query("SELECT * FROM referral_codes ORDER BY created_at DESC LIMIT 50");
         const leases = await client.query("SELECT * FROM workspace_leases ORDER BY created_at DESC LIMIT 50");
         const auditLogs = await client.query("SELECT * FROM admin_audit_logs ORDER BY created_at DESC LIMIT 50");
+        const billingPolicy = await getBillingPolicyForClient(client, { db });
         const planRows = plans.rows.map(toPlan);
         const auditTrail = auditLogs.rows.map(toAuditPreview);
         return {
           source: "postgres",
           generatedAt: isoNow(),
+          billingPolicy,
+          pendingUnpaidOrderCount: orders.rows.filter((order) => order.status !== "paid").length,
           summary: {
             users: users.rows.length,
             plans: plans.rows.length,

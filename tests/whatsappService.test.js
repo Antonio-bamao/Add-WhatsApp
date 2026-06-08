@@ -163,11 +163,18 @@ test('buildWhatsAppClientOptions keeps WhatsApp Web compatibility and browser st
   assert.equal(launchOptions.userDataDir, getLocalAuthProfilePath(sessionPath, clientId));
   assert.deepEqual(launchOptions.ignoreDefaultArgs, ['--enable-automation']);
   assert.equal(launchOptions.headless, false);
+  assert.equal(launchOptions.defaultViewport, null);
   assert.equal(launchOptions.executablePath, executablePath);
   assert.ok(launchOptions.args.includes('--disable-blink-features=AutomationControlled'));
   assert.ok(launchOptions.args.includes('--no-sandbox'));
   assert.ok(launchOptions.args.includes('--disable-setuid-sandbox'));
   assert.ok(launchOptions.args.includes('--disable-dev-shm-usage'));
+  assert.ok(launchOptions.args.includes('--force-device-scale-factor=1'));
+  assert.ok(launchOptions.args.includes('--high-dpi-support=1'));
+  assert.ok(launchOptions.args.includes('--window-size=1366,900'));
+  assert.ok(launchOptions.args.includes('--no-startup-window'));
+  assert.ok(!launchOptions.args.includes('--window-size=1100,760'));
+  assert.equal(launchOptions.waitForInitialPage, false);
   assert.ok(launchOptions.args.includes('--proxy-server=socks5://127.0.0.1:1080'));
   assert.equal(options.authStrategy.dataPath, sessionPath);
   assert.equal(options.authStrategy.clientId, clientId);
@@ -180,7 +187,8 @@ test('buildWhatsAppClientOptions keeps WhatsApp Web compatibility and browser st
     remotePath: WHATSAPP_WEB_VERSION_REMOTE_PATH
   });
   assert.deepEqual(options.puppeteer, {
-    browserWSEndpoint: 'ws://127.0.0.1/devtools/browser/test'
+    browserWSEndpoint: 'ws://127.0.0.1/devtools/browser/test',
+    defaultViewport: null
   });
 });
 
@@ -504,6 +512,40 @@ test('qr event keeps about blank startup tab when no WhatsApp page exists yet', 
   assert.deepEqual(closed, []);
   await service.destroy();
   resetWhatsAppSessionGuardsForTests();
+});
+
+test('ensureReady reports about blank network stalls before failing initialization', async () => {
+  resetWhatsAppSessionGuardsForTests();
+  const originalSetInterval = global.setInterval;
+  const originalClearInterval = global.clearInterval;
+  const events = [];
+  try {
+    global.setInterval = fn => {
+      for (let i = 0; i < 8; i += 1) setImmediate(fn);
+      return { fake: true };
+    };
+    global.clearInterval = () => {};
+    const client = createFakeClient(() => {});
+    client.pupPage = {
+      url: () => 'about:blank',
+      evaluate: async () => ''
+    };
+    const service = new FakeWhatsAppService({
+      sessionPath: fs.mkdtempSync(path.join(os.tmpdir(), 'add-whatsapp-blank-page-')),
+      emit: event => events.push(event)
+    }, [client]);
+
+    await assert.rejects(
+      () => service.ensureReady(),
+      /无法连接到 WhatsApp 服务器/
+    );
+    assert.equal(events.some(event => event.type === 'auth:blank-page'), true);
+    await service.destroy();
+  } finally {
+    global.setInterval = originalSetInterval;
+    global.clearInterval = originalClearInterval;
+    resetWhatsAppSessionGuardsForTests();
+  }
 });
 
 test('ensureReady repairs WhatsApp browser database errors by clearing profile stores and retrying', async () => {

@@ -12,6 +12,8 @@ test('stores pending cloud usage syncs by task and removes them after retry succ
 
   store.upsert({
     taskId: 'task-1',
+    billingSessionId: 'billing-session-1',
+    billingPolicySnapshot: { mode: 'free_access', version: 7 },
     sentRows: [{ rowNumber: 2, whatsappId: '5511999999999@c.us' }],
     workspaceId: 'main',
     sentAt: '2026-06-03T10:00:00.000Z',
@@ -27,6 +29,8 @@ test('stores pending cloud usage syncs by task and removes them after retry succ
 
   assert.equal(store.list().length, 1);
   assert.equal(store.list()[0].taskId, 'task-1');
+  assert.equal(store.list()[0].billingSessionId, 'billing-session-1');
+  assert.deepEqual(store.list()[0].billingPolicySnapshot, { mode: 'free_access', version: 7 });
   assert.equal(store.list()[0].sentRows.length, 1);
 
   store.remove('task-1');

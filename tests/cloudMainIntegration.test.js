@@ -107,6 +107,111 @@ test('cloud controller reports auth-required when refreshing without a token', a
   assert.equal(result.authRequired, true);
 });
 
+test('cloud controller uses a signed cached free policy when entitlement refresh is offline', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'add-whatsapp-cloud-policy-cache-'));
+  const sessionStore = new CloudSessionStore(path.join(dir, 'cloud-session.json'));
+  sessionStore.save({
+    user: { id: 'user-1', username: 'cloud-user' },
+    accessToken: 'access-1',
+    refreshToken: 'refresh-1',
+    entitlements: {
+      userId: 'user-1',
+      planId: 'free',
+      balanceCredits: 0,
+      usedToday: 50,
+      usedThisMonth: 500,
+      availableToday: 0
+    },
+    appPolicy: {
+      billing: {
+        mode: 'free_access',
+        version: 8,
+        fetchedAt: '2026-06-08T12:00:00.000Z',
+        cacheExpiresAt: '2999-06-09T12:00:00.000Z',
+        keyId: 'billing-policy-2026-01',
+        signature: 'signed-policy'
+      },
+      minimumBillingClientVersion: '0.1.6'
+    }
+  });
+  const { createCloudDesktopController } = require('../src/main/cloudDesktopController');
+  const timeout = new Error('CLOUD_API_TIMEOUT');
+  timeout.status = 504;
+  const controller = createCloudDesktopController({
+    sessionStore,
+    client: new CloudApiClient({ baseUrl: 'http://api.test', fetchImpl: async () => { throw timeout; } })
+  });
+
+  const result = await controller.refreshEntitlements();
+
+  assert.equal(result.ok, true);
+  assert.equal(result.offlinePolicy, true);
+  assert.equal(result.subscription.billingMode, 'free_access');
+  assert.equal(result.subscription.unlimitedDailyUsage, true);
+  assert.equal(result.subscription.hideBillingNavigation, true);
+  assert.equal(result.subscription.effectiveCapabilities.secondaryWorkspace, true);
+  assert.equal(result.subscription.effectiveTemplateLimit, null);
+});
+
+test('cloud controller does not let stale cached policy override online entitlements', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'add-whatsapp-cloud-policy-online-'));
+  const sessionStore = new CloudSessionStore(path.join(dir, 'cloud-session.json'));
+  sessionStore.save({
+    user: { id: 'user-1', username: 'cloud-user' },
+    accessToken: 'access-1',
+    refreshToken: 'refresh-1',
+    entitlements: {
+      userId: 'user-1',
+      planId: 'advanced',
+      balanceCredits: 0,
+      usedToday: 0,
+      usedThisMonth: 0,
+      availableToday: 0
+    },
+    appPolicy: {
+      billing: {
+        mode: 'paid',
+        version: 7,
+        fetchedAt: '2026-06-08T12:00:00.000Z'
+      }
+    }
+  });
+  const { createCloudDesktopController } = require('../src/main/cloudDesktopController');
+  const client = new CloudApiClient({
+    baseUrl: 'http://api.test',
+    fetchImpl: async (url) => {
+      if (url.endsWith('/v1/me/entitlements')) {
+        return response(200, {
+          userId: 'user-1',
+          planId: 'advanced',
+          balanceCredits: 0,
+          usedToday: 0,
+          usedThisMonth: 0,
+          availableToday: 0,
+          billingPolicy: { mode: 'free_access', version: 8 },
+          billingMode: 'free_access',
+          unlimitedDailyUsage: true,
+          hideBillingNavigation: true,
+          effectiveCapabilities: { secondaryWorkspace: true },
+          effectiveWorkspaceLimit: 5,
+          effectiveTemplateLimit: null
+        });
+      }
+      if (url.endsWith('/v1/app-policy')) throw new Error('APP_POLICY_UNAVAILABLE');
+      throw new Error(`unexpected ${url}`);
+    }
+  });
+  const controller = createCloudDesktopController({ client, sessionStore, deviceId: 'desktop-1' });
+
+  const result = await controller.refreshEntitlements();
+
+  assert.equal(result.ok, true);
+  assert.equal(result.subscription.billingMode, 'free_access');
+  assert.equal(result.subscription.unlimitedDailyUsage, true);
+  assert.equal(result.subscription.hideBillingNavigation, true);
+  assert.equal(sessionStore.load().entitlements.billingMode, 'free_access');
+});
+
 test('cloud controller consumes one credit per successful desktop send only', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'add-whatsapp-cloud-consume-'));
   const sessionStore = new CloudSessionStore(path.join(dir, 'cloud-session.json'));
@@ -140,6 +245,7 @@ test('cloud controller consumes one credit per successful desktop send only', as
 
   const result = await controller.consumeSuccessfulAdds({
     taskId: 'task-1',
+    billingSessionId: 'billing-session-1',
     workspaceId: 'main',
     sentAt: '2026-05-28T12:00:00.000Z',
     sentRows: [
@@ -151,6 +257,7 @@ test('cloud controller consumes one credit per successful desktop send only', as
   assert.equal(result.ok, true);
   assert.equal(consumed.length, 2);
   assert.equal(consumed[0].taskId, 'task-1');
+  assert.equal(consumed[0].billingSessionId, 'billing-session-1');
   assert.match(consumed[0].idempotencyKey, /^desktop-send:task-1:1:/);
   assert.notEqual(consumed[0].contactHash, consumed[1].contactHash);
   assert.equal(result.subscription.usedToday, 2);

@@ -8,6 +8,9 @@ const state = {
   activePayment: null,
   paymentRequestInFlight: false,
   taskStartInFlight: false,
+  taskRunning: false,
+  templatesLoaded: false,
+  templateBoundarySavePromise: null,
   selectedQuotaCredits: 2000,
   statisticsDays: 365,
   statisticsMetric: 'sent',
@@ -15,9 +18,13 @@ const state = {
   update: null
 };
 
-const CLOUD_ENTITLEMENT_REFRESH_MIN_INTERVAL_MS = 30 * 1000;
+const CLOUD_ENTITLEMENT_REFRESH_MIN_INTERVAL_MS = 60 * 1000;
+const CLOUD_POLICY_POLL_BASE_INTERVAL_MS = 30 * 1000;
+const CLOUD_POLICY_POLL_JITTER_MS = 15 * 1000;
+const TEMPLATE_LANGUAGES = ['en', 'es', 'fr'];
 let cloudEntitlementRefreshInFlight = null;
 let lastCloudEntitlementRefreshAt = 0;
+let lastBillingPolicyVersion = null;
 
 const elements = {
   authGate: document.getElementById('authGate'),
@@ -197,6 +204,7 @@ const elements = {
 };
 
 const PAGE_ACTIONS = new Set(['importPage']);
+const BILLING_PAGE_IDS = new Set(['planPage', 'usagePage', 'quotaPage', 'billingPage']);
 const IMPORT_OPTIONS_STORAGE_KEY = 'addWhatsapp.importOptions';
 const DEFAULT_MANUAL_ALIPAY_QR = '../../assets/pay/alipay-qr.png';
 const PAYMENT_ORDER_TTL_MS = 5 * 60 * 1000;
@@ -398,39 +406,100 @@ function renderSubscriptionState(subscription) {
   const catalog = Array.isArray(subscription.catalog) && subscription.catalog.length
     ? subscription.catalog
     : (state.subscription && Array.isArray(state.subscription.catalog) ? state.subscription.catalog : []);
+  const previousPolicyVersion = lastBillingPolicyVersion;
   state.subscription = { ...subscription, catalog };
   subscription = state.subscription;
+  const currentPolicyVersion = subscription.billingPolicy && subscription.billingPolicy.version
+    ? Number(subscription.billingPolicy.version)
+    : null;
+  const policyVersionChanged = previousPolicyVersion !== null
+    && currentPolicyVersion !== null
+    && currentPolicyVersion !== previousPolicyVersion;
   const plan = subscription.plan || {};
+  const effectivePlan = effectivePlanFor(subscription);
   const usage = subscription.usage || {};
-  const today = usage.today || { used: subscription.usedToday || 0, limit: plan.dailyLimit || 0, percent: 0 };
+  const today = usage.today || { used: subscription.usedToday || 0, limit: effectivePlan.dailyLimit || 0, percent: 0 };
   const month = usage.month || { used: subscription.usedThisMonth || 0, limit: subscription.monthlyLimit || 0, percent: 0 };
   renderPlanCards(subscription);
   elements.activePlanBadge.textContent = `当前：${plan.name || '-'}`;
   elements.balanceCreditsMetric.textContent = formatCredits(subscription.balanceCredits);
   elements.usedTodayMetric.textContent = formatCredits(today.used);
-  elements.dailyLimitValue.textContent = formatCredits(today.limit);
+  elements.dailyLimitValue.textContent = subscription.unlimitedDailyUsage ? '不限' : formatCredits(today.limit);
   elements.monthUsedMetric.textContent = formatCredits(month.used);
   elements.monthLimitMetric.textContent = formatCredits(month.limit);
   elements.dailyUsageResetHint.textContent = subscription.nextResetAt ? `${formatTime(subscription.nextResetAt)} 重置` : '每日 00:00 重置';
-  elements.workspaceUsageMetric.textContent = `${1 + (subscription.openSecondaryCount || 0)}/${plan.workspaceLimit || '-'}`;
+  elements.workspaceUsageMetric.textContent = `${1 + (subscription.openSecondaryCount || 0)}/${effectivePlan.workspaceLimit || '-'}`;
   elements.usagePolicyText.textContent = subscription.resetPolicy || '每日上限和账户余额分开计算。';
-  const workspacePercent = plan.workspaceLimit ? Math.min(100, ((1 + Number(subscription.openSecondaryCount || 0)) / plan.workspaceLimit) * 100) : 0;
+  const workspacePercent = effectivePlan.workspaceLimit ? Math.min(100, ((1 + Number(subscription.openSecondaryCount || 0)) / effectivePlan.workspaceLimit) * 100) : 0;
   elements.dailyUsageBar.style.width = `${today.percent || 0}%`;
   elements.monthlyUsageBar.style.width = `${month.percent || 0}%`;
   elements.workspaceUsageBar.style.width = `${workspacePercent}%`;
   renderMembershipCard(plan);
   updateQuotaEstimate(subscription);
-  elements.billingPlanDescription.textContent = `${plan.name || '-'}：每日可用上限 ${formatCredits(plan.dailyLimit)}，工作台 ${formatCredits(plan.workspaceLimit)} 个。`;
+  elements.billingPlanDescription.textContent = `${plan.name || '-'}：每日可用上限 ${subscription.unlimitedDailyUsage ? '不限' : formatCredits(effectivePlan.dailyLimit)}，工作台 ${formatCredits(effectivePlan.workspaceLimit)} 个。`;
   renderUsageLedger(subscription);
-  renderBillingFeatureLists(plan);
-  if (elements.dailyLimitInput && plan.dailyLimit) {
-    elements.dailyLimitInput.max = String(plan.dailyLimit);
-    elements.dailyLimitInput.value = String(plan.dailyLimit);
+  renderBillingFeatureLists(effectivePlan);
+  if (elements.dailyLimitInput && effectivePlan.dailyLimit) {
+    elements.dailyLimitInput.max = String(effectivePlan.dailyLimit);
+    elements.dailyLimitInput.value = String(effectivePlan.dailyLimit);
   }
+  applyBillingNavigation(subscription);
   enforceDelayInputs();
-  if (state.templates) renderTemplates(state.templates);
+  enforceTemplateBoundary({ persist: true, announce: policyVersionChanged });
   updateWorkspaceButtonState();
   updateActionLocks();
+  if (currentPolicyVersion !== null) {
+    lastBillingPolicyVersion = currentPolicyVersion;
+    if (policyVersionChanged) {
+      const modeText = subscription.billingMode === 'free_access' ? '全站免费' : '套餐与额度计费';
+      const message = `运营策略已更新：当前已切换为${modeText}，客户端状态已刷新。`;
+      elements.syncState.textContent = message;
+      addLog(message, 'strong');
+      announceWorkspaceBoundary(subscription);
+    }
+  }
+}
+
+function effectivePlanFor(subscription = state.subscription) {
+  const plan = subscription && subscription.plan ? subscription.plan : {};
+  return {
+    ...plan,
+    capabilities: subscription && subscription.effectiveCapabilities ? { ...subscription.effectiveCapabilities } : { ...(plan.capabilities || {}) },
+    workspaceLimit: subscription && Object.prototype.hasOwnProperty.call(subscription, 'effectiveWorkspaceLimit')
+      ? Number(subscription.effectiveWorkspaceLimit)
+      : plan.workspaceLimit,
+    templateLimit: subscription && Object.prototype.hasOwnProperty.call(subscription, 'effectiveTemplateLimit')
+      ? subscription.effectiveTemplateLimit
+      : plan.templateLimit
+  };
+}
+
+function billingNavigationHidden(subscription = state.subscription) {
+  return Boolean(subscription && subscription.hideBillingNavigation);
+}
+
+function isFreeAccessSubscription(subscription = state.subscription) {
+  return Boolean(
+    subscription
+    && (
+      subscription.unlimitedDailyUsage
+      || subscription.billingMode === 'free_access'
+      || (subscription.billingPolicy && subscription.billingPolicy.mode === 'free_access')
+    )
+  );
+}
+
+function applyBillingNavigation(subscription = state.subscription) {
+  const hidden = billingNavigationHidden(subscription);
+  if (hidden && state.taskRunning) return;
+  if (elements.plansToggle) {
+    elements.plansToggle.hidden = hidden;
+    elements.plansToggle.setAttribute('aria-hidden', hidden ? 'true' : 'false');
+  }
+  if (elements.plansSubnav) {
+    elements.plansSubnav.hidden = hidden;
+    elements.plansSubnav.classList.toggle('collapsed', hidden);
+  }
 }
 
 function renderMembershipCard(plan) {
@@ -581,7 +650,7 @@ function planExcludedFeatures(plan = {}) {
 }
 
 function featureAccess(feature) {
-  const plan = state.subscription && state.subscription.plan ? state.subscription.plan : {};
+  const plan = effectivePlanFor(state.subscription);
   if (plan.capabilities && plan.capabilities[feature]) return { ok: true };
   const labels = {
     exportPreview: '导出预检属于进阶版及以上功能',
@@ -597,6 +666,7 @@ function featureAccess(feature) {
 function taskStartAccess() {
   const subscription = state.subscription || {};
   const plan = subscription.plan || {};
+  if (isFreeAccessSubscription(subscription)) return { ok: true };
   if (plan.unitPriceCents > 0 && Number(subscription.balanceCredits || 0) <= 0) {
     return { ok: false, message: `当前${plan.name}账户余额为 0，不能开始新的成功添加任务。请联系开通或等待人工充值。` };
   }
@@ -604,6 +674,21 @@ function taskStartAccess() {
     return { ok: false, message: `当前${plan.name}今日可用上限已用完，请等服务器 00:00 重置后继续。` };
   }
   return { ok: true };
+}
+
+function taskStartAuditSnapshot(subscription = state.subscription) {
+  const plan = subscription && subscription.plan ? subscription.plan : {};
+  const policy = subscription && subscription.billingPolicy ? subscription.billingPolicy : {};
+  return [
+    `plan=${plan.id || '-'}`,
+    `mode=${subscription && subscription.billingMode ? subscription.billingMode : '-'}`,
+    `policy=${policy.mode || '-'}`,
+    `unlimited=${Boolean(subscription && subscription.unlimitedDailyUsage)}`,
+    `hideBilling=${Boolean(subscription && subscription.hideBillingNavigation)}`,
+    `balance=${Number(subscription && subscription.balanceCredits || 0)}`,
+    `available=${Number(subscription && subscription.availableNow || 0)}`,
+    `dailyRemaining=${Number(subscription && subscription.dailyRemaining || 0)}`
+  ].join(', ');
 }
 
 function updateActionLocks() {
@@ -615,7 +700,7 @@ function updateActionLocks() {
   if (elements.runButton) {
     const validCount = state.imported && state.imported.stats ? Number(state.imported.stats.valid || 0) : 0;
     const taskAccess = taskStartAccess();
-    elements.runButton.disabled = state.taskStartInFlight || !state.imported || validCount <= 0 || !taskAccess.ok;
+    elements.runButton.disabled = state.taskStartInFlight || !state.imported || validCount <= 0;
     elements.runButton.title = taskAccess.ok ? '' : taskAccess.message;
   }
   const paymentAccess = featureAccess('onlinePayment');
@@ -665,7 +750,7 @@ function updateActionLocks() {
 
 function updateWorkspaceButtonState() {
   if (!elements.openWorkspaceButton || !state.subscription) return;
-  const plan = state.subscription.plan || {};
+  const plan = effectivePlanFor(state.subscription);
   const workspaceAccess = featureAccess('secondaryWorkspace');
   const isSecondaryWorkspace = Boolean(state.auth.workspace && state.auth.workspace.isSecondary);
   const totalOpen = 1 + Number(state.subscription.openSecondaryCount || 0);
@@ -681,6 +766,23 @@ function updateWorkspaceButtonState() {
     elements.openWorkspaceButton.textContent = '新建工作台 / 打开另一个账号';
     elements.openWorkspaceButton.title = '';
   }
+}
+
+function workspaceBoundaryMessage(subscription = state.subscription) {
+  if (!subscription) return '';
+  const plan = effectivePlanFor(subscription);
+  const workspaceLimit = Number(plan.workspaceLimit || 0);
+  if (!workspaceLimit) return '';
+  const totalOpen = 1 + Number(subscription.openSecondaryCount || 0);
+  if (totalOpen <= workspaceLimit) return '';
+  return `工作台边界已收缩：当前${plan.name || '套餐'}最多同时使用 ${workspaceLimit} 个工作台，当前已打开 ${totalOpen} 个；超出工作台会保留到关闭，但不能再新建。`;
+}
+
+function announceWorkspaceBoundary(subscription = state.subscription) {
+  const message = workspaceBoundaryMessage(subscription);
+  if (!message) return;
+  elements.syncState.textContent = message;
+  addLog(message, 'strong');
 }
 
 function proxyStatusText(proxy) {
@@ -1510,6 +1612,9 @@ function loadImportOptions() {
 }
 
 function switchPage(pageId) {
+  if (BILLING_PAGE_IDS.has(pageId) && billingNavigationHidden()) {
+    pageId = 'importPage';
+  }
   for (const page of elements.pages) {
     page.classList.toggle('active-page', page.id === pageId);
   }
@@ -1520,9 +1625,9 @@ function switchPage(pageId) {
   elements.pageTitle.textContent = active.dataset.title;
   elements.pageEyebrow.textContent = active.dataset.eyebrow;
   elements.topbarActions.hidden = !PAGE_ACTIONS.has(pageId);
-  const isPlanPage = ['planPage', 'usagePage', 'quotaPage', 'billingPage'].includes(pageId);
+  const isPlanPage = BILLING_PAGE_IDS.has(pageId);
   elements.plansToggle.classList.toggle('active', isPlanPage);
-  if (isPlanPage) setPlansExpanded(true);
+  if (isPlanPage && !billingNavigationHidden()) setPlansExpanded(true);
   if (isPlanPage) refreshCloudEntitlementsIfStale().catch(() => {});
   if (pageId === 'historyPage') loadHistory();
   if (pageId === 'statisticsPage') loadStatistics();
@@ -1715,6 +1820,7 @@ function handleTaskEvent(event) {
   addLog(taskEventMessage(event), errorTone || strongTone);
 
   if (event.type === 'task:starting') {
+    state.taskRunning = true;
     state.taskStats = { sent: 0, failed: 0, unregistered: 0, invalid: 0 };
     renderTaskStats();
     elements.taskState.textContent = '连接中';
@@ -1759,11 +1865,14 @@ function handleTaskEvent(event) {
     renderTaskStats();
   }
   if (event.type === 'task:finished' || event.type === 'task:error') {
+    state.taskRunning = false;
     elements.taskState.textContent = event.type === 'task:error' ? '出错' : '已结束';
     elements.taskStateMetric.textContent = event.type === 'task:error' ? '出错' : '已结束';
+    applyBillingNavigation(state.subscription);
     updateActionLocks();
     elements.stopButton.disabled = true;
     refreshCurrentProgress();
+    refreshCloudEntitlementsIfStale({ force: true }).catch(() => {});
   }
 }
 
@@ -1776,9 +1885,20 @@ async function startTask() {
     addLog('请先导入表格。', 'error');
     return;
   }
+  await refreshCloudEntitlementsIfStale({ force: true });
+  if (typeof window.addWhatsapp.getSubscriptionState === 'function') {
+    const latestSubscription = await window.addWhatsapp.getSubscriptionState();
+    if (latestSubscription && latestSubscription.plan) renderSubscriptionState(latestSubscription);
+  }
   const access = taskStartAccess();
   if (!access.ok) {
+    const audit = taskStartAuditSnapshot();
+    console.warn(`Task start policy audit: ${audit}`);
+    addLog(`任务策略审计：${audit}`, 'strong');
     addLog(access.message, 'error');
+    if (access.reason === 'NO_BALANCE') {
+      addLog('当前已启用收费模式，请先在额度页充值，或让后台管理员补额后再开始任务。', 'strong');
+    }
     updateActionLocks();
     return;
   }
@@ -1892,18 +2012,81 @@ function updateTemplateCounts() {
 }
 
 function currentTemplateLimit() {
-  const plan = state.subscription && state.subscription.plan ? state.subscription.plan : {};
+  const plan = effectivePlanFor(state.subscription);
   return plan.templateLimit === null || plan.templateLimit === undefined ? null : Number(plan.templateLimit);
 }
 
 function limitTemplatesForCurrentPlan(templates) {
   const limit = currentTemplateLimit();
-  if (limit === null) return templates;
+  if (limit === null) return {
+    en: [...(templates && templates.en || [])],
+    es: [...(templates && templates.es || [])],
+    fr: [...(templates && templates.fr || [])]
+  };
   const capped = {};
-  for (const language of ['en', 'es', 'fr']) {
-    capped[language] = (templates[language] || []).slice(0, limit);
+  const cappedLimit = Math.max(1, Number(limit) || 1);
+  for (const language of TEMPLATE_LANGUAGES) {
+    capped[language] = (templates && templates[language] || []).slice(0, cappedLimit);
   }
   return capped;
+}
+
+function currentTemplateDrafts() {
+  return {
+    en: templateLines('en'),
+    es: templateLines('es'),
+    fr: templateLines('fr')
+  };
+}
+
+function countTemplateBoundaryRemovals(original, limited) {
+  return TEMPLATE_LANGUAGES.reduce((total, language) => {
+    const before = Array.isArray(original && original[language]) ? original[language].filter(Boolean).length : 0;
+    const after = Array.isArray(limited && limited[language]) ? limited[language].filter(Boolean).length : 0;
+    return total + Math.max(0, before - after);
+  }, 0);
+}
+
+function persistTemplateBoundary(limited, message) {
+  if (!window.addWhatsapp.saveTemplates) return;
+  state.templateBoundarySavePromise = window.addWhatsapp.saveTemplates(limited)
+    .then(response => {
+      if (response && response.ok && response.templates) {
+        renderTemplates(response.templates);
+        elements.templateSaveState.textContent = message;
+        return;
+      }
+      const error = response && response.error ? response.error : '模板边界保存失败。';
+      elements.templateSaveState.textContent = error;
+      addLog(error, 'error');
+    })
+    .catch(error => {
+      const messageText = error && error.message ? error.message : '模板边界保存失败。';
+      elements.templateSaveState.textContent = messageText;
+      addLog(messageText, 'error');
+    });
+}
+
+function enforceTemplateBoundary({ persist = false, announce = false } = {}) {
+  if (!state.templatesLoaded || !state.auth.authenticated) return;
+  const limit = currentTemplateLimit();
+  if (limit === null) {
+    updateTemplateAddButtons();
+    return;
+  }
+  const drafts = currentTemplateDrafts();
+  const limited = limitTemplatesForCurrentPlan(drafts);
+  const removed = countTemplateBoundaryRemovals(drafts, limited);
+  if (removed <= 0) {
+    updateTemplateAddButtons();
+    return;
+  }
+  const plan = effectivePlanFor(state.subscription);
+  const message = `套餐边界已收缩：当前${plan.name || '套餐'}每种语言最多 ${limit} 条文案，已移除 ${removed} 条超出文案。`;
+  renderTemplates(limited);
+  elements.templateSaveState.textContent = message;
+  if (announce) addLog(message, 'strong');
+  if (persist) persistTemplateBoundary(limited, message);
 }
 
 function updateTemplateAddButtons() {
@@ -1947,6 +2130,7 @@ function markTemplatesDirty() {
 function renderTemplates(templates) {
   const limited = limitTemplatesForCurrentPlan(templates);
   state.templates = limited;
+  state.templatesLoaded = true;
   renderTemplateList('en', limited.en);
   renderTemplateList('es', limited.es);
   renderTemplateList('fr', limited.fr);
@@ -2494,6 +2678,12 @@ if (typeof window.addWhatsapp.onUpdateStateChanged === 'function') {
 window.addEventListener('focus', () => {
   refreshCloudEntitlementsIfStale().catch(() => {});
 });
+if (typeof setInterval === 'function') {
+  const pollJitter = Math.floor(Math.random() * CLOUD_POLICY_POLL_JITTER_MS);
+  setInterval(() => {
+    refreshCloudEntitlementsIfStale({ force: true }).catch(() => {});
+  }, CLOUD_POLICY_POLL_BASE_INTERVAL_MS + pollJitter);
+}
 loadImportOptions();
 elements.skipChinaNumbersToggle.addEventListener('change', saveImportOptions);
 bootstrapApp();

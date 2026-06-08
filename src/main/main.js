@@ -21,6 +21,7 @@ const { buildAnalytics } = require('../core/analytics');
 const {
   canOpenSecondaryWorkspace,
   createEntitlementState,
+  effectiveTemplateLimitFor,
   planCatalog,
   resolveFeatureAccess,
   resolveTaskDailyLimit,
@@ -346,6 +347,37 @@ function publicSubscriptionState() {
     openSecondaryCount: openSecondaryWorkspaces.size,
     usage: usageSummary(subscriptionState)
   };
+}
+
+function templateLimitForCurrentSubscription() {
+  return effectiveTemplateLimitFor(subscriptionState);
+}
+
+function shouldPersistTemplateBoundary(templates, limit) {
+  if (limit === null || limit === undefined) return false;
+  const cappedLimit = Math.max(1, Number(limit) || 1);
+  return ['en', 'es', 'fr'].some(language => {
+    const pool = Array.isArray(templates && templates[language]) ? templates[language] : [];
+    return pool.length > cappedLimit;
+  });
+}
+
+function loadTemplatesForCurrentSubscription() {
+  const limit = templateLimitForCurrentSubscription();
+  const hasFiniteLimit = limit !== null && limit !== undefined;
+  const loaded = templateStore.load({ fillDefaults: !hasFiniteLimit });
+  const limited = applyTemplateLimit(loaded, limit);
+  if (shouldPersistTemplateBoundary(loaded, limit)) {
+    templateStore.save(limited, { fillDefaults: false });
+  }
+  return limited;
+}
+
+function saveTemplatesForCurrentSubscription(templates) {
+  const limit = templateLimitForCurrentSubscription();
+  const limited = applyTemplateLimit(templates, limit);
+  const saved = templateStore.save(limited, { fillDefaults: limit === null || limit === undefined });
+  return applyTemplateLimit(saved, limit);
 }
 
 function protectedError(error) {
@@ -1241,7 +1273,7 @@ ipcMain.handle('task:stop', async () => {
 
 ipcMain.handle('templates:get', async () => {
   requireAuthenticated();
-  return applyTemplateLimit(templateStore.load(), subscriptionState.plan.templateLimit);
+  return loadTemplatesForCurrentSubscription();
 });
 
 ipcMain.handle('templates:save', async (_event, templates) => {
@@ -1251,8 +1283,7 @@ ipcMain.handle('templates:save', async (_event, templates) => {
       languageCounts: templateLanguageCounts(templates)
     });
     if (!access.ok) return { ok: false, error: access.message, reason: access.reason };
-    const saved = templateStore.save(applyTemplateLimit(templates, subscriptionState.plan.templateLimit));
-    return { ok: true, templates: applyTemplateLimit(saved, subscriptionState.plan.templateLimit) };
+    return { ok: true, templates: saveTemplatesForCurrentSubscription(templates) };
   } catch (error) {
     return protectedError(error);
   }
@@ -1275,6 +1306,8 @@ ipcMain.handle('analytics:get', async (_event, options = {}) => {
 async function runTask(config) {
   const startedAt = new Date().toISOString();
   const taskId = `${Date.now()}`;
+  let billingSessionId = null;
+  let shouldCloseBillingSession = false;
   const progressPath = progressPathForSource(importedSource);
   activeRun = {
     id: taskId,
@@ -1289,6 +1322,20 @@ async function runTask(config) {
   historyStore.upsert(activeRun);
   sendToRenderer('history:updated', historyStore.list());
   try {
+    if (cloudController) {
+      const billingSessionResult = await cloudController.createTaskBillingSession({
+        taskId,
+        workspaceId: workspaceId || 'main',
+        clientVersion: app.getVersion()
+      });
+      if (billingSessionResult && billingSessionResult.ok === false) {
+        throw new Error(billingSessionResult.error || '任务计费会话创建失败。');
+      }
+      billingSessionId = billingSessionResult
+        && billingSessionResult.taskBillingSession
+        && billingSessionResult.taskBillingSession.sessionId;
+      shouldCloseBillingSession = Boolean(billingSessionId);
+    }
     startProxyMonitorForRunningTask();
     sendToRenderer('task:event', { type: 'task:starting', message: '正在连接 WhatsApp...' });
     const whatsappService = await whatsappSessionManager.switchToAccount(accountContext.requireCurrentUser());
@@ -1314,7 +1361,7 @@ async function runTask(config) {
       onEvent: event => sendToRenderer('task:event', event)
     });
 
-    await syncCloudUsageAfterTask({ taskId, result, sentBeforeCount, sentAt: new Date().toISOString() });
+    shouldCloseBillingSession = await syncCloudUsageAfterTask({ taskId, billingSessionId, result, sentBeforeCount, sentAt: new Date().toISOString() });
 
     sendToRenderer('task:event', {
       type: 'task:finished',
@@ -1345,6 +1392,9 @@ async function runTask(config) {
     });
     sendToRenderer('history:updated', history);
   } finally {
+    if (cloudController && billingSessionId && shouldCloseBillingSession) {
+      cloudController.closeTaskBillingSession({ sessionId: billingSessionId }).catch(() => {});
+    }
     stopProxyMonitorForRunningTask();
     currentTask = null;
     stopRequested = false;
@@ -1354,13 +1404,14 @@ async function runTask(config) {
   }
 }
 
-async function syncCloudUsageAfterTask({ taskId, result, sentBeforeCount, sentAt }) {
-  if (!cloudController || !result || !result.progress) return;
+async function syncCloudUsageAfterTask({ taskId, billingSessionId, result, sentBeforeCount, sentAt }) {
+  if (!cloudController || !result || !result.progress) return true;
   const sentRows = selectNewlySentRows(result.progress, sentBeforeCount);
-  if (!sentRows.length) return;
+  if (!sentRows.length) return true;
   try {
     const cloudResult = await cloudController.consumeSuccessfulAdds({
       taskId,
+      billingSessionId,
       sentRows,
       workspaceId: workspaceId || 'main',
       sentAt
@@ -1372,26 +1423,31 @@ async function syncCloudUsageAfterTask({ taskId, result, sentBeforeCount, sentAt
         type: 'cloud:usage-synced',
         message: `云端已同步 ${cloudResult.consumed || sentRows.length} 个成功添加额度。`
       });
-      return;
+      return true;
     }
-    recordPendingCloudSync({ taskId, sentRows, workspaceId: workspaceId || 'main', sentAt, reason: cloudResult.error || 'AUTH_REQUIRED' });
+    recordPendingCloudSync({ taskId, billingSessionId, sentRows, workspaceId: workspaceId || 'main', sentAt, reason: cloudResult.error || 'AUTH_REQUIRED' });
     sendToRenderer('task:event', {
       type: 'cloud:usage-sync-failed',
       message: '云端额度同步暂未完成，已保存到本地，重新登录后会自动补同步。'
     });
+    return false;
   } catch (error) {
-    recordPendingCloudSync({ taskId, sentRows, workspaceId: workspaceId || 'main', sentAt, reason: error.message });
+    recordPendingCloudSync({ taskId, billingSessionId, sentRows, workspaceId: workspaceId || 'main', sentAt, reason: error.message });
     sendToRenderer('task:event', {
       type: 'cloud:usage-sync-failed',
       message: `云端额度同步失败，已保存到本地待重试：${error.message}`
     });
+    return false;
   }
 }
 
 function recordPendingCloudSync(item) {
   if (!pendingCloudSyncStore) return;
   try {
-    pendingCloudSyncStore.upsert(item);
+    pendingCloudSyncStore.upsert({
+      ...item,
+      billingPolicySnapshot: item.billingPolicySnapshot || (subscriptionState && subscriptionState.billingPolicy) || null
+    });
   } catch (error) {
     sendToRenderer('task:event', {
       type: 'cloud:usage-sync-failed',
@@ -1429,6 +1485,7 @@ async function retryPendingCloudSyncs() {
     }
     const cloudResult = await cloudController.consumeSuccessfulAdds({
       taskId: item.taskId,
+      billingSessionId: item.billingSessionId,
       sentRows: item.sentRows,
       workspaceId: item.workspaceId || 'main',
       sentAt: item.sentAt
@@ -1436,6 +1493,9 @@ async function retryPendingCloudSyncs() {
     if (cloudResult.ok && cloudResult.subscription) {
       subscriptionState = cloudResult.subscription;
       pendingCloudSyncStore.remove(item.taskId);
+      if (item.billingSessionId) {
+        cloudController.closeTaskBillingSession({ sessionId: item.billingSessionId }).catch(() => {});
+      }
       sendToRenderer('auth:changed', authState());
       sendToRenderer('task:event', {
         type: 'cloud:usage-synced',

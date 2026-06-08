@@ -16,7 +16,8 @@ class CloudSessionStore {
         user: parsed.user,
         accessToken: parsed.accessToken,
         refreshToken: parsed.refreshToken || null,
-        entitlements: parsed.entitlements || null
+        entitlements: parsed.entitlements || null,
+        appPolicy: parsed.appPolicy || null
       };
     } catch {
       return unauthenticated();
@@ -30,6 +31,7 @@ class CloudSessionStore {
       accessToken: session.accessToken,
       refreshToken: session.refreshToken || null,
       entitlements: session.entitlements || null,
+      appPolicy: session.appPolicy || null,
       updatedAt: new Date().toISOString()
     };
     fs.writeFileSync(this.sessionPath, JSON.stringify(payload, null, 2));
@@ -50,7 +52,8 @@ function unauthenticated() {
     user: null,
     accessToken: null,
     refreshToken: null,
-    entitlements: null
+    entitlements: null,
+    appPolicy: null
   };
 }
 

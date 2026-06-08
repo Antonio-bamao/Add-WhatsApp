@@ -130,6 +130,9 @@ CREATE TABLE IF NOT EXISTS contact_imports (
   created_at TEXT NOT NULL
 );
 
+ALTER TABLE contact_imports
+  ADD COLUMN IF NOT EXISTS client_import_key TEXT;
+
 CREATE UNIQUE INDEX IF NOT EXISTS contact_imports_user_client_import_key_idx
   ON contact_imports (user_id, client_import_key)
   WHERE client_import_key IS NOT NULL;
@@ -166,6 +169,42 @@ CREATE TABLE IF NOT EXISTS workspace_leases (
   created_at TEXT NOT NULL,
   renewed_at TEXT,
   released_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS task_billing_sessions (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id),
+  task_id TEXT NOT NULL,
+  workspace_id TEXT NOT NULL,
+  mode TEXT NOT NULL,
+  policy_version INTEGER NOT NULL,
+  plan_id_snapshot TEXT,
+  client_version TEXT,
+  device_id TEXT,
+  started_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  closed_at TEXT,
+  status TEXT NOT NULL,
+  UNIQUE (user_id, task_id)
+);
+
+CREATE TABLE IF NOT EXISTS task_usage_events (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id),
+  task_id TEXT NOT NULL,
+  billing_session_id TEXT NOT NULL,
+  mode TEXT NOT NULL,
+  idempotency_key TEXT NOT NULL UNIQUE,
+  contact_hash TEXT,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS system_settings (
+  key TEXT PRIMARY KEY,
+  value_json TEXT NOT NULL,
+  version INTEGER NOT NULL,
+  updated_at TEXT NOT NULL,
+  updated_by TEXT
 );
 
 CREATE TABLE IF NOT EXISTS admin_users (
@@ -223,6 +262,21 @@ ON CONFLICT (id) DO UPDATE SET
   minimum_top_up_credits = EXCLUDED.minimum_top_up_credits,
   template_limit = EXCLUDED.template_limit,
   status = EXCLUDED.status;
+
+INSERT INTO system_settings (
+  key,
+  value_json,
+  version,
+  updated_at,
+  updated_by
+) VALUES (
+  'billing_policy',
+  '{"mode":"paid","pendingMode":null,"effectiveAt":null}',
+  1,
+  '2026-06-08T00:00:00.000Z',
+  NULL
+)
+ON CONFLICT (key) DO NOTHING;
 
 INSERT INTO admin_users (
   id,

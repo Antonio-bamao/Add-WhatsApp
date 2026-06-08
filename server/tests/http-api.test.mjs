@@ -20,7 +20,9 @@ function encryptWechatResource(payload, apiV3Key, { nonce = "notify-nonce", asso
 }
 
 async function withServer(testFn, options = {}) {
-  const server = createAppServer(options);
+  const serverOptions = { ...options };
+  if (!serverOptions.runtime) serverOptions.runtime = createPaidMemoryRuntime();
+  const server = createAppServer(serverOptions);
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const { port } = server.address();
 
@@ -29,6 +31,17 @@ async function withServer(testFn, options = {}) {
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }
+}
+
+function createPaidMemoryRuntime() {
+  const runtime = createMemoryRuntime();
+  runtime.updateBillingPolicy({
+    adminUserId: "admin-preview",
+    mode: "paid",
+    expectedVersion: 1,
+    reason: "test paid mode"
+  });
+  return runtime;
 }
 
 async function request(baseUrl, path, options = {}) {
@@ -134,7 +147,37 @@ describe("cloud API skeleton", () => {
 
       const entitlements = await request(baseUrl, "/v1/me/entitlements", { headers: auth });
       assert.equal(entitlements.response.status, 200);
-      assert.equal(entitlements.payload.availableToday, 200);
+      assert.equal(entitlements.payload.billingPolicy.mode, "free_access");
+      assert.equal(entitlements.payload.unlimitedDailyUsage, true);
+      assert.equal(entitlements.payload.effectiveWorkspaceLimit, 5);
+
+      const appPolicy = await request(baseUrl, "/v1/app-policy", { headers: auth });
+      assert.equal(appPolicy.response.status, 200);
+      assert.equal(appPolicy.payload.billing.mode, "free_access");
+      assert.equal(appPolicy.payload.billing.version, 1);
+      assert.equal(appPolicy.payload.minimumBillingClientVersion, "0.1.6");
+      assert.match(appPolicy.payload.billing.signature, /^[A-Za-z0-9+/=]+$/);
+
+      const paidPolicy = await request(baseUrl, "/v1/admin/billing-policy", {
+        method: "PUT",
+        headers: adminAuth,
+        body: {
+          mode: "paid",
+          expectedVersion: 1,
+          reason: "结束免费推广期"
+        }
+      });
+      assert.equal(paidPolicy.response.status, 200);
+      assert.equal(paidPolicy.payload.mode, "paid");
+      assert.equal(paidPolicy.payload.version, 2);
+
+      const conflictedPolicy = await request(baseUrl, "/v1/admin/billing-policy", {
+        method: "PUT",
+        headers: adminAuth,
+        body: { mode: "free_access", expectedVersion: 1 }
+      });
+      assert.equal(conflictedPolicy.response.status, 409);
+      assert.equal(conflictedPolicy.payload.error, "BILLING_POLICY_VERSION_CONFLICT");
 
       const order = await request(baseUrl, "/v1/orders", {
         method: "POST",
@@ -267,6 +310,8 @@ describe("cloud API skeleton", () => {
       const consoleSnapshot = await request(baseUrl, "/v1/admin/console", { headers: adminAuth });
       assert.equal(consoleSnapshot.response.status, 200);
       assert.equal(consoleSnapshot.payload.source, "server-local-preview");
+      assert.equal(consoleSnapshot.payload.billingPolicy.mode, "paid");
+      assert.equal(consoleSnapshot.payload.pendingUnpaidOrderCount, 0);
       assert.equal(consoleSnapshot.payload.summary.users, 1);
       assert.equal(consoleSnapshot.payload.summary.paymentEvents, 1);
       assert.deepEqual(consoleSnapshot.payload.modules.users.recordHeaders, [
@@ -291,6 +336,7 @@ describe("cloud API skeleton", () => {
       assert.equal(consoleSnapshot.payload.modules.plans.records.length, 4);
       assert.ok(consoleSnapshot.payload.modules.orders.paymentEvents.some((row) => row.includes("evt-api-paid-1")));
       assert.ok(consoleSnapshot.payload.auditTrail.some((entry) => entry.action === "credit.adjustment"));
+      assert.ok(consoleSnapshot.payload.auditTrail.some((entry) => entry.action === "billing.policy_update"));
 
       const loggedOut = await request(baseUrl, "/v1/admin/auth/logout", {
         method: "POST",
@@ -300,7 +346,26 @@ describe("cloud API skeleton", () => {
       assert.equal(loggedOut.payload.loggedOut, true);
       const rejectedAfterLogout = await request(baseUrl, "/v1/admin/console", { headers: adminAuth });
       assert.equal(rejectedAfterLogout.response.status, 401);
-    }, { env: { MANUAL_PAYMENT_ALIPAY_QR_URL: "https://addwhatsapp.com/pay/alipay.png" } });
+    }, { runtime: createMemoryRuntime(), env: { MANUAL_PAYMENT_ALIPAY_QR_URL: "https://addwhatsapp.com/pay/alipay.png" } });
+  });
+
+  it("rejects new payment orders while global free access is active", async () => {
+    await withServer(async (baseUrl) => {
+      const registered = await request(baseUrl, "/v1/auth/register", {
+        method: "POST",
+        body: { username: "free-order-user", password: "StrongPass123", planId: "advanced" }
+      });
+      assert.equal(registered.response.status, 201);
+
+      const order = await request(baseUrl, "/v1/orders", {
+        method: "POST",
+        headers: { authorization: `Bearer ${registered.payload.accessToken}` },
+        body: { planId: "advanced", credits: 2000, amountCents: 60000 }
+      });
+
+      assert.equal(order.response.status, 409);
+      assert.equal(order.payload.error, "BILLING_DISABLED");
+    }, { runtime: createMemoryRuntime() });
   });
 
   it("allows lower package purchases for higher-tier users without downgrading their subscription", async () => {
@@ -343,7 +408,7 @@ describe("cloud API skeleton", () => {
       assert.equal(entitlements.response.status, 200);
       assert.equal(entitlements.payload.planId, "business");
       assert.equal(entitlements.payload.balanceCredits, 5000);
-    });
+    }, { runtime: createPaidMemoryRuntime() });
   });
 
   it("accepts signed mock_alipay notifications and rejects tampered callbacks", async () => {
@@ -579,7 +644,7 @@ describe("cloud API skeleton", () => {
         ZPAY_TYPE: "wxpay",
         ZPAY_SITE_NAME: "Add WhatsApp"
       }
-    });
+    }, { runtime: createPaidMemoryRuntime() });
   });
 
   it("creates WeChat Native payment requests and accepts encrypted APIv3 callbacks", async () => {
@@ -841,6 +906,12 @@ describe("cloud API skeleton", () => {
     const store = createCloudStore();
     store.now = () => now;
     const runtime = createMemoryRuntime({ store });
+    runtime.updateBillingPolicy({
+      adminUserId: "admin-preview",
+      mode: "paid",
+      expectedVersion: 1,
+      reason: "test paid mode"
+    });
     const calls = [];
 
     await withServer(async (baseUrl) => {

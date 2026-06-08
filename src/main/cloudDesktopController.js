@@ -9,6 +9,14 @@ const PLAN_RANKS = Object.freeze({
   business: 3
 });
 
+const FREE_ACCESS_EFFECTIVE_CAPABILITIES = Object.freeze({
+  exportPreview: true,
+  secondaryWorkspace: true,
+  proxySettings: true,
+  customTemplates: true
+});
+const FREE_ACCESS_WORKSPACE_LIMIT = 5;
+
 function planRank(planId) {
   return PLAN_RANKS[planId] ?? PLAN_RANKS.free;
 }
@@ -42,6 +50,123 @@ function createCloudDesktopController({ client, sessionStore, deviceId = 'deskto
 
   function isCloudTimeout(error) {
     return error && (error.status === 504 || /TIMEOUT/.test(error.message || ''));
+  }
+
+  function validPolicyEnvelope(appPolicy) {
+    const billing = appPolicy && appPolicy.billing;
+    if (!billing || !billing.mode || !Number.isFinite(Number(billing.version))) return null;
+    return { ...appPolicy, billing };
+  }
+
+  function isUsableCachedPolicy(appPolicy, now = Date.now()) {
+    const envelope = validPolicyEnvelope(appPolicy);
+    if (!envelope) return false;
+    if (envelope.billing.mode !== 'free_access') return true;
+    if (!envelope.billing.signature || !envelope.billing.keyId || !envelope.billing.cacheExpiresAt) return false;
+    const expiresAt = Date.parse(envelope.billing.cacheExpiresAt);
+    return Number.isFinite(expiresAt) && expiresAt > now;
+  }
+
+  function chooseNewestPolicy(currentPolicy, nextPolicy) {
+    const current = validPolicyEnvelope(currentPolicy);
+    const next = validPolicyEnvelope(nextPolicy);
+    if (!next) return currentPolicy || null;
+    if (!current) return next;
+    const currentVersion = Number(current.billing.version);
+    const nextVersion = Number(next.billing.version);
+    if (nextVersion < currentVersion) return current;
+    if (nextVersion === currentVersion) {
+      const currentFetched = Date.parse(current.billing.fetchedAt || current.billing.updatedAt || 0) || 0;
+      const nextFetched = Date.parse(next.billing.fetchedAt || next.billing.updatedAt || 0) || 0;
+      if (nextFetched < currentFetched) return current;
+    }
+    return next;
+  }
+
+  function entitlementsCarryPolicy(entitlements) {
+    return Boolean(
+      entitlements
+      && (
+        entitlements.billingPolicy
+        || entitlements.billingMode
+        || Object.prototype.hasOwnProperty.call(entitlements, 'unlimitedDailyUsage')
+        || Object.prototype.hasOwnProperty.call(entitlements, 'hideBillingNavigation')
+        || Object.prototype.hasOwnProperty.call(entitlements, 'effectiveCapabilities')
+        || Object.prototype.hasOwnProperty.call(entitlements, 'effectiveWorkspaceLimit')
+        || Object.prototype.hasOwnProperty.call(entitlements, 'effectiveTemplateLimit')
+      )
+    );
+  }
+
+  function paidEntitlementOverlay(entitlements) {
+    const plan = getPlan(entitlements && (entitlements.planId || (entitlements.plan && entitlements.plan.id)));
+    return {
+      effectiveCapabilities: {
+        exportPreview: Boolean(plan.id && plan.id !== 'free'),
+        secondaryWorkspace: Number(plan.workspaceLimit || 0) > 1,
+        proxySettings: Boolean(plan.id && plan.id !== 'free'),
+        customTemplates: Number(plan.templateLimit || 0) > 1 || plan.templateLimit === null
+      },
+      effectiveWorkspaceLimit: Number(plan.workspaceLimit || 1),
+      effectiveTemplateLimit: plan.templateLimit === null ? null : Number(plan.templateLimit || 0)
+    };
+  }
+
+  function mergeEntitlementsWithAppPolicy(entitlements, appPolicy) {
+    if (!entitlements) return entitlements;
+    const envelope = validPolicyEnvelope(appPolicy);
+    if (!envelope) return entitlements;
+    const billing = envelope.billing;
+    const next = {
+      ...entitlements,
+      billingPolicy: billing,
+      billingMode: billing.mode,
+      unlimitedDailyUsage: false,
+      hideBillingNavigation: false
+    };
+    if (billing.mode !== 'free_access' || !isUsableCachedPolicy(envelope)) {
+      return { ...next, ...paidEntitlementOverlay(entitlements) };
+    }
+    return {
+      ...next,
+      unlimitedDailyUsage: true,
+      hideBillingNavigation: true,
+      effectiveCapabilities: { ...FREE_ACCESS_EFFECTIVE_CAPABILITIES },
+      effectiveWorkspaceLimit: FREE_ACCESS_WORKSPACE_LIMIT,
+      effectiveTemplateLimit: null
+    };
+  }
+
+  async function applyLatestAppPolicy(session, entitlements) {
+    let appPolicy = session.appPolicy || null;
+    let fetchedPolicy = null;
+    if (typeof client.getAppPolicy === 'function') {
+      try {
+        fetchedPolicy = await client.getAppPolicy(session.accessToken);
+        appPolicy = chooseNewestPolicy(appPolicy, fetchedPolicy);
+      } catch {
+        // Entitlements are still authoritative online; policy cache is best-effort here.
+      }
+    }
+    const overlayPolicy = fetchedPolicy || (entitlementsCarryPolicy(entitlements) ? null : appPolicy);
+    return {
+      appPolicy,
+      entitlements: mergeEntitlementsWithAppPolicy(entitlements, overlayPolicy)
+    };
+  }
+
+  function cachedPolicyFallback(error) {
+    if (isUnauthorized(error)) return null;
+    const session = sessionStore.load();
+    if (!session.authenticated || !session.entitlements || !isUsableCachedPolicy(session.appPolicy)) return null;
+    const entitlements = mergeEntitlementsWithAppPolicy(session.entitlements, session.appPolicy);
+    return {
+      ok: true,
+      offlinePolicy: true,
+      error: error && error.message ? error.message : 'CLOUD_API_UNAVAILABLE',
+      cloud: publicCloudState({ ...session, entitlements }),
+      subscription: mapCloudEntitlements(entitlements)
+    };
   }
 
   function wechatPaymentErrorResult({ paymentError, order, plan, credits, amountCents }) {
@@ -106,16 +231,18 @@ function createCloudDesktopController({ client, sessionStore, deviceId = 'deskto
   async function register({ username, password, planId = 'advanced' }) {
     const session = await client.register({ username, password, deviceId, planId });
     const entitlements = await client.getEntitlements(session.accessToken);
-    const subscription = mapCloudEntitlements(entitlements);
+    const policyState = await applyLatestAppPolicy(session, entitlements);
+    const subscription = mapCloudEntitlements(policyState.entitlements);
     sessionStore.save({
       user: session.user,
       accessToken: session.accessToken,
       refreshToken: session.refreshToken,
-      entitlements
+      entitlements: policyState.entitlements,
+      appPolicy: policyState.appPolicy
     });
     return {
       ok: true,
-      cloud: publicCloudState({ ...sessionStore.load(), entitlements }),
+      cloud: publicCloudState({ ...sessionStore.load(), entitlements: policyState.entitlements }),
       subscription
     };
   }
@@ -123,16 +250,18 @@ function createCloudDesktopController({ client, sessionStore, deviceId = 'deskto
   async function login({ username, password }) {
     const session = await client.login({ username, password, deviceId });
     const entitlements = await client.getEntitlements(session.accessToken);
-    const subscription = mapCloudEntitlements(entitlements);
+    const policyState = await applyLatestAppPolicy(session, entitlements);
+    const subscription = mapCloudEntitlements(policyState.entitlements);
     sessionStore.save({
       user: session.user,
       accessToken: session.accessToken,
       refreshToken: session.refreshToken,
-      entitlements
+      entitlements: policyState.entitlements,
+      appPolicy: policyState.appPolicy
     });
     return {
       ok: true,
-      cloud: publicCloudState({ ...sessionStore.load(), entitlements }),
+      cloud: publicCloudState({ ...sessionStore.load(), entitlements: policyState.entitlements }),
       subscription
     };
   }
@@ -141,20 +270,23 @@ function createCloudDesktopController({ client, sessionStore, deviceId = 'deskto
     try {
       return await withFreshSession(async (session) => {
         const entitlements = await client.getEntitlements(session.accessToken);
-        const subscription = mapCloudEntitlements(entitlements);
-        sessionStore.save({ ...session, entitlements });
+        const policyState = await applyLatestAppPolicy(session, entitlements);
+        const subscription = mapCloudEntitlements(policyState.entitlements);
+        sessionStore.save({ ...session, entitlements: policyState.entitlements, appPolicy: policyState.appPolicy });
         return {
           ok: true,
-          cloud: publicCloudState({ ...session, entitlements }),
+          cloud: publicCloudState({ ...session, entitlements: policyState.entitlements, appPolicy: policyState.appPolicy }),
           subscription
         };
       });
     } catch (error) {
+      const fallback = cachedPolicyFallback(error);
+      if (fallback) return fallback;
       return handleCloudError(error);
     }
   }
 
-  async function consumeSuccessfulAdds({ taskId, sentRows = [], workspaceId = 'main', sentAt }) {
+  async function consumeSuccessfulAdds({ taskId, billingSessionId, sentRows = [], workspaceId = 'main', sentAt }) {
     const rows = Array.isArray(sentRows) ? sentRows : [];
     try {
       return await withFreshSession(async (session) => {
@@ -165,6 +297,7 @@ function createCloudDesktopController({ client, sessionStore, deviceId = 'deskto
           entitlements = await withFreshSession(async (currentSession) => client.consumeCredit(currentSession.accessToken, {
             idempotencyKey: `desktop-send:${taskId}:${rowKey}:${contactHash.slice(0, 16)}`,
             taskId,
+            billingSessionId,
             contactHash,
             workspaceId,
             sentAt
@@ -173,14 +306,48 @@ function createCloudDesktopController({ client, sessionStore, deviceId = 'deskto
           });
           if (!entitlements || entitlements.ok === false) return entitlements;
         }
-        const subscription = mapCloudEntitlements(entitlements);
-        sessionStore.save({ ...sessionStore.load(), entitlements });
+        const stored = sessionStore.load();
+        const mergedEntitlements = mergeEntitlementsWithAppPolicy(entitlements, stored.appPolicy);
+        const subscription = mapCloudEntitlements(mergedEntitlements);
+        sessionStore.save({ ...stored, entitlements: mergedEntitlements });
         return {
           ok: true,
           consumed: rows.length,
-          cloud: publicCloudState({ ...sessionStore.load(), entitlements }),
+          cloud: publicCloudState({ ...sessionStore.load(), entitlements: mergedEntitlements }),
           subscription
         };
+      }, {
+        missingResult: { ok: true, skipped: true, authRequired: true }
+      });
+    } catch (error) {
+      return handleCloudError(error);
+    }
+  }
+
+  async function createTaskBillingSession({ taskId, workspaceId = 'main', clientVersion } = {}) {
+    try {
+      return await withFreshSession(async (session) => {
+        const taskBillingSession = await client.createTaskBillingSession(session.accessToken, {
+          taskId,
+          workspaceId,
+          clientVersion,
+          deviceId
+        });
+        return { ok: true, taskBillingSession };
+      }, {
+        missingResult: { ok: true, skipped: true, authRequired: true }
+      });
+    } catch (error) {
+      return handleCloudError(error);
+    }
+  }
+
+  async function closeTaskBillingSession({ sessionId } = {}) {
+    if (!sessionId) return { ok: true, skipped: true };
+    try {
+      return await withFreshSession(async (session) => {
+        const taskBillingSession = await client.closeTaskBillingSession(session.accessToken, sessionId);
+        return { ok: true, taskBillingSession };
       }, {
         missingResult: { ok: true, skipped: true, authRequired: true }
       });
@@ -458,6 +625,8 @@ function createCloudDesktopController({ client, sessionStore, deviceId = 'deskto
   return {
     getState,
     createContactImport,
+    createTaskBillingSession,
+    closeTaskBillingSession,
     consumeSuccessfulAdds,
     issueWorkspaceLease,
     renewWorkspaceLease,
@@ -484,7 +653,8 @@ function publicCloudState(session) {
   return {
     authenticated: Boolean(session && session.authenticated),
     user: session && session.authenticated ? session.user : null,
-    entitlements: session && session.authenticated ? session.entitlements : null
+    entitlements: session && session.authenticated ? session.entitlements : null,
+    appPolicy: session && session.authenticated ? session.appPolicy || null : null
   };
 }
 

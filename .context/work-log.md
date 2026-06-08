@@ -574,3 +574,50 @@
 - 线上部署命令：生产机进入 `/opt/add-whatsapp` 后，若 `git status --short` 只有服务器本地 lockfile 变脏，可 `git restore package-lock.json website/package-lock.json` 或按需 stash；随后 `git pull --ff-only origin main`、`git lfs pull`、`npm ci`、`npm ci --prefix website`、`npm run build --prefix website`、`systemctl restart add-whatsapp-website.service`、`nginx -t`、`systemctl reload nginx`。本轮通常不需要重启 API。
 - 线上验证标准：`curl -s https://addwhatsapp.com/downloads/latest/update.json` 必须显示 `version=0.1.5`、`sizeBytes=228629436`、SHA256 `75c20a...ef113`；`curl -I https://addwhatsapp.com/downloads/latest/Add-WhatsApp-Setup.exe` 返回真实安装包大小；`curl -I -H "Range: bytes=0-0" https://addwhatsapp.com/downloads/updates/win/stable/Add-WhatsApp-Setup-0.1.5.exe` 必须返回 `206 Partial Content`。
 - 当前限制：尚未完成生产域名部署后的 `npm run verify:update:host` 校验，也尚未在两台干净 Windows 虚拟机完成 `0.1.5 -> 0.1.6` 实机升级演练。Windows Smart App Control 会拦截未签名安装包，无法对单个 exe 加白名单；普通用户正式发布前应购买代码签名证书，最好 EV，其次 OV。
+
+## 2026-06-08T22:57:19+08:00｜全站免费运营模式、收费策略切换和套餐边界收缩大更新
+- 背景：用户希望后台能一键切换“全站免费 / 套餐与额度计费”，先在本地 API + `npm start` 开发客户端验证，不打包进官网；同时要求切换策略后客户端尽快响应，避免开始任务、文案模板、工作台能力出现“后台已切换但客户端还按旧状态卡住”的边界问题。
+- 服务端：新增并接入全站计费策略能力，后台保存收费模式时会持久化策略版本、模式、计划生效时间、切换原因和操作者；桌面端登录、刷新权益、任务计费会话、使用量同步都会收到 `billingPolicy`、`billingMode`、`unlimitedDailyUsage`、`hideBillingNavigation`、`effectiveCapabilities`、`effectiveWorkspaceLimit`、`effectiveTemplateLimit` 等字段。
+- 服务端：补齐 PostgreSQL schema/runtime 兼容，`contact_imports.client_import_key` 增加迁移兜底，避免本地真实 PostgreSQL 启动后因旧表缺列导致 API 或审计链路异常；本轮本地 API 使用 `http://127.0.0.1:4110` 和 Docker PostgreSQL 验证。
+- 后台：套餐与限额页新增“收费模式”运营面板，显示策略版本、更新时间、操作者、计划生效时间；原复选框改成更明确的 ON/OFF 开关，OFF 表示全站免费，ON 表示套餐与额度计费中；保存后后台快照刷新，便于用户直接观察策略版本变化。
+- 桌面端策略刷新：客户端启动、窗口 focus、主进程 `auth:changed`、点击开始任务前都会刷新权益；后台策略轮询从原先偏慢的间隔调整为 30 秒基础间隔 + 最多 15 秒抖动，策略版本变化时会在运行日志提示“运营策略已更新：当前已切换为全站免费/套餐与额度计费，客户端状态已刷新”。
+- 桌面端免费模式：全站免费时隐藏探索方案/套餐/额度/账单导航，发送任务不再因为付费套餐余额为 0 被拦住；`resolveTaskStartAccess()` 在 `billingMode=free_access`、`billingPolicy.mode=free_access` 或 `unlimitedDailyUsage=true` 时直接允许开始任务；`resolveTaskDailyLimit()` 在免费模式下不再把用户填写的每日上限压回套餐上限。
+- 开始任务边界：修复“后台已关闭收费但开始任务仍提示进阶版余额为 0”的问题。点击开始任务前 renderer 会强制刷新云端权益，并在需要时读取主进程最新 subscription state，避免 renderer 旧缓存导致误判；付费模式且余额为 0 时，开始任务按钮保持可点击，用点击后的日志明确提示余额不足，而不是按钮看起来“点不了”。
+- 任务计费会话：主进程开始任务时会创建 cloud task billing session，任务结束或异常退出后关闭 session；成功发送记录同步时带上 `billingSessionId`，pending cloud sync 也保留 session id，便于服务端和后台审计“任务期间到底按哪个策略计费/免费”。
+- 模板文案边界：免费模式下每种语言文案模板不限，用户可以随意添加；切回收费模式后，客户端收到新策略会按用户真实套餐的 `effectiveTemplateLimit` 自动收缩模板池，保留每种语言前 N 条并移除超出文案，同时保存到本地模板文件，避免免费期添加的多余文案在收费模式下继续偷偷存在。
+- 模板存储：`JsonTemplateStore` 新增有限套餐保存/读取模式，有限套餐下不会再自动补齐 4 条默认文案；免费/不限套餐仍保留原先默认模板补齐体验。主进程 `templates:get` / `templates:save` 不再使用原始 `subscriptionState.plan.templateLimit`，统一走 `effectiveTemplateLimitFor(subscriptionState)`。
+- 工作台边界：免费模式下工作台按后台下发的 `effectiveWorkspaceLimit` 放开；切回收费模式后，`canOpenSecondaryWorkspace()` 和 renderer 按 `effectiveWorkspaceLimit` + `effectiveCapabilities.secondaryWorkspace` 判断。若当前已打开工作台数量超过新套餐，不强杀已打开窗口，避免中断正在使用或正在跑的任务，但立即禁用“新建工作台 / 打开另一个账号”按钮，并提示“工作台边界已收缩：超出工作台会保留到关闭，但不能再新建”。
+- 能力计算统一：`src/core/billingPlans.js` 增加 `effectiveCapabilitiesFor()`、`effectiveTemplateLimitFor()`、`effectiveWorkspaceLimitFor()`，使服务端下发的运营策略 overlay 成为桌面主进程、renderer、模板保存、工作台打开判断的统一来源，减少页面和主进程各写一套规则造成的错位。
+- 前端状态与提示：套餐页、用量页和工作台按钮展示使用 effective plan；免费模式显示“每日可用上限不限”，收费模式恢复为用户实际套餐规则；策略切换时会同步更新按钮 disabled/title、模板添加按钮、套餐导航显示和运行日志。
+- 后台/客户端本地联调：本轮按用户要求不打包、不同步官网，只在 worktree `C:\Users\m1591\Desktop\Add-WhatsApp\.worktrees\free-operation-mode` 里运行本地 API、admin 静态页和 Electron 开发客户端；用户用 `yojiro / yojiro123` 验证后台开关能实时影响客户端。
+- 已确认的问题与修复过程：最初客户端仍显示“探索方案”，原因是用户从主仓目录而不是 worktree 启动旧代码；随后修正为从 worktree 启动。登录 `AUTH_FAILED` 是本地 PostgreSQL 与桌面账号状态不一致，注册/登录本地数据库账号后恢复。后续又连续修复“免费模式仍余额为 0 不能开始任务”“开启收费后按钮不可点但无明确提示”“策略刷新有延迟”“模板/工作台未随收费模式收缩”等边界。
+- 本轮未做：没有打包 EXE，没有同步 `website/public/downloads/latest`，没有推送官网，也没有部署生产 API；当前目标是让用户在 `npm start` 开发客户端把免费/收费策略、开始任务、模板、工作台边界全部测稳。
+- 验证：桌面根项目 `npm test` 最终通过 212/212；服务端 `server npm test` 此前通过 47/47；后台 `admin npm test` 此前通过 12/12。新增/重点覆盖包括：免费策略下任务可启动、paid zero-balance 按钮可点击并显示错误、策略轮询提示、模板从免费切回收费自动裁剪保存、工作台从免费切回收费后禁止继续超限新开、有限套餐模板保存不再补回默认 4 条。
+- 后续测试路径：先后台 OFF 全站免费，在客户端确认套餐导航隐藏、开始任务不因余额 0 卡住、模板可加超过套餐限制、工作台可按免费 effective limit 打开；再后台 ON 收费，确认运行日志提示策略切换，模板自动裁到当前套餐数量，工作台按钮禁用/提示，开始任务在余额 0 时给明确错误，已有运行任务不被硬中断。
+- 风险与决策：模板属于本地数据边界，按用户要求在收费模式恢复后自动删除超出套餐的模板；工作台属于运行态边界，当前选择不强杀已打开的独立工作台，只禁止新增并提示，避免误中断用户正在执行的 WhatsApp 任务。这条口径后续如果要变成“收费后强制关闭超限工作台”，必须另做退出协调和任务保护设计。
+
+## 2026-06-08T23:20:34+08:00｜修复免费/收费策略审计发现的稳定性边界
+- 目标：根据代码审计结果修掉全站免费模式里最容易造成误收费、误免费或生产 API 异常的边界。
+- 动作：计费策略改为当前 `mode` + 排期 `pendingMode/effectiveAt`，未来生效时间不再提前改变权益、下单和任务计费；后台面板能显示当前模式到计划模式的切换状态。
+- 动作：PostgreSQL runtime 增加 `system_settings`、`task_billing_sessions`、`task_usage_events` 的轻量自迁移保护；schema 的生产默认策略改为 paid，避免生产库首次应用新 schema 后自动进入全站免费，内存预览仍默认 free_access。
+- 动作：桌面端在线权益优先于本地 app policy 缓存，避免旧 paid 缓存覆盖服务器已经返回的 free_access；pending 云同步保存 `billingSessionId` 和策略快照，任务同步失败时不立即关闭 billing session，补同步成功后再关闭。
+- 验证：先补红灯测试确认旧代码会失败；修复后 `npm test` 通过 213/213，`npm test --prefix server` 通过 48/48，`npm test --prefix admin` 通过 12/12，`git diff --check` 无 whitespace error。
+
+## 2026-06-08T23:27:44+08:00｜修复 WhatsApp Web 登录页被压到 800px 的窗口回归
+- 目标：修复上次稳定性改动后 WhatsApp 登录页没有占满浏览器、右侧出现大块空白的问题。
+- 根因：桌面端预启动 Chrome 后再让 `whatsapp-web.js` 通过 DevTools endpoint 连接，但连接参数没有显式关闭 Puppeteer 默认 viewport；页面按默认 800x600 视口渲染，即使外层 Chrome 窗口更宽也会看起来被压缩。
+- 动作：WhatsApp 浏览器启动参数改回桌面尺寸语义，使用 `--window-size=1366,900`、`--force-device-scale-factor=1` 和 `--high-dpi-support=1`；launch/connect 两侧都设置 `defaultViewport: null`，让 WhatsApp Web 使用真实窗口尺寸。
+- 验证：先补红灯测试覆盖默认 viewport、窗口尺寸和缩放参数；修复后 `node --test tests\whatsappService.test.js` 通过 13/13，根项目 `npm test` 通过 213/213，`git diff --check` 无 whitespace error。
+
+## 2026-06-08T23:32:30+08:00｜修复 WhatsApp 登录时弹出两个 Chromium 窗口
+- 目标：修复 WhatsApp 登录时同时出现一个空白 Chromium 新标签页窗口和一个 WhatsApp Web 窗口的问题。
+- 根因：桌面端为了先给 WhatsApp origin 授权 durable storage，会先 `puppeteer.launch()` 一个 Chrome；Puppeteer headful launch 默认会附带 `about:blank` 初始页，而 `whatsapp-web.js` 连接已有 browser endpoint 后又固定执行 `browser.newPage()` 打开 WhatsApp，导致用户看到两个窗口。
+- 动作：预启动 Chrome 增加 `--no-startup-window`，并设置 `waitForInitialPage: false`，让预启动阶段只保留可连接的 browser process，不显示空白新标签页；WhatsApp 页面仍由 `whatsapp-web.js` 创建，继续保留提前授权 storage 的稳定性改动。
+- 验证：先补红灯测试确认旧启动参数缺少 no-startup-window；修复后 `node --test tests\whatsappService.test.js` 通过 13/13。
+
+## 2026-06-08T23:40:39+08:00｜审计另一台电脑开始任务后停留 about:blank 的边界
+- 目标：排查“开发电脑正常，另一台电脑从官网下载包后点击开始任务停留 about:blank，二维码/WhatsApp 页面不出现”的原因。
+- 判断：当前官网 metadata 仍是 2026-06-06 的 `0.1.5`，今天关于 `defaultViewport`、`--no-startup-window`、`waitForInitialPage` 的修复还只在 worktree，官网下载包大概率没有包含；同时开发电脑正常、另一台电脑异常，更符合该电脑网络/VPN/代理/防火墙或旧安装包环境差异。
+- 代码边界：原代码虽然会在 WhatsApp 页面连续停留 `about:blank` 后报错并关闭浏览器，但中途没有运行日志提示，用户会误以为二维码刷新逻辑卡死。
+- 动作：增加 `auth:blank-page` 事件，在第一次检测到 WhatsApp Web 页面仍是 `about:blank` 时就提示“当前电脑网络、VPN、代理或防火墙可能无法访问 web.whatsapp.com，正在继续等待页面加载”。
+- 验证：先补红灯测试确认旧代码不会发出 `auth:blank-page`；修复后 `node --test tests\whatsappService.test.js` 通过 14/14。
