@@ -54,6 +54,8 @@ describe("public website structure", () => {
     const layout = readText("app/layout.js");
     const homePage = readText("app/page.js");
     const landingExperience = readText("components/LandingExperience.js");
+    const bizFinderPage = readText("app/bizfinder/page.js");
+    const bizFinderExperience = readText("components/BizFinderPage.js");
     const downloadPage = readText("app/download/page.js");
     const releasesPage = readText("app/releases/page.js");
     const releasesData = readText("lib/releases.js");
@@ -64,9 +66,16 @@ describe("public website structure", () => {
     assert.match(homePage, /LandingExperience/);
     assert.match(landingExperience, /Add WhatsApp/);
     assert.match(landingExperience, /src="\/logo\.png"/);
+    assert.match(landingExperience, /href="\/bizfinder"/);
     assert.match(landingExperience, /官方下载/);
     assert.match(landingExperience, /全球/);
     assert.doesNotMatch(landingExperience, /上线前最常见的问题|FAQ/);
+    assert.match(bizFinderPage, /BizFinderPage/);
+    assert.match(bizFinderPage, /metadata/);
+    assert.match(bizFinderExperience, /从地图上，\s*.*找到下一批海外客户/s);
+    assert.match(bizFinderExperience, /立即下载/);
+    assert.match(bizFinderExperience, /bizfinder-logo-transparent\.png/);
+    assert.match(bizFinderExperience, /真实软件界面/);
     assert.match(downloadPage, /Windows/);
     assert.match(downloadPage, /latestRelease\.downloadUrl/);
     assert.match(releasesPage, /releaseHistory/);

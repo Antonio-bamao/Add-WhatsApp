@@ -209,10 +209,15 @@ export default function LandingExperience() {
             <a href="#trust">安全</a>
             <Link href="/releases">版本</Link>
           </nav>
-          <Link className="cinematic-download" href="/download">
-            <ArrowDownToLine size={18} />
-            下载
-          </Link>
+          <div className="cinematic-header-actions">
+            <Link className="cinematic-product-link" href="/bizfinder">
+              BizFinder
+            </Link>
+            <Link className="cinematic-download" href="/download">
+              <ArrowDownToLine size={18} />
+              下载
+            </Link>
+          </div>
         </header>
 
         <section
