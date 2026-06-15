@@ -2,6 +2,10 @@
 
 - 当前阶段：Phase 8.6，后台管理台、云端 API、PostgreSQL 持久化、管理员鉴权、桌面端云端登录/扣费和第二工作台云端租约生命周期已跑通。
 - 主线状态：`C:\Users\m1591\Desktop\Add-WhatsApp` 已形成公开官网 `website/`、后台管理台 `admin/`、云端 API `server/`、桌面端 `src/` 四个边界；本地数据库容器 `add-whatsapp-postgres` 继续作为 PostgreSQL 预览数据库。
+- 最新完成：Add WhatsApp 官网新增 BizFinder 谷歌地图获客子页面 `/bizfinder`，首页固定头部新增桌面/手机均可见的 `BizFinder` 入口；页面采用蓝白亮色“地图商机工作台”方案，包含营销首屏、核心功能、四步获客流程、地图/名单联动、真实软件截图、任务稳定性和行动区。
+- BizFinder 页面边界：文案以 `H:\项目\BizFinder` 的项目计划和实际功能为准，面向外贸销售团队；“立即下载”当前仅为视觉占位，尚未生成或接入 BizFinder Windows 安装包，也未部署生产官网。
+- BizFinder 验证：`npm test --prefix website` 6/6，`npm run build --prefix website` 成功并静态生成 `/bizfinder`；桌面浏览器入口跳转正常，390px 手机视口无横向溢出。功能提交 `b21566d` 已合并到本地 `main`，临时 worktree 和分支已清理。
+- BizFinder 下一步：完成 Windows 打包后接入真实下载文件和版本信息，再推送并部署生产官网；线上生效前不能把本地页面完成等同于正式发布。
 - 已完成：`website/` 独立 Next.js App Router 工程已创建；首页、下载页、版本页、公开静态 `/site.css`、站点导航/页脚、`react-globe.gl` 开源 WebGL 地球、`world-atlas` 本地国家边界和下载 manifest 已落地。
 - 已完成：当前 Windows 便携版 `dist\Add WhatsApp 0.1.2.exe` 已复制到 `website\public\downloads\latest\Add-WhatsApp.exe` 和 `website\public\downloads\releases\0.1.2\Add-WhatsApp-0.1.2.exe`；`update.json` 已写入版本、文件名、下载路径、发布日期、大小和 SHA256。
 - 已完成：新增 `docs/repository-structure.md` 记录当前单仓库分目录边界，明确官网不放 API 密钥、后台逻辑、客户数据或 WhatsApp session，并新增 `admin/` 管理台边界。

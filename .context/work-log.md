@@ -641,3 +641,16 @@
 - 验证：先写红灯测试覆盖强制更新弹窗、后台生效时间默认空、afterPack 图标资源编辑和 0.1.7 发布元数据；修复后 `npm run build` 成功，抽取 `dist\win-unpacked\Add WhatsApp.exe` 图标确认是绿色电话图标；`npm test` 通过 215/215，`npm test --prefix admin` 通过 12/12，`npm test --prefix server` 通过 48/48，`npm test --prefix website` 通过 6/6，`npm run build --prefix website` 成功。`git diff --check` 在本机 Git for Windows 报 `sh.exe: couldn't create signal pipe, Win32 error 5`，未给出 whitespace 行号，判断为本机 Git 权限/环境错误而非补丁格式错误。
 - 服务器部署命令：生产机进入 `/opt/add-whatsapp` 后执行 `git pull --ff-only origin main`、`git lfs pull`、`npm ci`、`npm ci --prefix website`、`npm ci --prefix admin`、`npm run build --prefix website`、`systemctl restart add-whatsapp-website.service`、如 API 也同仓运行则 `npm ci --prefix server && systemctl restart add-whatsapp-api.service`，最后 `nginx -t && systemctl reload nginx`。
 - 线上验证标准：`curl -s https://addwhatsapp.com/downloads/latest/update.json` 必须显示 `version=0.1.7`、`sizeBytes=228876916` 和上述 SHA256；`curl -I -H "Range: bytes=0-0" https://addwhatsapp.com/downloads/updates/win/stable/Add-WhatsApp-Setup-0.1.7.exe` 必须返回 `206 Partial Content`；客户端 0.1.6 启动后应在约 5 秒内自动检测并弹出强制更新弹窗。
+
+## 2026-06-15T22:06:26+08:00｜新增 BizFinder 谷歌地图获客官网子页面
+- 目标：在 Add WhatsApp 官网增加 BizFinder 产品入口和独立中文子页面，面向外贸销售团队介绍谷歌地图商家获客能力；页面采用明亮、精致的 B2B 软件风格。
+- 产品依据：读取 `H:\项目\BizFinder` 的项目上下文和实际软件界面，文案只覆盖现有能力：按国家/城市/关键词搜索、采集商家名称/电话/地址/网站/坐标/来源链接、地图与表格联动、筛选去重、任务暂停继续与断点恢复、本地 SQLite 保存、CSV / Excel 导出、验证码人工处理、随机间隔和失败重试。
+- 视觉决策：采用 A 方案“地图商机工作台”；首屏使用代码实现的精致产品工作台示意图，中后段展示 BizFinder 真实“数据统计”软件截图。品牌 Logo 和图标取自 BizFinder 仓库，页面使用蓝白亮色基调，辅以青色和橙色信息点。
+- 页面实现：新增 `website/app/bizfinder/page.js`、`website/components/BizFinderPage.js` 和 `website/public/bizfinder/` 素材；在 Add WhatsApp 首页固定头部新增独立 `BizFinder` 按钮，桌面端和手机端均可进入 `/bizfinder`。
+- 营销内容：主标题为“从地图上，找到下一批海外客户”；页面包含核心功能、四步获客流程、地图/名单联动、可导出字段、真实软件界面、长任务稳定性和底部行动区。所有页面文案为中文，目标用户明确为外贸销售团队。
+- 下载边界：页面中的“立即下载”按钮当前只做视觉占位，不链接未完成的安装包；页面不显示“Windows 版本即将开放”等提示。待 BizFinder 完成打包后再接入真实下载地址和版本发布信息。
+- 验证：按 TDD 先增加 BizFinder 路由与入口结构测试并确认红灯，再实现页面；最终 `npm test --prefix website` 通过 6/6，`npm run build --prefix website` 成功，Next.js 成功静态生成 `/bizfinder`。
+- 浏览器验证：桌面端检查首页入口、BizFinder 首屏、中后段和真实截图区；首页 `BizFinder` 按钮点击后正确进入 `/bizfinder`。390px 手机视口的 `innerWidth=390`、`scrollWidth=390`，无页面级横向溢出；页面和真实截图资源均返回 200。
+- Git：设计说明提交 `ad9aec1`，实施计划提交 `c348079`，功能提交 `b21566d feat: add BizFinder product page`；功能分支已快进合并到 `main`，临时分支、worktree 和 `.worktrees` 空目录均已删除，最终工作区干净。
+- 当前状态：本地开发预览已确认并获用户认可；尚未推送或部署生产官网，BizFinder 安装包也尚未生成。
+- 下一步：BizFinder 完成 Windows 打包后，增加真实下载文件、下载地址、版本元数据和必要的发布校验，再部署 Add WhatsApp 生产官网。
