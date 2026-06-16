@@ -49,6 +49,66 @@ CREATE TABLE IF NOT EXISTS subscriptions (
   changed_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS product_subscriptions (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id),
+  product_code TEXT NOT NULL,
+  plan_id TEXT NOT NULL REFERENCES plans(id),
+  status TEXT NOT NULL DEFAULT 'active',
+  started_at TEXT NOT NULL,
+  changed_at TEXT NOT NULL,
+  UNIQUE (user_id, product_code)
+);
+
+CREATE TABLE IF NOT EXISTS product_credit_ledger (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id),
+  product_code TEXT NOT NULL,
+  type TEXT NOT NULL,
+  amount INTEGER NOT NULL,
+  balance_after INTEGER NOT NULL,
+  idempotency_key TEXT NOT NULL UNIQUE,
+  related_order_id TEXT,
+  reservation_id TEXT,
+  place_index INTEGER,
+  note TEXT,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS product_usage_daily (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id),
+  product_code TEXT NOT NULL,
+  business_date TEXT NOT NULL,
+  plan_id_snapshot TEXT NOT NULL,
+  daily_limit INTEGER NOT NULL,
+  used_count INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (user_id, product_code, business_date)
+);
+
+CREATE TABLE IF NOT EXISTS quota_reservations (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id),
+  product_code TEXT NOT NULL,
+  reserved_count INTEGER NOT NULL,
+  status TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  closed_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS quota_reservation_items (
+  id TEXT PRIMARY KEY,
+  reservation_id TEXT NOT NULL REFERENCES quota_reservations(id),
+  place_index INTEGER NOT NULL,
+  decision TEXT NOT NULL,
+  outcome TEXT NOT NULL,
+  ledger_id TEXT,
+  created_at TEXT NOT NULL,
+  UNIQUE (reservation_id, place_index)
+);
+
 CREATE TABLE IF NOT EXISTS credit_ledger (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL REFERENCES users(id),
@@ -101,6 +161,9 @@ CREATE TABLE IF NOT EXISTS orders (
   paid_at TEXT,
   closed_at TEXT
 );
+
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS product_code TEXT NOT NULL DEFAULT 'whatsapp';
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS sku TEXT;
 
 CREATE TABLE IF NOT EXISTS payment_events (
   id TEXT PRIMARY KEY,

@@ -157,9 +157,17 @@ function errorStatus(error) {
   if (/SIGNATURE/.test(error.message)) return 401;
   if (/UNAUTHORIZED|AUTH_FAILED|NOT_ACTIVE/.test(error.message)) return 401;
   if (/NOT_FOUND/.test(error.message)) return 404;
-  if (/LIMIT|INSUFFICIENT|NO_AVAILABLE|ALREADY_PAID|CLOSED|DOWNGRADE|CONFLICT/.test(error.message)) return 409;
-  if (/INVALID|REQUIRED|WEAK|EXISTS|MISMATCH|TOO_LARGE/.test(error.message)) return 400;
+  if (/LIMIT|INSUFFICIENT|NO_AVAILABLE|ALREADY_PAID|CLOSED|DOWNGRADE|CONFLICT|MISMATCH/.test(error.message)) return 409;
+  if (/INVALID|REQUIRED|WEAK|EXISTS|TOO_LARGE/.test(error.message)) return 400;
   return 500;
+}
+
+function quotaDecisionBody(body, reservationId) {
+  return {
+    ...body,
+    reservationId: reservationId || body.reservationId || body.reservation_id,
+    placeIndex: body.placeIndex ?? body.place_index
+  };
 }
 
 export function createAppServer(options = {}) {
@@ -264,7 +272,7 @@ export function createAppServer(options = {}) {
 
       if (request.method === "GET" && url.pathname === "/v1/me/entitlements") {
         const userId = await authUserId(runtime, request);
-        jsonResponse(response, 200, await runtime.getEntitlements(userId));
+        jsonResponse(response, 200, await runtime.getEntitlements(userId, url.searchParams.get("product") || undefined));
         return;
       }
 
@@ -285,6 +293,29 @@ export function createAppServer(options = {}) {
         const userId = await authUserId(runtime, request);
         const body = await readJson(request);
         jsonResponse(response, 201, await runtime.createTaskBillingSession({ ...body, userId }));
+        return;
+      }
+
+      if (request.method === "POST" && url.pathname === "/v1/quota/reservations") {
+        const userId = await authUserId(runtime, request);
+        const body = await readJson(request);
+        jsonResponse(response, 201, await runtime.reserveProductQuota({ ...body, userId }));
+        return;
+      }
+
+      if (request.method === "POST" && /^\/v1\/quota\/reservations\/[^/]+\/confirm$/.test(url.pathname)) {
+        const userId = await authUserId(runtime, request);
+        const reservationId = decodeURIComponent(url.pathname.split("/")[4]);
+        const body = await readJson(request);
+        jsonResponse(response, 200, await runtime.confirmProductQuota({ ...quotaDecisionBody(body, reservationId), userId }));
+        return;
+      }
+
+      if (request.method === "POST" && /^\/v1\/quota\/reservations\/[^/]+\/release$/.test(url.pathname)) {
+        const userId = await authUserId(runtime, request);
+        const reservationId = decodeURIComponent(url.pathname.split("/")[4]);
+        const body = await readJson(request);
+        jsonResponse(response, 200, await runtime.releaseProductQuota({ ...quotaDecisionBody(body, reservationId), userId }));
         return;
       }
 

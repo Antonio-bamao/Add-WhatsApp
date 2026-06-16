@@ -2,6 +2,10 @@ import crypto from "node:crypto";
 import zlib from "node:zlib";
 import { Pool } from "pg";
 import {
+  GMAPS_PLAN_CATALOG,
+  GMAPS_SKU_CATALOG
+} from "../services/billingService.js";
+import {
   BILLING_POLICY_KEY,
   billingPolicyValueJson,
   buildBillingPolicyUpdate,
@@ -26,6 +30,7 @@ const CONTACT_IMPORT_MAX_BYTES = 25 * 1024 * 1024;
 const migratedOrderLifecyclePools = new WeakSet();
 const migratedContactImportPools = new WeakSet();
 const migratedBillingPolicyPools = new WeakSet();
+const migratedProductBillingPools = new WeakSet();
 const PLAN_RANKS = Object.freeze({
   free: 0,
   advanced: 1,
@@ -136,7 +141,9 @@ function toOrder(row, balanceCredits = undefined) {
     createdAt: row.created_at,
     expiresAt: row.expires_at,
     paidAt: row.paid_at,
-    closedAt: row.closed_at
+    closedAt: row.closed_at,
+    productCode: row.product_code || "whatsapp",
+    sku: row.sku || null
   };
   if (balanceCredits !== undefined) order.balanceCredits = balanceCredits;
   return order;
@@ -447,6 +454,173 @@ async function appendLedger(client, { userId, type, amount, idempotencyKey, rela
   return { entry, idempotentReplay: false };
 }
 
+function normalizeProduct(product = "gmaps") {
+  const normalized = String(product || "gmaps").trim().toLowerCase();
+  if (normalized !== "gmaps") throw new Error("PRODUCT_UNSUPPORTED");
+  return normalized;
+}
+
+function gmapsPlan(planId) {
+  return GMAPS_PLAN_CATALOG[planId] || GMAPS_PLAN_CATALOG.free;
+}
+
+function productPackages() {
+  return Object.values(GMAPS_SKU_CATALOG).map((sku) => ({
+    sku: sku.sku,
+    planId: sku.planId,
+    credits: sku.credits,
+    amountCents: sku.amountCents
+  }));
+}
+
+async function productBalanceFor(client, userId, product = "gmaps") {
+  const result = await client.query(
+    "SELECT COALESCE(SUM(amount), 0)::int AS balance FROM product_credit_ledger WHERE user_id = $1 AND product_code = $2",
+    [userId, normalizeProduct(product)]
+  );
+  return Number(result.rows[0]?.balance || 0);
+}
+
+async function appendProductLedger(client, { userId, product = "gmaps", type, amount, idempotencyKey, relatedOrderId = null, relatedReservationId = null, note = "" }) {
+  const productCode = normalizeProduct(product);
+  const existing = await client.query("SELECT * FROM product_credit_ledger WHERE idempotency_key = $1", [idempotencyKey]);
+  if (existing.rows[0]) return { entry: existing.rows[0], idempotentReplay: true };
+
+  const balanceAfter = (await productBalanceFor(client, userId, productCode)) + Number(amount);
+  if (balanceAfter < 0) throw new Error("INSUFFICIENT_CREDITS");
+  const entry = {
+    id: createId("product_ledger"),
+    userId,
+    productCode,
+    type,
+    amount: Number(amount),
+    balanceAfter,
+    idempotencyKey,
+    relatedOrderId,
+    relatedReservationId,
+    note,
+    createdAt: isoNow()
+  };
+  await client.query(
+    `INSERT INTO product_credit_ledger
+      (id, user_id, product_code, type, amount, balance_after, idempotency_key, related_order_id, related_reservation_id, note, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+    [
+      entry.id,
+      entry.userId,
+      entry.productCode,
+      entry.type,
+      entry.amount,
+      entry.balanceAfter,
+      entry.idempotencyKey,
+      entry.relatedOrderId,
+      entry.relatedReservationId,
+      entry.note,
+      entry.createdAt
+    ]
+  );
+  return { entry, idempotentReplay: false };
+}
+
+async function getProductSubscription(client, userId, product = "gmaps") {
+  const result = await client.query(
+    `SELECT * FROM product_subscriptions
+     WHERE user_id = $1 AND product_code = $2 AND status = 'active'
+     ORDER BY started_at DESC
+     LIMIT 1`,
+    [userId, normalizeProduct(product)]
+  );
+  return result.rows[0] || null;
+}
+
+async function ensureProductAccount(client, userId, product = "gmaps") {
+  const productCode = normalizeProduct(product);
+  const now = isoNow();
+  const existing = await getProductSubscription(client, userId, productCode);
+  if (!existing) {
+    await client.query(
+      `INSERT INTO product_subscriptions (id, user_id, product_code, plan_id, status, started_at, ends_at, changed_at)
+       VALUES ($1, $2, $3, 'free', 'active', $4, NULL, $4)`,
+      [createId("product_sub"), userId, productCode, now]
+    );
+  }
+  await appendProductLedger(client, {
+    userId,
+    product: productCode,
+    type: "free_grant",
+    amount: 20,
+    idempotencyKey: `free_grant:${productCode}:${userId}`,
+    note: "BizFinder free credits"
+  });
+}
+
+async function getOrCreateProductDailyUsage(client, userId, product = "gmaps", plan = GMAPS_PLAN_CATALOG.free) {
+  const productCode = normalizeProduct(product);
+  const { businessDate } = businessParts();
+  const now = isoNow();
+  await client.query(
+    `INSERT INTO product_usage_daily
+      (id, user_id, product_code, business_date, plan_id_snapshot, daily_limit, used_count, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, 0, $7, $7)
+     ON CONFLICT (user_id, product_code, business_date) DO NOTHING`,
+    [createId("product_usage_day"), userId, productCode, businessDate, plan.id, plan.dailyLimit, now]
+  );
+  const result = await client.query(
+    "SELECT * FROM product_usage_daily WHERE user_id = $1 AND product_code = $2 AND business_date = $3",
+    [userId, productCode, businessDate]
+  );
+  return result.rows[0];
+}
+
+async function reservedProductUnits(client, userId, product = "gmaps") {
+  const result = await client.query(
+    `SELECT COALESCE(SUM(reserved_count - confirmed_count - released_count), 0)::int AS reserved
+     FROM quota_reservations
+     WHERE user_id = $1 AND product_code = $2 AND status = 'active'`,
+    [userId, normalizeProduct(product)]
+  );
+  return Math.max(0, Number(result.rows[0]?.reserved || 0));
+}
+
+async function getProductEntitlementsForClient(client, { userId, product = "gmaps" }) {
+  const productCode = normalizeProduct(product);
+  await ensureProductAccount(client, userId, productCode);
+  const subscription = await getProductSubscription(client, userId, productCode);
+  const plan = gmapsPlan(subscription?.plan_id || "free");
+  const daily = await getOrCreateProductDailyUsage(client, userId, productCode, plan);
+  const balanceCredits = await productBalanceFor(client, userId, productCode);
+  const reservedCount = await reservedProductUnits(client, userId, productCode);
+  const remainingByLimit = Math.max(0, Number(daily.daily_limit) - Number(daily.used_count) - reservedCount);
+  return {
+    product: productCode,
+    userId,
+    planId: plan.id,
+    planName: plan.displayName,
+    cardTier: plan.cardTier,
+    balanceCredits,
+    dailyLimit: plan.dailyLimit,
+    taskLimit: plan.taskLimit,
+    batchGroupLimit: plan.batchGroupLimit,
+    proxyLimit: plan.proxyLimit,
+    deviceLimit: plan.deviceLimit,
+    deviceExpansionLimit: plan.deviceExpansionLimit,
+    usedToday: Number(daily.used_count),
+    reservedCount,
+    availableToday: Math.min(balanceCredits, remainingByLimit),
+    businessDate: daily.business_date,
+    resetAt: `${daily.business_date}T24:00:00+08:00`,
+    capabilities: plan.capabilities,
+    plannedCapabilities: plan.plannedCapabilities,
+    packages: productPackages()
+  };
+}
+
+async function orderBalanceFor(client, order) {
+  return (order.product_code || "whatsapp") === "gmaps"
+    ? productBalanceFor(client, order.user_id, "gmaps")
+    : balanceFor(client, order.user_id);
+}
+
 function publicTaskBillingSession(row) {
   return {
     sessionId: row.id,
@@ -577,6 +751,93 @@ async function ensureOrderLifecycleColumns(client, db) {
   migratedOrderLifecyclePools.add(db);
 }
 
+async function ensureProductBillingTables(client, db) {
+  if (migratedProductBillingPools.has(db)) return;
+  await client.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS product_code TEXT NOT NULL DEFAULT 'whatsapp'");
+  await client.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS sku TEXT");
+  await client.query(
+    `CREATE TABLE IF NOT EXISTS product_subscriptions (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id),
+      product_code TEXT NOT NULL,
+      plan_id TEXT NOT NULL,
+      status TEXT NOT NULL,
+      started_at TEXT NOT NULL,
+      ends_at TEXT,
+      changed_at TEXT NOT NULL
+    )`
+  );
+  await client.query(
+    `CREATE INDEX IF NOT EXISTS product_subscriptions_user_product_idx
+     ON product_subscriptions (user_id, product_code, status, started_at DESC)`
+  );
+  await client.query(
+    `CREATE TABLE IF NOT EXISTS product_credit_ledger (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id),
+      product_code TEXT NOT NULL,
+      type TEXT NOT NULL,
+      amount INTEGER NOT NULL,
+      balance_after INTEGER NOT NULL,
+      idempotency_key TEXT NOT NULL UNIQUE,
+      related_order_id TEXT,
+      related_reservation_id TEXT,
+      note TEXT,
+      created_at TEXT NOT NULL
+    )`
+  );
+  await client.query(
+    `CREATE INDEX IF NOT EXISTS product_credit_ledger_user_product_idx
+     ON product_credit_ledger (user_id, product_code, created_at DESC)`
+  );
+  await client.query(
+    `CREATE TABLE IF NOT EXISTS product_usage_daily (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id),
+      product_code TEXT NOT NULL,
+      business_date TEXT NOT NULL,
+      plan_id_snapshot TEXT NOT NULL,
+      daily_limit INTEGER NOT NULL,
+      used_count INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE (user_id, product_code, business_date)
+    )`
+  );
+  await client.query(
+    `CREATE TABLE IF NOT EXISTS quota_reservations (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id),
+      product_code TEXT NOT NULL,
+      plan_id_snapshot TEXT NOT NULL,
+      requested_count INTEGER NOT NULL,
+      reserved_count INTEGER NOT NULL,
+      confirmed_count INTEGER NOT NULL DEFAULT 0,
+      released_count INTEGER NOT NULL DEFAULT 0,
+      status TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )`
+  );
+  await client.query(
+    `CREATE INDEX IF NOT EXISTS quota_reservations_user_product_idx
+     ON quota_reservations (user_id, product_code, status, created_at DESC)`
+  );
+  await client.query(
+    `CREATE TABLE IF NOT EXISTS quota_reservation_items (
+      id TEXT PRIMARY KEY,
+      reservation_id TEXT NOT NULL REFERENCES quota_reservations(id),
+      place_index INTEGER NOT NULL,
+      decision TEXT NOT NULL,
+      charged INTEGER NOT NULL,
+      ledger_entry_id TEXT,
+      created_at TEXT NOT NULL,
+      UNIQUE (reservation_id, place_index)
+    )`
+  );
+  migratedProductBillingPools.add(db);
+}
+
 async function ensureContactImportColumns(client, db) {
   if (migratedContactImportPools.has(db)) return;
   await client.query("ALTER TABLE contact_imports ADD COLUMN IF NOT EXISTS client_import_key TEXT");
@@ -607,6 +868,37 @@ async function creditPaidOrder(client, order, { providerTradeNo, notePrefix = "p
     "UPDATE orders SET status = 'paid', provider_trade_no = COALESCE($1, provider_trade_no), paid_at = COALESCE(paid_at, $2) WHERE id = $3",
     [providerTradeNo || null, now, order.id]
   );
+  if ((order.product_code || "whatsapp") === "gmaps") {
+    try {
+      await appendProductLedger(client, {
+        userId: order.user_id,
+        product: "gmaps",
+        type: "purchase",
+        amount: Number(order.credits),
+        idempotencyKey: `purchase:gmaps:${order.id}`,
+        relatedOrderId: order.id,
+        note: `${notePrefix} ${providerTradeNo || order.provider_trade_no || ""}`.trim()
+      });
+    } catch (error) {
+      await client.query("UPDATE orders SET status = 'paid_pending_credit' WHERE id = $1", [order.id]);
+      throw error;
+    }
+    const currentSubscription = await getProductSubscription(client, order.user_id, "gmaps");
+    const currentPlanId = currentSubscription?.plan_id || "free";
+    if (planRank(order.plan_id) > planRank(currentPlanId)) {
+      await client.query(
+        "UPDATE product_subscriptions SET status = 'inactive', ends_at = $1, changed_at = $1 WHERE user_id = $2 AND product_code = 'gmaps' AND status = 'active'",
+        [now, order.user_id]
+      );
+      await client.query(
+        `INSERT INTO product_subscriptions (id, user_id, product_code, plan_id, status, started_at, ends_at, changed_at)
+         VALUES ($1, $2, 'gmaps', $3, 'active', $4, NULL, $4)`,
+        [createId("product_sub"), order.user_id, order.plan_id, now]
+      );
+    }
+    const updated = await client.query("SELECT * FROM orders WHERE id = $1", [order.id]);
+    return updated.rows[0];
+  }
   try {
     await appendLedger(client, {
       userId: order.user_id,
@@ -835,10 +1127,14 @@ export function createPostgresRuntime({ databaseUrl, pool } = {}) {
       return { loggedOut: true };
     },
 
-    async getEntitlements(userId) {
+    async getEntitlements(userId, product = undefined) {
       const client = await db.connect();
       try {
         await requireActiveUser(client, userId);
+        if (product) {
+          await ensureProductBillingTables(client, db);
+          return await getProductEntitlementsForClient(client, { userId, product });
+        }
         const subscription = await getSubscription(client, userId);
         const plan = await getPlan(client, subscription?.plan_id || "free");
         const billingPolicy = await getBillingPolicyForClient(client, { db });
@@ -1094,29 +1390,188 @@ export function createPostgresRuntime({ databaseUrl, pool } = {}) {
       }
     },
 
-    async createOrder({ userId, planId, credits, amountCents }) {
+    async reserveProductQuota({ userId, product = "gmaps", units }) {
+      const normalizedUnits = Number(units);
+      if (!Number.isInteger(normalizedUnits) || normalizedUnits <= 0) throw new Error("QUOTA_UNITS_INVALID");
+      const client = await db.connect();
+      try {
+        await client.query("BEGIN");
+        await ensureProductBillingTables(client, db);
+        await requireActiveUser(client, userId);
+        const productCode = normalizeProduct(product);
+        const entitlements = await getProductEntitlementsForClient(client, { userId, product: productCode });
+        if (normalizedUnits > entitlements.taskLimit) throw new Error("TASK_LIMIT_REACHED");
+        if (normalizedUnits > entitlements.availableToday) throw new Error("NO_AVAILABLE_CREDITS");
+        const now = isoNow();
+        const reservationId = createId("quota_reservation");
+        await client.query(
+          `INSERT INTO quota_reservations
+            (id, user_id, product_code, plan_id_snapshot, requested_count, reserved_count, confirmed_count, released_count, status, created_at, updated_at)
+           VALUES ($1, $2, $3, $4, $5, $5, 0, 0, 'active', $6, $6)`,
+          [reservationId, userId, productCode, entitlements.planId, normalizedUnits, now]
+        );
+        await client.query("COMMIT");
+        return {
+          reservation_id: reservationId,
+          reserved_count: normalizedUnits,
+          remaining_balance: entitlements.balanceCredits - normalizedUnits
+        };
+      } catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+      } finally {
+        client.release();
+      }
+    },
+
+    async confirmProductQuota(body) {
+      if (body.decision !== "confirmed_phone") throw new Error("QUOTA_CONFIRM_DECISION_INVALID");
+      return this.settleProductQuota({ ...body, charge: true });
+    },
+
+    async releaseProductQuota(body) {
+      return this.settleProductQuota({ ...body, charge: false });
+    },
+
+    async settleProductQuota({ userId, product = "gmaps", reservationId, placeIndex, decision, charge }) {
+      const normalizedPlaceIndex = Number(placeIndex);
+      if (!Number.isInteger(normalizedPlaceIndex) || normalizedPlaceIndex < 0) throw new Error("QUOTA_PLACE_INDEX_INVALID");
+      const client = await db.connect();
+      try {
+        await client.query("BEGIN");
+        await ensureProductBillingTables(client, db);
+        await requireActiveUser(client, userId);
+        const productCode = normalizeProduct(product);
+        const reservationResult = await client.query(
+          "SELECT * FROM quota_reservations WHERE id = $1 AND user_id = $2 AND product_code = $3 FOR UPDATE",
+          [reservationId, userId, productCode]
+        );
+        const reservation = reservationResult.rows[0];
+        if (!reservation) throw new Error("QUOTA_RESERVATION_NOT_FOUND");
+        if (normalizedPlaceIndex >= Number(reservation.reserved_count)) throw new Error("QUOTA_PLACE_INDEX_INVALID");
+
+        const existing = await client.query(
+          "SELECT * FROM quota_reservation_items WHERE reservation_id = $1 AND place_index = $2",
+          [reservationId, normalizedPlaceIndex]
+        );
+        if (existing.rows[0]) {
+          await client.query("COMMIT");
+          return {
+            idempotentReplay: true,
+            balanceCredits: await productBalanceFor(client, userId, productCode),
+            item: {
+              id: existing.rows[0].id,
+              reservationId,
+              placeIndex: Number(existing.rows[0].place_index),
+              decision: existing.rows[0].decision,
+              outcome: existing.rows[0].charged ? "confirmed" : "released",
+              ledgerId: existing.rows[0].ledger_entry_id,
+              createdAt: existing.rows[0].created_at
+            }
+          };
+        }
+
+        let ledgerId = null;
+        if (charge) {
+          const { entry } = await appendProductLedger(client, {
+            userId,
+            product: productCode,
+            type: "consume",
+            amount: -1,
+            idempotencyKey: `quota_confirm:${reservationId}:${normalizedPlaceIndex}`,
+            relatedReservationId: reservationId,
+            note: decision
+          });
+          ledgerId = entry.id;
+          const plan = gmapsPlan(reservation.plan_id_snapshot);
+          const usage = await getOrCreateProductDailyUsage(client, userId, productCode, plan);
+          await client.query("UPDATE product_usage_daily SET used_count = used_count + 1, updated_at = $1 WHERE id = $2", [isoNow(), usage.id]);
+        }
+
+        const now = isoNow();
+        const itemId = createId("quota_item");
+        await client.query(
+          `INSERT INTO quota_reservation_items
+            (id, reservation_id, place_index, decision, charged, ledger_entry_id, created_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+          [itemId, reservationId, normalizedPlaceIndex, decision || "", charge ? 1 : 0, ledgerId, now]
+        );
+        await client.query(
+          `UPDATE quota_reservations
+           SET confirmed_count = confirmed_count + $1,
+               released_count = released_count + $2,
+               status = CASE WHEN confirmed_count + released_count + 1 >= reserved_count THEN 'closed' ELSE status END,
+               updated_at = $3
+           WHERE id = $4`,
+          [charge ? 1 : 0, charge ? 0 : 1, now, reservationId]
+        );
+        await client.query("COMMIT");
+        return {
+          idempotentReplay: false,
+          balanceCredits: await productBalanceFor(client, userId, productCode),
+          item: {
+            id: itemId,
+            reservationId,
+            placeIndex: normalizedPlaceIndex,
+            decision,
+            outcome: charge ? "confirmed" : "released",
+            ledgerId,
+            createdAt: now
+          }
+        };
+      } catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+      } finally {
+        client.release();
+      }
+    },
+
+    async createOrder({ userId, planId, credits, amountCents, product = "whatsapp", sku = null }) {
       const client = await db.connect();
       try {
         await ensureOrderLifecycleColumns(client, db);
+        await ensureProductBillingTables(client, db);
         await requireActiveUser(client, userId);
-        const plan = await getPlan(client, planId);
-        const normalizedCredits = Number(credits);
+        const productCode = String(product || "whatsapp").trim().toLowerCase();
+        const packageSku = productCode === "gmaps" ? GMAPS_SKU_CATALOG[String(sku || "")] : null;
+        if (productCode === "gmaps" && (!packageSku || packageSku.credits !== Number(credits) || packageSku.amountCents !== Number(amountCents))) {
+          throw new Error("PRODUCT_SKU_MISMATCH");
+        }
+        if (productCode !== "whatsapp" && productCode !== "gmaps") throw new Error("PRODUCT_UNSUPPORTED");
+        const plan = productCode === "gmaps" ? gmapsPlan(packageSku.planId) : await getPlan(client, planId);
+        const normalizedCredits = Number(productCode === "gmaps" ? packageSku.credits : credits);
         const order = {
           id: createId("order"),
           orderNo: `${Date.now()}`,
           userId,
           planId: plan.id,
           credits: normalizedCredits,
-          amountCents: calculateOrderAmountCents(plan, normalizedCredits),
+          amountCents: productCode === "gmaps" ? packageSku.amountCents : calculateOrderAmountCents(plan, normalizedCredits),
           status: "created",
           paymentProvider: "manual",
-          createdAt: isoNow()
+          createdAt: isoNow(),
+          productCode,
+          sku: productCode === "gmaps" ? packageSku.sku : null
         };
         order.expiresAt = new Date(new Date(order.createdAt).getTime() + ORDER_PAYMENT_TTL_MS).toISOString();
         await client.query(
-          `INSERT INTO orders (id, order_no, user_id, plan_id, credits, amount_cents, status, payment_provider, provider_trade_no, created_at, expires_at, paid_at, closed_at)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULL, $9, $10, NULL, NULL)`,
-          [order.id, order.orderNo, order.userId, order.planId, order.credits, order.amountCents, order.status, order.paymentProvider, order.createdAt, order.expiresAt]
+          `INSERT INTO orders (id, order_no, user_id, plan_id, credits, amount_cents, status, payment_provider, provider_trade_no, created_at, expires_at, paid_at, closed_at, product_code, sku)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULL, $9, $10, NULL, NULL, $11, $12)`,
+          [
+            order.id,
+            order.orderNo,
+            order.userId,
+            order.planId,
+            order.credits,
+            order.amountCents,
+            order.status,
+            order.paymentProvider,
+            order.createdAt,
+            order.expiresAt,
+            order.productCode,
+            order.sku
+          ]
         );
         return { ...order, providerTradeNo: null, paidAt: null, closedAt: null };
       } finally {
@@ -1127,6 +1582,7 @@ export function createPostgresRuntime({ databaseUrl, pool } = {}) {
     async getOrderForPayment({ userId, orderId }) {
       const client = await db.connect();
       try {
+        await ensureProductBillingTables(client, db);
         await requireActiveUser(client, userId);
         const result = await client.query("SELECT * FROM orders WHERE id = $1 AND user_id = $2", [orderId, userId]);
         const order = result.rows[0];
@@ -1146,11 +1602,12 @@ export function createPostgresRuntime({ databaseUrl, pool } = {}) {
     async getOrderStatus({ userId, orderId }) {
       const client = await db.connect();
       try {
+        await ensureProductBillingTables(client, db);
         await requireActiveUser(client, userId);
         const result = await client.query("SELECT * FROM orders WHERE id = $1 AND user_id = $2", [orderId, userId]);
         const order = result.rows[0];
         if (!order) throw new Error("ORDER_NOT_FOUND");
-        return toOrder(order, await balanceFor(client, userId));
+        return toOrder(order, await orderBalanceFor(client, order));
       } finally {
         client.release();
       }
@@ -1159,6 +1616,7 @@ export function createPostgresRuntime({ databaseUrl, pool } = {}) {
     async listOrders({ userId, limit = 20, offset = 0 } = {}) {
       const client = await db.connect();
       try {
+        await ensureProductBillingTables(client, db);
         await requireActiveUser(client, userId);
         const normalizedLimit = Math.min(Math.max(Number(limit) || 20, 1), 100);
         const normalizedOffset = Math.max(Number(offset) || 0, 0);
@@ -1181,6 +1639,7 @@ export function createPostgresRuntime({ databaseUrl, pool } = {}) {
     async markOrderPaymentProvider({ userId, orderId, provider }) {
       const client = await db.connect();
       try {
+        await ensureProductBillingTables(client, db);
         await requireActiveUser(client, userId);
         const result = await client.query("SELECT * FROM orders WHERE id = $1 AND user_id = $2", [orderId, userId]);
         const order = result.rows[0];
@@ -1199,13 +1658,14 @@ export function createPostgresRuntime({ databaseUrl, pool } = {}) {
       const client = await db.connect();
       try {
         await client.query("BEGIN");
+        await ensureProductBillingTables(client, db);
         await requireActiveUser(client, userId);
         const order = await orderByIdOrNumber(client, { orderId, forUpdate: true });
         if (!order || order.user_id !== userId) throw new Error("ORDER_NOT_FOUND");
         if (order.status === "paid") throw new Error("ORDER_ALREADY_PAID");
         if (order.closed_at || ["closed", "canceled", "expired"].includes(order.status)) {
           await client.query("COMMIT");
-          return toOrder(order, await balanceFor(client, userId));
+          return toOrder(order, await orderBalanceFor(client, order));
         }
         const status = String(reason || "canceled").trim().toLowerCase() === "expired" ? "expired" : "canceled";
         const closedAt = isoNow();
@@ -1214,7 +1674,7 @@ export function createPostgresRuntime({ databaseUrl, pool } = {}) {
           [status, closedAt, order.id]
         );
         await client.query("COMMIT");
-        return toOrder(updated.rows[0], await balanceFor(client, userId));
+        return toOrder(updated.rows[0], await orderBalanceFor(client, updated.rows[0]));
       } catch (error) {
         await client.query("ROLLBACK");
         throw error;
@@ -1231,13 +1691,15 @@ export function createPostgresRuntime({ databaseUrl, pool } = {}) {
       const client = await db.connect();
       try {
         await client.query("BEGIN");
+        await ensureProductBillingTables(client, db);
         const order = await orderByIdOrNumber(client, { orderId, forUpdate: true });
         if (!order) throw new Error("ORDER_NOT_FOUND");
-        const before = { status: order.status, balanceCredits: await balanceFor(client, order.user_id) };
+        const before = { status: order.status, balanceCredits: await orderBalanceFor(client, order) };
         if (order.status !== "paid") {
           await creditPaidOrder(client, order, { providerTradeNo, notePrefix: "manual payment" });
         }
-        const after = { status: "paid", balanceCredits: await balanceFor(client, order.user_id) };
+        const updatedForBalance = await orderByIdOrNumber(client, { orderId: order.id });
+        const after = { status: "paid", balanceCredits: await orderBalanceFor(client, updatedForBalance) };
         await appendAuditLog(client, { adminUserId, action: "order.mark_paid", targetType: "order", targetId: order.id, before, after, ip });
         await client.query("COMMIT");
         const updated = await orderByIdOrNumber(client, { orderId });
@@ -1253,9 +1715,10 @@ export function createPostgresRuntime({ databaseUrl, pool } = {}) {
     async getOrderForAdmin({ orderId }) {
       const client = await db.connect();
       try {
+        await ensureProductBillingTables(client, db);
         const order = await orderByIdOrNumber(client, { orderId });
         if (!order) throw new Error("ORDER_NOT_FOUND");
-        return toOrder(order, await balanceFor(client, order.user_id));
+        return toOrder(order, await orderBalanceFor(client, order));
       } finally {
         client.release();
       }
@@ -1271,10 +1734,11 @@ export function createPostgresRuntime({ databaseUrl, pool } = {}) {
       const client = await db.connect();
       try {
         await client.query("BEGIN");
+        await ensureProductBillingTables(client, db);
         const existing = await client.query("SELECT * FROM payment_events WHERE provider_event_id = $1", [normalizedEventId]);
         if (existing.rows[0]) {
           const existingOrder = await orderByIdOrNumber(client, { orderId: existing.rows[0].order_id });
-          const balanceCredits = existingOrder ? await balanceFor(client, existingOrder.user_id) : undefined;
+          const balanceCredits = existingOrder ? await orderBalanceFor(client, existingOrder) : undefined;
           await client.query("COMMIT");
           return {
             event: toPaymentEvent(existing.rows[0]),
@@ -1307,7 +1771,7 @@ export function createPostgresRuntime({ databaseUrl, pool } = {}) {
           event.processedAt = isoNow();
           await client.query("UPDATE payment_events SET processed_at = $1 WHERE id = $2", [event.processedAt, event.id]);
         }
-        const balanceCredits = await balanceFor(client, updatedOrder.user_id);
+        const balanceCredits = await orderBalanceFor(client, updatedOrder);
         await client.query("COMMIT");
         return {
           event,
@@ -1328,6 +1792,7 @@ export function createPostgresRuntime({ databaseUrl, pool } = {}) {
       const failures = [];
       let processedCount = 0;
       try {
+        await ensureProductBillingTables(client, db);
         const pending = await client.query("SELECT * FROM orders WHERE status = 'paid_pending_credit' ORDER BY paid_at, created_at LIMIT $1", [Number(limit) || 20]);
         for (const order of pending.rows) {
           try {

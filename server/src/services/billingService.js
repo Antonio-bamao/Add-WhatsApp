@@ -52,6 +52,117 @@ export const PLAN_CATALOG = Object.freeze({
   }
 });
 
+export const GMAPS_PLAN_CATALOG = Object.freeze({
+  free: Object.freeze({
+    id: "free",
+    displayName: "免费版",
+    cardTier: "FREE",
+    dailyLimit: 10,
+    taskLimit: 20,
+    batchGroupLimit: 0,
+    proxyLimit: 0,
+    deviceLimit: 1,
+    deviceExpansionLimit: 1,
+    capabilities: Object.freeze({
+      completeBusinessFields: true,
+      pauseResume: true,
+      csvTaskExport: true,
+      xlsxExport: false,
+      batchQueue: false,
+      usageReports: false,
+      auditLog: false
+    }),
+    plannedCapabilities: Object.freeze({ batchQueue: false })
+  }),
+  advanced: Object.freeze({
+    id: "advanced",
+    displayName: "进阶版",
+    cardTier: "PLUS",
+    dailyLimit: 200,
+    taskLimit: 200,
+    batchGroupLimit: 0,
+    proxyLimit: 1,
+    deviceLimit: 1,
+    deviceExpansionLimit: 1,
+    capabilities: Object.freeze({
+      completeBusinessFields: true,
+      pauseResume: true,
+      csvTaskExport: true,
+      xlsxExport: true,
+      batchQueue: false,
+      usageReports: false,
+      auditLog: false
+    }),
+    plannedCapabilities: Object.freeze({ batchQueue: false })
+  }),
+  professional: Object.freeze({
+    id: "professional",
+    displayName: "专业版",
+    cardTier: "PRO",
+    dailyLimit: 500,
+    taskLimit: 500,
+    batchGroupLimit: 20,
+    proxyLimit: 5,
+    deviceLimit: 1,
+    deviceExpansionLimit: 3,
+    capabilities: Object.freeze({
+      completeBusinessFields: true,
+      pauseResume: true,
+      csvTaskExport: true,
+      xlsxExport: true,
+      batchQueue: false,
+      usageReports: true,
+      auditLog: false
+    }),
+    plannedCapabilities: Object.freeze({ batchQueue: true })
+  }),
+  business: Object.freeze({
+    id: "business",
+    displayName: "商业版",
+    cardTier: "ULTRA",
+    dailyLimit: 1000,
+    taskLimit: 1000,
+    batchGroupLimit: 100,
+    proxyLimit: null,
+    deviceLimit: 1,
+    deviceExpansionLimit: 5,
+    capabilities: Object.freeze({
+      completeBusinessFields: true,
+      pauseResume: true,
+      csvTaskExport: true,
+      xlsxExport: true,
+      batchQueue: false,
+      usageReports: true,
+      auditLog: true
+    }),
+    plannedCapabilities: Object.freeze({ batchQueue: true })
+  })
+});
+
+export const GMAPS_SKU_CATALOG = Object.freeze({
+  PLUS_200_299: Object.freeze({
+    sku: "PLUS_200_299",
+    product: "gmaps",
+    planId: "advanced",
+    credits: 200,
+    amountCents: 29900
+  }),
+  PRO_400_499: Object.freeze({
+    sku: "PRO_400_499",
+    product: "gmaps",
+    planId: "professional",
+    credits: 400,
+    amountCents: 49900
+  }),
+  ULTRA_800_899: Object.freeze({
+    sku: "ULTRA_800_899",
+    product: "gmaps",
+    planId: "business",
+    credits: 800,
+    amountCents: 89900
+  })
+});
+
 function getStoreBillingPolicy(store) {
   if (!store.billingPolicy) store.billingPolicy = createDefaultBillingPolicy(store.now());
   return resolveBillingPolicyForNow(store.billingPolicy, store.now());
@@ -182,6 +293,113 @@ function balanceFor(store, userId) {
   return store.creditLedger
     .filter((entry) => entry.userId === userId)
     .reduce((sum, entry) => sum + entry.amount, 0);
+}
+
+function productAccountKey(userId, product) {
+  return `${userId}:${product}`;
+}
+
+function productBalanceFor(store, userId, product) {
+  return store.productCreditLedger
+    .filter((entry) => entry.userId === userId && entry.product === product)
+    .reduce((sum, entry) => sum + entry.amount, 0);
+}
+
+function appendProductLedger(store, {
+  userId,
+  product,
+  type,
+  amount,
+  idempotencyKey,
+  relatedOrderId = null,
+  reservationId = null,
+  placeIndex = null,
+  note = ""
+}) {
+  const existing = store.productCreditLedger.find((entry) => entry.idempotencyKey === idempotencyKey);
+  if (existing) return { entry: existing, idempotentReplay: true };
+  const entry = {
+    id: createId("product_ledger"),
+    userId,
+    product,
+    type,
+    amount,
+    balanceAfter: productBalanceFor(store, userId, product) + amount,
+    idempotencyKey,
+    relatedOrderId,
+    reservationId,
+    placeIndex,
+    note,
+    createdAt: isoNow(store)
+  };
+  store.productCreditLedger.push(entry);
+  return { entry, idempotentReplay: false };
+}
+
+function ensureProductAccount(store, userId, product) {
+  getUser(store, userId);
+  if (product !== "gmaps") throw new Error("PRODUCT_NOT_SUPPORTED");
+  const key = productAccountKey(userId, product);
+  if (!store.productSubscriptions.has(key)) {
+    store.productSubscriptions.set(key, {
+      id: createId("product_sub"),
+      userId,
+      product,
+      planId: "free",
+      status: "active",
+      startedAt: isoNow(store),
+      changedAt: isoNow(store)
+    });
+  }
+  appendProductLedger(store, {
+    userId,
+    product,
+    type: "free_grant",
+    amount: 20,
+    idempotencyKey: `free_grant:${product}:${userId}`,
+    note: "one-time BizFinder registration grant"
+  });
+  return store.productSubscriptions.get(key);
+}
+
+function getProductPlan(planId) {
+  return GMAPS_PLAN_CATALOG[planId] || GMAPS_PLAN_CATALOG.free;
+}
+
+function getOrCreateProductDailyUsage(store, userId, product, plan) {
+  const { businessDate } = businessParts(store);
+  const key = `${userId}:${product}:${businessDate}`;
+  if (!store.productUsageDaily.has(key)) {
+    store.productUsageDaily.set(key, {
+      id: createId("product_usage_day"),
+      userId,
+      product,
+      businessDate,
+      planIdSnapshot: plan.id,
+      dailyLimit: plan.dailyLimit,
+      usedCount: 0,
+      createdAt: isoNow(store),
+      updatedAt: isoNow(store)
+    });
+  } else if (store.productUsageDaily.get(key).dailyLimit < plan.dailyLimit) {
+    const usage = store.productUsageDaily.get(key);
+    usage.dailyLimit = plan.dailyLimit;
+    usage.planIdSnapshot = plan.id;
+    usage.updatedAt = isoNow(store);
+  }
+  return store.productUsageDaily.get(key);
+}
+
+function reservedProductUnits(store, userId, product) {
+  let pending = 0;
+  for (const reservation of store.quotaReservations.values()) {
+    if (reservation.userId !== userId || reservation.product !== product || reservation.status !== "active") continue;
+    const settled = [...store.quotaReservationItems.values()].filter(
+      (item) => item.reservationId === reservation.id,
+    ).length;
+    pending += Math.max(0, reservation.reservedCount - settled);
+  }
+  return pending;
 }
 
 function appendAuditLog(store, { adminUserId, action, targetType, targetId, before, after, ip }) {
@@ -455,6 +673,11 @@ export function createCloudStore(options = {}) {
     sessions: new Map(),
     subscriptions: new Map(),
     creditLedger: [],
+    productSubscriptions: new Map(),
+    productCreditLedger: [],
+    productUsageDaily: new Map(),
+    quotaReservations: new Map(),
+    quotaReservationItems: new Map(),
     usageDaily: new Map(),
     usageMonthly: new Map(),
     orders: new Map(),
@@ -634,6 +857,136 @@ export function getEntitlements(store, userId) {
     resetAt: `${dailyUsage.businessDate}T24:00:00+08:00`,
     ...entitlementBillingOverlay(billingPolicy, plan)
   };
+}
+
+export function getProductEntitlements(store, { userId, product }) {
+  const subscription = ensureProductAccount(store, userId, product);
+  const plan = getProductPlan(subscription.planId);
+  const usage = getOrCreateProductDailyUsage(store, userId, product, plan);
+  const balanceCredits = productBalanceFor(store, userId, product);
+  const remainingByLimit = Math.max(0, usage.dailyLimit - usage.usedCount);
+  const pendingReservations = reservedProductUnits(store, userId, product);
+
+  return {
+    userId,
+    product,
+    planId: plan.id,
+    planName: plan.displayName,
+    cardTier: plan.cardTier,
+    balanceCredits,
+    dailyLimit: usage.dailyLimit,
+    taskLimit: plan.taskLimit,
+    usedToday: usage.usedCount,
+    availableToday: Math.max(0, Math.min(balanceCredits, remainingByLimit) - pendingReservations),
+    batchGroupLimit: plan.batchGroupLimit,
+    proxyLimit: plan.proxyLimit,
+    deviceLimit: plan.deviceLimit,
+    deviceExpansionLimit: plan.deviceExpansionLimit,
+    capabilities: { ...plan.capabilities },
+    plannedCapabilities: { ...plan.plannedCapabilities },
+    packages: Object.values(GMAPS_SKU_CATALOG).map((item) => ({ ...item }))
+  };
+}
+
+export function reserveProductQuota(store, { userId, product, units }) {
+  const normalizedUnits = Number(units);
+  if (!Number.isInteger(normalizedUnits) || normalizedUnits <= 0) throw new Error("QUOTA_UNITS_INVALID");
+  const entitlements = getProductEntitlements(store, { userId, product });
+  if (normalizedUnits > entitlements.taskLimit) throw new Error("TASK_LIMIT_REACHED");
+  if (normalizedUnits > entitlements.availableToday) throw new Error("NO_AVAILABLE_CREDITS");
+  const reservation = {
+    id: createId("quota_reservation"),
+    userId,
+    product,
+    reservedCount: normalizedUnits,
+    status: "active",
+    createdAt: isoNow(store),
+    closedAt: null
+  };
+  store.quotaReservations.set(reservation.id, reservation);
+  return {
+    reservation_id: reservation.id,
+    reserved_count: reservation.reservedCount,
+    remaining_balance: entitlements.balanceCredits - normalizedUnits
+  };
+}
+
+function settleProductQuota(store, {
+  userId,
+  product,
+  reservationId,
+  placeIndex,
+  decision,
+  charge
+}) {
+  const reservation = store.quotaReservations.get(reservationId);
+  if (!reservation || reservation.userId !== userId || reservation.product !== product) {
+    throw new Error("QUOTA_RESERVATION_NOT_FOUND");
+  }
+  if (!Number.isInteger(Number(placeIndex)) || Number(placeIndex) < 0 || Number(placeIndex) >= reservation.reservedCount) {
+    throw new Error("QUOTA_PLACE_INDEX_INVALID");
+  }
+  const itemKey = `${reservationId}:${placeIndex}`;
+  const existing = store.quotaReservationItems.get(itemKey);
+  if (existing) {
+    return {
+      idempotentReplay: true,
+      balanceCredits: productBalanceFor(store, userId, product),
+      item: { ...existing }
+    };
+  }
+
+  let ledgerId = null;
+  if (charge) {
+    const { entry } = appendProductLedger(store, {
+      userId,
+      product,
+      type: "consume",
+      amount: -1,
+      idempotencyKey: `quota_confirm:${reservationId}:${placeIndex}`,
+      reservationId,
+      placeIndex,
+      note: decision
+    });
+    ledgerId = entry.id;
+    const subscription = ensureProductAccount(store, userId, product);
+    const plan = getProductPlan(subscription.planId);
+    const usage = getOrCreateProductDailyUsage(store, userId, product, plan);
+    usage.usedCount += 1;
+    usage.updatedAt = isoNow(store);
+  }
+
+  const item = {
+    id: createId("quota_item"),
+    reservationId,
+    placeIndex: Number(placeIndex),
+    decision,
+    outcome: charge ? "confirmed" : "released",
+    ledgerId,
+    createdAt: isoNow(store)
+  };
+  store.quotaReservationItems.set(itemKey, item);
+  const settledCount = [...store.quotaReservationItems.values()].filter(
+    (candidate) => candidate.reservationId === reservationId,
+  ).length;
+  if (settledCount >= reservation.reservedCount) {
+    reservation.status = "closed";
+    reservation.closedAt = isoNow(store);
+  }
+  return {
+    idempotentReplay: false,
+    balanceCredits: productBalanceFor(store, userId, product),
+    item: { ...item }
+  };
+}
+
+export function confirmProductQuota(store, body) {
+  if (body.decision !== "confirmed_phone") throw new Error("QUOTA_CONFIRM_DECISION_INVALID");
+  return settleProductQuota(store, { ...body, charge: true });
+}
+
+export function releaseProductQuota(store, body) {
+  return settleProductQuota(store, { ...body, charge: false });
 }
 
 export function getBillingPolicy(store) {
@@ -835,17 +1188,34 @@ export function consumeCredit(store, { userId, idempotencyKey, taskId, billingSe
   return { ...getEntitlements(store, userId), idempotentReplay: false, ledgerId: entry.id };
 }
 
-export function createOrder(store, { userId, planId, credits, amountCents }) {
+export function createOrder(store, { userId, planId, credits, amountCents, product, sku }) {
   getUser(store, userId);
+  if (product === "gmaps") {
+    const packageItem = GMAPS_SKU_CATALOG[sku];
+    if (
+      !packageItem ||
+      Number(credits) !== packageItem.credits ||
+      Number(amountCents) !== packageItem.amountCents
+    ) {
+      throw new Error("PRODUCT_SKU_MISMATCH");
+    }
+    planId = packageItem.planId;
+    credits = packageItem.credits;
+    amountCents = packageItem.amountCents;
+  }
   const plan = getPlan(planId);
   const normalizedCredits = Number(credits);
   const order = {
     id: createId("order"),
     orderNo: `${String(store.orders.size + 1).padStart(12, "0")}`,
     userId,
+    productCode: product || "whatsapp",
+    sku: sku || null,
     planId: plan.id,
     credits: normalizedCredits,
-    amountCents: calculateOrderAmountCents(plan, normalizedCredits),
+    amountCents: product === "gmaps"
+      ? Number(amountCents)
+      : calculateOrderAmountCents(plan, normalizedCredits),
     status: "created",
     paymentProvider: "manual",
     providerTradeNo: null,
@@ -934,25 +1304,44 @@ function creditPaidOrder(store, order, { providerTradeNo, notePrefix = "payment"
   order.providerTradeNo = providerTradeNo || order.providerTradeNo || null;
   order.paidAt = order.paidAt || isoNow(store);
   try {
-    appendLedger(store, {
-      userId: order.userId,
-      type: "purchase",
-      amount: order.credits,
-      idempotencyKey: `purchase:${order.id}`,
-      relatedOrderId: order.id,
-      note: `${notePrefix} ${order.providerTradeNo || ""}`.trim()
-    });
+    if (order.productCode === "gmaps") {
+      appendProductLedger(store, {
+        userId: order.userId,
+        product: "gmaps",
+        type: "purchase",
+        amount: order.credits,
+        idempotencyKey: `purchase:gmaps:${order.id}`,
+        relatedOrderId: order.id,
+        note: `${notePrefix} ${order.providerTradeNo || ""}`.trim()
+      });
+    } else {
+      appendLedger(store, {
+        userId: order.userId,
+        type: "purchase",
+        amount: order.credits,
+        idempotencyKey: `purchase:${order.id}`,
+        relatedOrderId: order.id,
+        note: `${notePrefix} ${order.providerTradeNo || ""}`.trim()
+      });
+    }
   } catch (error) {
     order.status = "paid_pending_credit";
     throw error;
   }
-  const currentSubscription = getSubscription(store, order.userId);
+  const currentSubscription = order.productCode === "gmaps"
+    ? ensureProductAccount(store, order.userId, "gmaps")
+    : getSubscription(store, order.userId);
   if (planRank(order.planId) > planRank(currentSubscription.planId)) {
     const now = isoNow(store);
-    store.subscriptions.set(order.userId, {
+    const target = order.productCode === "gmaps" ? store.productSubscriptions : store.subscriptions;
+    const key = order.productCode === "gmaps"
+      ? productAccountKey(order.userId, "gmaps")
+      : order.userId;
+    target.set(key, {
       ...currentSubscription,
       id: currentSubscription.id || createId("sub"),
       userId: order.userId,
+      product: order.productCode === "gmaps" ? "gmaps" : undefined,
       planId: getPlan(order.planId).id,
       status: "active",
       changedAt: now
@@ -964,7 +1353,10 @@ function creditPaidOrder(store, order, { providerTradeNo, notePrefix = "payment"
 export function markOrderPaid(store, { orderId, adminUserId, providerTradeNo, ip }) {
   const order = store.orders.get(orderId) || orderByIdOrNumber(store, { orderNo: orderId });
   if (!order) throw new Error("ORDER_NOT_FOUND");
-  const before = { status: order.status, balanceCredits: balanceFor(store, order.userId) };
+  const balance = order.productCode === "gmaps"
+    ? productBalanceFor(store, order.userId, "gmaps")
+    : balanceFor(store, order.userId);
+  const before = { status: order.status, balanceCredits: balance };
 
   if (order.status !== "paid") {
     creditPaidOrder(store, order, { providerTradeNo, notePrefix: "manual payment" });
@@ -976,10 +1368,20 @@ export function markOrderPaid(store, { orderId, adminUserId, providerTradeNo, ip
     targetType: "order",
     targetId: order.id,
     before,
-    after: { status: order.status, balanceCredits: balanceFor(store, order.userId) },
+    after: {
+      status: order.status,
+      balanceCredits: order.productCode === "gmaps"
+        ? productBalanceFor(store, order.userId, "gmaps")
+        : balanceFor(store, order.userId)
+    },
     ip
   });
-  return { ...order, balanceCredits: balanceFor(store, order.userId) };
+  return {
+    ...order,
+    balanceCredits: order.productCode === "gmaps"
+      ? productBalanceFor(store, order.userId, "gmaps")
+      : balanceFor(store, order.userId)
+  };
 }
 
 export function getOrderForAdmin(store, { orderId }) {
@@ -1440,13 +1842,18 @@ export function createMemoryRuntime(options = {}) {
     refreshUserSession: (body) => refreshUserSession(store, body),
     loginAdmin: (body) => loginAdmin(store, body),
     logoutAdmin: (accessToken) => logoutAdmin(store, accessToken),
-    getEntitlements: (userId) => getEntitlements(store, userId),
+    getEntitlements: (userId, product) => product
+      ? getProductEntitlements(store, { userId, product })
+      : getEntitlements(store, userId),
     getBillingPolicy: () => getBillingPolicy(store),
     getAppPolicy: () => getAppPolicy(store),
     updateBillingPolicy: (body) => updateBillingPolicy(store, body),
     createTaskBillingSession: (body) => createTaskBillingSession(store, body),
     closeTaskBillingSession: (body) => closeTaskBillingSession(store, body),
     consumeCredit: (body) => consumeCredit(store, body),
+    reserveProductQuota: (body) => reserveProductQuota(store, body),
+    confirmProductQuota: (body) => confirmProductQuota(store, body),
+    releaseProductQuota: (body) => releaseProductQuota(store, body),
     createOrder: (body) => createOrder(store, body),
     getOrderForPayment: (body) => getOrderForPayment(store, body),
     getOrderStatus: (body) => getOrderStatus(store, body),

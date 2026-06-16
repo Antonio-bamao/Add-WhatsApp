@@ -65,9 +65,11 @@
     }
   },
   "dependencies": {
+    "alipay-sdk": "^4.14.0",
     "electron-log": "^5.4.3",
     "electron-updater": "^6.8.5",
     "libphonenumber-js": "^1.11.19",
+    "pg": "^8.21.0",
     "puppeteer": "24.38.0",
     "qrcode": "^1.5.4",
     "qrcode-terminal": "^0.12.0",

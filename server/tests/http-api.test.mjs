@@ -80,6 +80,90 @@ async function requestBuffer(baseUrl, path, options = {}) {
 }
 
 describe("cloud API skeleton", () => {
+  it("serves product-scoped BizFinder orders, entitlements, and quota reservations", async () => {
+    await withServer(async (baseUrl) => {
+      const registered = await request(baseUrl, "/v1/auth/register", {
+        method: "POST",
+        body: { username: "gmaps-api-user", password: "StrongPass123" }
+      });
+      const auth = { authorization: `Bearer ${registered.payload.accessToken}` };
+
+      const freeEntitlements = await request(baseUrl, "/v1/me/entitlements?product=gmaps", { headers: auth });
+      assert.equal(freeEntitlements.response.status, 200);
+      assert.equal(freeEntitlements.payload.product, "gmaps");
+      assert.equal(freeEntitlements.payload.planId, "free");
+      assert.equal(freeEntitlements.payload.balanceCredits, 20);
+
+      const rejectedOrder = await request(baseUrl, "/v1/orders", {
+        method: "POST",
+        headers: auth,
+        body: { product: "gmaps", sku: "PLUS_200_299", credits: 201, amountCents: 29900 }
+      });
+      assert.equal(rejectedOrder.response.status, 409);
+      assert.equal(rejectedOrder.payload.error, "PRODUCT_SKU_MISMATCH");
+
+      const order = await request(baseUrl, "/v1/orders", {
+        method: "POST",
+        headers: auth,
+        body: { product: "gmaps", sku: "ULTRA_800_899", credits: 800, amountCents: 89900 }
+      });
+      assert.equal(order.response.status, 201);
+      assert.equal(order.payload.productCode, "gmaps");
+      assert.equal(order.payload.sku, "ULTRA_800_899");
+      assert.equal(order.payload.amountCents, 89900);
+
+      const admin = await request(baseUrl, "/v1/admin/auth/login", {
+        method: "POST",
+        body: { username: "yojiro", password: "yojiro123" }
+      });
+      const adminAuth = { authorization: `Bearer ${admin.payload.adminAccessToken}` };
+      const paid = await request(baseUrl, `/v1/admin/orders/${order.payload.id}/mark-paid`, {
+        method: "POST",
+        headers: adminAuth,
+        body: { providerTradeNo: "gmaps-api-paid" }
+      });
+      assert.equal(paid.response.status, 200);
+
+      const reservation = await request(baseUrl, "/v1/quota/reservations", {
+        method: "POST",
+        headers: auth,
+        body: { product: "gmaps", units: 2 }
+      });
+      assert.equal(reservation.response.status, 201);
+      assert.equal(reservation.payload.reserved_count, 2);
+
+      const confirmed = await request(baseUrl, `/v1/quota/reservations/${reservation.payload.reservation_id}/confirm`, {
+        method: "POST",
+        headers: auth,
+        body: {
+          product: "gmaps",
+          reservation_id: reservation.payload.reservation_id,
+          place_index: 0,
+          decision: "confirmed_phone"
+        }
+      });
+      assert.equal(confirmed.response.status, 200);
+
+      const released = await request(baseUrl, `/v1/quota/reservations/${reservation.payload.reservation_id}/release`, {
+        method: "POST",
+        headers: auth,
+        body: {
+          product: "gmaps",
+          reservation_id: reservation.payload.reservation_id,
+          place_index: 1,
+          decision: "duplicate_or_empty_phone"
+        }
+      });
+      assert.equal(released.response.status, 200);
+
+      const after = await request(baseUrl, "/v1/me/entitlements?product=gmaps", { headers: auth });
+      assert.equal(after.payload.planId, "business");
+      assert.equal(after.payload.balanceCredits, 819);
+      assert.equal(after.payload.usedToday, 1);
+      assert.equal(after.payload.availableToday, 819);
+    });
+  });
+
   it("serves health, auth, entitlements, admin adjustment, credit consume, leases, and audit logs", async () => {
     await withServer(async (baseUrl) => {
       const health = await request(baseUrl, "/v1/health");
